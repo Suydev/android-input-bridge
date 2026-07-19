@@ -14,6 +14,7 @@ import com.inputbridge.input.UsbInputCapture
 import com.inputbridge.protocol.EventPacketFactory
 import com.inputbridge.transport.wifi.UdpTransport
 import kotlinx.coroutines.*
+import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TAG = "BridgeService"
 private const val NOTIFICATION_ID = 1001
@@ -55,8 +56,12 @@ class BridgeService : Service() {
     private var captureJob: Job? = null
     private var counterFlushJob: Job? = null
 
-    /** Guards against duplicate pipeline starts from repeated onStartCommand calls. */
-    @Volatile private var pipelineStarted = false
+    /**
+     * Guards against duplicate pipeline starts from repeated onStartCommand calls.
+     * Set atomically via compareAndSet in onStartCommand BEFORE launching the coroutine,
+     * so concurrent rapid starts cannot both pass the check.
+     */
+    private val pipelineStarted = AtomicBoolean(false)
 
     // ── USB BroadcastReceiver ─────────────────────────────────────────────────
 
@@ -109,9 +114,10 @@ class BridgeService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        // Guard: ignore repeated starts (e.g. BootReceiver firing on an already-running service)
-        if (pipelineStarted) {
-            BridgeLogger.d(TAG, "onStartCommand: pipeline already running, ignoring")
+        // Atomic guard: compareAndSet ensures only one caller ever launches startPipeline(),
+        // even under rapid concurrent onStartCommand calls (e.g. BootReceiver + user tap).
+        if (!pipelineStarted.compareAndSet(false, true)) {
+            BridgeLogger.d(TAG, "onStartCommand: pipeline already starting/running — ignoring")
             return START_STICKY
         }
         serviceScope.launch { startPipeline() }
@@ -141,7 +147,7 @@ class BridgeService : Service() {
 
         // 3. Cancel the scope after resources are freed
         serviceScope.cancel()
-        pipelineStarted = false
+        pipelineStarted.set(false)
         releaseWakeLock()
         DiagnosticsManager.update {
             copy(
@@ -159,7 +165,7 @@ class BridgeService : Service() {
     // ── Pipeline setup ────────────────────────────────────────────────────────
 
     private suspend fun startPipeline() {
-        pipelineStarted = true
+        // pipelineStarted was already set to true atomically in onStartCommand
         val targetIp = prefs.targetIp
         val port = prefs.port
 

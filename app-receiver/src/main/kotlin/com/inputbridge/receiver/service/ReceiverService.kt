@@ -13,6 +13,7 @@ import com.inputbridge.receiver.prefs.ReceiverPreferences
 import com.inputbridge.receiver.ui.MainActivity
 import com.inputbridge.transport.wifi.UdpTransport
 import kotlinx.coroutines.*
+import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TAG = "ReceiverService"
 private const val NOTIFICATION_ID = 2001
@@ -46,8 +47,12 @@ class ReceiverService : Service() {
     private var receiveJob: Job? = null
     private var counterFlushJob: Job? = null
 
-    /** Guards against duplicate listener starts from repeated onStartCommand calls. */
-    @Volatile private var listenerStarted = false
+    /**
+     * Guards against duplicate listener starts from repeated onStartCommand calls.
+     * Set atomically via compareAndSet in onStartCommand BEFORE launching the coroutine,
+     * so concurrent rapid starts cannot both pass the check.
+     */
+    private val listenerStarted = AtomicBoolean(false)
 
     // ── Service lifecycle ─────────────────────────────────────────────────────
 
@@ -67,9 +72,10 @@ class ReceiverService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        // Guard: ignore repeated starts (e.g. BootReceiver on already-running service)
-        if (listenerStarted) {
-            BridgeLogger.d(TAG, "onStartCommand: listener already running, ignoring")
+        // Atomic guard: compareAndSet ensures only one caller ever launches startListening(),
+        // even under rapid concurrent onStartCommand calls (e.g. BootReceiver + user tap).
+        if (!listenerStarted.compareAndSet(false, true)) {
+            BridgeLogger.d(TAG, "onStartCommand: listener already starting/running — ignoring")
             return START_STICKY
         }
         serviceScope.launch { startListening() }
@@ -96,7 +102,7 @@ class ReceiverService : Service() {
 
         // 3. Cancel the scope after resources are freed
         serviceScope.cancel()
-        listenerStarted = false
+        listenerStarted.set(false)
         releaseWakeLock()
         DiagnosticsManager.update { copy(receiverServiceRunning = false, transportConnected = false) }
         BridgeLogger.i(TAG, "ReceiverService destroyed")
@@ -107,7 +113,7 @@ class ReceiverService : Service() {
     // ── Receive pipeline ──────────────────────────────────────────────────────
 
     private suspend fun startListening() {
-        listenerStarted = true
+        // listenerStarted was already set to true atomically in onStartCommand
         val port = prefs.port
         val config = TransportConfig(port = port)
         val transport = UdpTransport(config, isSender = false)
@@ -117,7 +123,7 @@ class ReceiverService : Service() {
             BridgeLogger.e(TAG, "Failed to bind UDP socket on port $port")
             updateNotification("UDP bind failed on port $port")
             DiagnosticsManager.update { copy(lastError = "UDP bind failed on port $port") }
-            listenerStarted = false  // allow retry on next start
+            listenerStarted.set(false)  // allow retry on next start command
             return
         }
 
