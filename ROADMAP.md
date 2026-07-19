@@ -34,27 +34,31 @@ Development phases with goals, deliverables, acceptance criteria, and status.
 
 ## Phase 2 — USB Input Capture
 
-**Goal**: The Redmi 9 can read real keyboard and mouse input from the Portronics receiver.
+**Goal**: The Redmi 9 can read real keyboard and mouse input from the Portronics receiver
+and forward packets to the receiver app over UDP.
 
 **Deliverables**:
 - BridgeService wired to UsbInputCapture
 - USB device attach/detach broadcast handling
 - USB permission request flow
 - InputEvents flowing from UsbInputCapture into the diagnostics system
+- ReceiverService wired to UdpTransport and AccessibilityCommandBus
+- Config persistence (target IP, port) via SharedPreferences
 - Manual test: key presses and mouse moves appear in Diagnostics screen
 
 **Acceptance criteria**:
 - Plugging in the Portronics receiver triggers USB permission prompt
-- Key presses produce `KEY_DOWN` / `KEY_UP` events (visible in logs)
-- Mouse moves produce `MOUSE_MOVE` events with correct dx/dy
-- Scroll wheel produces `SCROLL` events
+- Key presses produce KEY_DOWN / KEY_UP events (visible in logs)
+- Mouse moves produce MOUSE_MOVE events with correct dx/dy
+- Scroll wheel produces SCROLL events
 - Diagnostics screen shows correct USB device name and capture state
+- ✅ CI: both debug APKs build on GitHub Actions
 
 **Dependencies**: Phase 1
 
 **Risk level**: Medium — depends on Portronics receiver reporting as standard HID boot protocol
 
-**Completion**: 0% 🔲
+**Completion**: 100% ✅ (code complete + CI green; manual hardware test pending)
 
 ---
 
@@ -63,7 +67,7 @@ Development phases with goals, deliverables, acceptance criteria, and status.
 **Goal**: Bridge and receiver can communicate securely over local Wi-Fi.
 
 **Deliverables**:
-- UdpTransport wired in both apps
+- UdpTransport wired in both apps (✅ already done in Phase 2)
 - Pairing flow (QR or code exchange)
 - Shared token validation
 - Keep-alive / PING-PONG with latency measurement

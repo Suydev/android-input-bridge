@@ -1,30 +1,70 @@
 # Project State
 
 ## Current Version
-`0.2.0` — Phase 2 USB input wiring complete
+`0.2.1` — Phase 2 complete, CI green
 
 ## Repository
 **GitHub:** https://github.com/Suydev/android-input-bridge  
 **Branch:** `main`  
-**Last commit:** Session 003 — Phase 2 USB input wiring
+**Last commit:** `9931cb8` — Fix: 4 more compile errors (BuildConfig, androidContext, ic_menu_receive)
+
+## CI Status ✅
+| Run | SHA | Status | Notes |
+|-----|-----|--------|-------|
+| #25 | `9931cb8` | ✅ **success** | Both APKs built, unit tests pass |
+| #24 | `8dbec88` | ❌ failure | androidContext import missing, BuildConfig, ic_menu_receive |
+| #23 | `774ba97` | ❌ failure | AAPT: Theme.Material.NoTitleBar.Fullscreen not found |
+| #22 | `a93b48e` | ❌ failure | DiagnosticsManager name shadow, 2× companion, isActive(ctx) |
+| #21 | `5e9b520` | ❌ failure | Same pre-existing compile errors |
+
+**CI pipeline:** `.github/workflows/ci.yml`
+- Builds: `app-bridge` debug APK + `app-receiver` debug APK
+- Tests: unit tests in `shared-core` and `protocol`
+- APK artifacts retained for 30 days (download from GitHub Actions → run #25)
+- Release APKs: built automatically on push to `main` if signing secrets are set
 
 ## Phase Status
 | Phase | Name                     | Status      | Complete |
 |-------|--------------------------|-------------|----------|
 | 1     | Project scaffold         | ✅ Done     | 100%     |
 | 2     | USB input wiring         | ✅ Done     | 100%     |
-| 3     | Wi-Fi UDP transport      | ⏳ Next     | 0%       |
-| 4     | End-to-end integration   | 🔒 Blocked  | 0%       |
-| 5     | Reliability + UX polish  | 🔒 Blocked  | 0%       |
+| 3     | Pairing + keep-alive     | ⏳ Next     | 0%       |
+| 4     | Accessibility receiver   | 🔒 Blocked  | 0%       |
+| 5     | Latency + reconnect      | 🔒 Blocked  | 0%       |
 | 6     | Bluetooth HID (Path A)   | 🔒 Blocked  | 0%       |
 | 7     | Release + distribution   | 🔒 Blocked  | 0%       |
 
-## CI Status
-- GitHub Actions workflow: `.github/workflows/ci.yml`
-- Triggered on push to `main`
-- Builds: `app-bridge` debug APK + `app-receiver` debug APK
-- Tests: unit tests in `shared-core` and `protocol`
-- APK artifacts retained for 7 days
+## What Phase 2 Delivers (done)
+- `BridgeService`: dynamic USB receiver, permission flow, UsbInputCapture
+  lifecycle, hot-path pipeline (InputEvent → EventPacketFactory → UdpTransport)
+- `ReceiverService`: UdpTransport bind, incomingPackets → PacketToEventConverter
+  → AccessibilityCommandBus dispatch, WakeLock
+- `BridgePreferences` / `ReceiverPreferences`: SharedPreferences wrappers
+  so target IP and port survive service restarts
+- `PacketToEventConverter`: stateless Packet→InputEvent converter in protocol module
+- BridgeViewModel and ReceiverViewModel now persist config changes to prefs
+- **Service lifecycle hardening**: AtomicBoolean idempotency guard in
+  onStartCommand (set before launching coroutine, compareAndSet), and
+  NonCancellable teardown in onDestroy to ensure socket/USB cleanup completes
+  before scope cancellation.
+
+## What Phase 2 CI Fixes Deliver (done in Session 004)
+- `buildFeatures { buildConfig = true }` added to AndroidAppConventionPlugin
+- `androidContext()` import fixed in both Koin module files
+- DiagnosticsManager lambda name-shadow bug fixed (AtomicLong vs. data class field)
+- Duplicate companion object in InputBridgeAccessibilityService merged
+- `UsbInputCapture` loop guard fixed (`coroutineContext.isActive` not `isActive(ctx)`)
+- Receiver app theme fixed (Material3 not android:Theme.Material)
+- `ic_menu_receive` replaced with valid `ic_menu_send` drawable
+
+## Known Issues / Limitations
+- No pairing / token validation yet — any sender's packets are accepted (Phase 3)
+- No keep-alive / reconnect yet (Phase 3)
+- No launcher icons created (build warns, doesn't fail for debug APKs)
+- `AccessibilityCommandBus` virtual cursor is unconstrained pending real screen dims
+- `BluetoothHidTransport` is Phase 6 stub only
+- Config persisted to SharedPreferences; DataStore migration in Phase 7
+- Manual test on real Portronics Key2 Combo hardware not yet performed
 
 ## Next Task — Phase 3: Network Transport + Pairing
 
@@ -45,24 +85,6 @@ and reconnect automatically after disconnect.
 ### Entry Point
 `app-bridge/src/main/kotlin/com/inputbridge/bridge/service/BridgeService.kt`
 `app-receiver/src/main/kotlin/com/inputbridge/receiver/service/ReceiverService.kt`
-
-## What Phase 2 Delivers (done)
-- `BridgeService`: dynamic USB receiver, permission flow, UsbInputCapture
-  lifecycle, hot-path pipeline (InputEvent → EventPacketFactory → UdpTransport)
-- `ReceiverService`: UdpTransport bind, incomingPackets → PacketToEventConverter
-  → AccessibilityCommandBus dispatch, WakeLock
-- `BridgePreferences` / `ReceiverPreferences`: SharedPreferences wrappers
-  so target IP and port survive service restarts
-- `PacketToEventConverter`: stateless Packet→InputEvent converter in protocol module
-- BridgeViewModel and ReceiverViewModel now persist config changes to prefs
-
-## Known Issues / Limitations
-- No pairing / token validation yet — any sender's packets are accepted (Phase 3)
-- No keep-alive / reconnect yet (Phase 3)
-- No launcher icons created (build warns, doesn't fail for debug APKs)
-- `AccessibilityCommandBus` virtual cursor is unconstrained pending real screen dims
-- `BluetoothHidTransport` is Phase 6 stub only
-- Config persisted to SharedPreferences; DataStore migration in Phase 7
 
 ## Manual Test Procedure (Phase 2)
 1. On the receiver (OnePlus Pad Go):

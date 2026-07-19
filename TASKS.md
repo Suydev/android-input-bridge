@@ -54,17 +54,34 @@ Complete checklist of all project tasks. Never delete completed tasks. Always ap
 - [x] BridgeService: DiagnosticsManager.onPacketSent() / onSendFailed() per packet
 - [x] BridgeService: 1s periodic DiagnosticsManager.flushCounters()
 - [x] BridgeService: detect pre-attached USB HID device on service start
+- [x] BridgeService: AtomicBoolean.compareAndSet idempotency guard in onStartCommand
+- [x] BridgeService: NonCancellable teardown in onDestroy (USB + socket released before scope cancel)
 - [x] ReceiverService: UdpTransport in receive mode (bind to configurable port)
 - [x] ReceiverService: collect incomingPackets → PacketToEventConverter → AccessibilityCommandBus
 - [x] ReceiverService: DiagnosticsManager.onPacketReceived() per packet
 - [x] ReceiverService: 1s periodic DiagnosticsManager.flushCounters()
 - [x] ReceiverService: WakeLock (was missing in Phase 1 stub)
+- [x] ReceiverService: AtomicBoolean.compareAndSet idempotency guard in onStartCommand
+- [x] ReceiverService: NonCancellable teardown in onDestroy (socket released before scope cancel)
 - [x] BridgeViewModel: injected BridgePreferences; setTargetIp()/setPort() persist to prefs
 - [x] BridgeViewModel: config pre-loaded from prefs on init
 - [x] ReceiverViewModel: injected ReceiverPreferences; setListenPort() persists to prefs
+- [x] CI: all compile errors fixed, run #25 = ✅ success (both APKs build)
 - [ ] Manual test with real Portronics Key2 Combo hardware
 - [ ] Verify KeyMap covers all keys on the Portronics keyboard
 - [ ] Diagnostics screen live-updates during bridging session
+
+---
+
+## Phase 2 — CI Build Fixes ✅ (Session 004)
+
+- [x] DiagnosticsManager.flushCounters() — fix AtomicLong name shadow in lambda
+- [x] InputBridgeAccessibilityService — merge duplicate companion objects
+- [x] UsbInputCapture — fix isActive(coroutineContext) → coroutineContext.isActive
+- [x] app-receiver themes.xml — fix AAPT error (Theme.Material → Material3)
+- [x] AndroidAppConventionPlugin — add buildFeatures { buildConfig = true }
+- [x] BridgeModule / ReceiverModule — add androidContext() import
+- [x] ReceiverService — replace non-existent ic_menu_receive drawable
 
 ---
 
