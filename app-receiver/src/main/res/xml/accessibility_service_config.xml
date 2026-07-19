@@ -1,19 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-    Accessibility service configuration for InputBridge Receiver.
-
-    canPerformGestures: required for tap, swipe, scroll injection.
-    canRetrieveWindowContent: required for future text-field targeting.
-
-    Note: this service does NOT observe accessibility events for input injection.
-    The accessibilityEventTypes="typeNone" prevents unnecessary callbacks.
--->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:description="@string/accessibility_service_description"
-    android:accessibilityEventTypes="typeNone"
+    android:accessibilityEventTypes="typeAllMask"
+    android:accessibilityFlags="flagDefault|flagReportViewIds"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagRequestFilterKeyEvents|flagRequestTouchExplorationMode"
     android:canPerformGestures="true"
-    android:canRetrieveWindowContent="true"
-    android:notificationTimeout="0"
-    android:settingsActivity="com.inputbridge.receiver.ui.MainActivity" />
+    android:canRequestFilterKeyEvents="true"
+    android:description="@string/accessibility_service_description"
+    android:notificationTimeout="100" />
