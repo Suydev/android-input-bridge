@@ -4,12 +4,16 @@ plugins {
 
 group = "com.inputbridge.buildlogic"
 
-java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+// Align compileJava and compileKotlin to the same JVM target.
+// With JDK 21 on the runner, kotlin-dsl would otherwise infer target=21
+// while the explicit java block below set target=17 → InvalidUserCodeException.
+kotlin {
+    jvmToolchain(17)
 }
 
-// Use direct Maven coordinates — version catalog isn't accessible here without extra wiring
+// Use direct Maven coordinates — version catalog is wired via
+// build-logic/settings.gradle.kts but the libs accessor is unavailable
+// here in the included build's own build script without extra plumbing.
 dependencies {
     compileOnly("com.android.tools.build:gradle:8.4.2")
     compileOnly("org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.0")
