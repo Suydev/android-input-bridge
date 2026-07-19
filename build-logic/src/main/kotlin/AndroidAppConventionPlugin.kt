@@ -45,6 +45,13 @@ class AndroidAppConventionPlugin : Plugin<Project> {
                     }
                 }
             }
+
+            // Align Kotlin JVM target with Java target
+            extensions.configure<org.jetbrains.kotlin.gradle.dsl.KotlinAndroidProjectExtension> {
+                compilerOptions {
+                    jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+                }
+            }
         }
     }
 }
