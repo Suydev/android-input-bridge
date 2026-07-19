@@ -164,7 +164,7 @@ class ReceiverService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("InputBridge Receiver")
             .setContentText(status)
-            .setSmallIcon(android.R.drawable.ic_menu_receive)
+            .setSmallIcon(android.R.drawable.ic_menu_send)
             .setContentIntent(pi)
             .setOngoing(true)
             .setSilent(true)

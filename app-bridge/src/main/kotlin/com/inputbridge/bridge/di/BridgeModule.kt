@@ -2,6 +2,7 @@ package com.inputbridge.bridge
 
 import com.inputbridge.bridge.prefs.BridgePreferences
 import com.inputbridge.bridge.viewmodel.BridgeViewModel
+import org.koin.android.ext.koin.androidContext
 import org.koin.androidx.viewmodel.dsl.viewModel
 import org.koin.dsl.module
 
@@ -10,7 +11,7 @@ import org.koin.dsl.module
  */
 val bridgeModule = module {
     // Persistent config — shared between ViewModel (writes) and BridgeService (reads)
-    single { BridgePreferences(get()) }
+    single { BridgePreferences(androidContext()) }
 
     viewModel { BridgeViewModel(androidContext(), get()) }
 }
