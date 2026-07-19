@@ -17,6 +17,7 @@ gson = "2.11.0"
 koin = "3.5.6"
 koinCompose = "3.5.6"
 mockk = "1.13.11"
+material = "1.12.0"
 
 [libraries]
 # AndroidX Core
@@ -38,6 +39,9 @@ androidx-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-man
 androidx-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
 androidx-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
+
+# Material Design
+material = { group = "com.google.android.material", name = "material", version.ref = "material" }
 
 # Coroutines
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
@@ -67,6 +71,6 @@ kotlinx-coroutines-test-lib = { group = "org.jetbrains.kotlinx", name = "kotlinx
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
-android-library = { id = "com.android.library", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "android-library" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
