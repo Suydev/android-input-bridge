@@ -1,19 +1,19 @@
 # InputBridge — Offline Android Input Bridge
 
-Turn a **Redmi 9** into a low-latency keyboard and mouse bridge for a **OnePlus Pad Go** using a **Portronics Key2 Combo** USB receiver connected via OTG.
+Turn a **android device ** into a low-latency keyboard and mouse bridge for a **OnePlus Pad Go** using a **Portronics Key2 Combo** USB receiver connected via OTG.
 
 Works entirely offline. No cloud. No accounts. No telemetry.
-
+[![Android CI](https://github.com/Suydev/android-input-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/Suydev/android-input-bridge/actions/workflows/ci.yml)
 ---
 
 ## What it does
 
 ```
-[Portronics Key2 Combo] ──USB OTG──► [Redmi 9 (Bridge App)]
+[Portronics Key2 Combo] ──USB OTG──► [android 1 (Bridge App)]
                                               │
                                       Wi-Fi UDP / HID
                                               │
-                                     [OnePlus Pad Go (Receiver App)]
+                                     [android 2 (Receiver App)]
 ```
 
 The **Bridge App** reads keyboard and mouse input from the USB receiver and sends it over your local network. The **Receiver App** listens for those packets and injects them as screen input using Android's Accessibility Service (or Bluetooth HID for a real cursor).
@@ -24,9 +24,9 @@ The **Bridge App** reads keyboard and mouse input from the USB receiver and send
 
 | Device | Role |
 |---|---|
-| Redmi 9 | Bridge (sends input) |
-| OnePlus Pad Go | Receiver (accepts input) |
-| Portronics Key2 Combo | USB HID keyboard + mouse |
+| android 1 | Bridge (sends input) |
+| android 2 | Receiver (accepts input) |
+| your keyboard | USB HID keyboard + mouse |
 | USB OTG adapter | Connects receiver to Redmi 9 |
 
 ---
@@ -37,8 +37,8 @@ The **Bridge App** reads keyboard and mouse input from the USB receiver and send
 
 Download the latest APKs from [GitHub Actions](../../actions) → most recent successful workflow → Artifacts.
 
-- `bridge-debug-apk-*` → install on **Redmi 9**
-- `receiver-debug-apk-*` → install on **OnePlus Pad Go**
+- `bridge-debug-apk-*` → install on **android 1**
+- `receiver-debug-apk-*` → install on **android 2**
 
 ### 2. First-time setup (Redmi 9 — Bridge)
 
@@ -65,7 +65,7 @@ Settings → Wi-Fi → tap your network → IP Address
 
 ## Permissions
 
-### Bridge App (Redmi 9)
+### Bridge App (android 1)
 
 | Permission | Reason |
 |---|---|
@@ -78,7 +78,7 @@ Settings → Wi-Fi → tap your network → IP Address
 | Bluetooth Connect | Bluetooth HID mode (optional) |
 | Receive Boot Completed | Auto-start after reboot |
 
-### Receiver App (OnePlus Pad Go)
+### Receiver App (android 2)
 
 | Permission | Reason |
 |---|---|
