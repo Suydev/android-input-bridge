@@ -34,11 +34,16 @@ object DiagnosticsManager {
 
     /** Flush counters into the state snapshot. Call periodically (e.g. every second). */
     fun flushCounters() {
+        // Explicit outer-object qualifier needed: inside the DiagnosticsData lambda,
+        // 'packetsSent' would otherwise resolve to DiagnosticsData.packetsSent (Long).
+        val sent     = packetsSent.get()
+        val received = packetsReceived.get()
+        val failed   = sendFailures.get()
         update {
             copy(
-                packetsSent = packetsSent.get(),
-                packetsReceived = packetsReceived.get(),
-                packetsSendFailed = sendFailures.get(),
+                packetsSent       = sent,
+                packetsReceived   = received,
+                packetsSendFailed = failed,
                 snapshotTimestampMs = System.currentTimeMillis(),
             )
         }

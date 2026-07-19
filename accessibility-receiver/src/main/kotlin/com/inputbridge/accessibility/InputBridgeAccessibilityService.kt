@@ -42,6 +42,8 @@ class InputBridgeAccessibilityService : AccessibilityService() {
             private set
 
         fun isRunning() = instance != null
+
+        const val TAP_DURATION_MS = 50L
     }
 
     override fun onServiceConnected() {
@@ -118,7 +120,4 @@ class InputBridgeAccessibilityService : AccessibilityService() {
     /** Pull down notifications. */
     fun openNotifications() = performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
 
-    companion object {
-        private const val TAP_DURATION_MS = 50L
-    }
 }

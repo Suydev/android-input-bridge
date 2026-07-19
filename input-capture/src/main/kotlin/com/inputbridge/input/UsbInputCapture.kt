@@ -112,7 +112,7 @@ class UsbInputCapture(
         var prevKeys = IntArray(6)
         var prevModifiers: ModifierState = ModifierState.NONE
 
-        while (isActive && isActive(coroutineContext)) {
+        while (this@UsbInputCapture.isActive && coroutineContext.isActive) {
             val transferred = conn.bulkTransfer(endpoint, buf, buf.size, TRANSFER_TIMEOUT_MS)
             if (transferred < 8) continue
 
@@ -153,7 +153,7 @@ class UsbInputCapture(
         val buf = ByteArray(endpoint.maxPacketSize.coerceAtLeast(4))
         var prevButtons = 0
 
-        while (isActive && isActive(coroutineContext)) {
+        while (this@UsbInputCapture.isActive && coroutineContext.isActive) {
             val transferred = conn.bulkTransfer(endpoint, buf, buf.size, TRANSFER_TIMEOUT_MS)
             if (transferred < 3) continue
 
@@ -191,7 +191,7 @@ class UsbInputCapture(
         endpoint: UsbEndpoint,
     ) = withContext(Dispatchers.IO) {
         val buf = ByteArray(endpoint.maxPacketSize.coerceAtLeast(8))
-        while (isActive && isActive(coroutineContext)) {
+        while (this@UsbInputCapture.isActive && coroutineContext.isActive) {
             conn.bulkTransfer(endpoint, buf, buf.size, TRANSFER_TIMEOUT_MS)
             // Generic HID — no-op for now; extend in future phases
         }
