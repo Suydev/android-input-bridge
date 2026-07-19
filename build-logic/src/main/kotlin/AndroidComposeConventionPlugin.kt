@@ -9,7 +9,7 @@ import org.gradle.kotlin.dsl.configure
  * Apply alongside androidApp or androidLibrary conventions.
  *
  * Uses pluginManager.withPlugin() to detect which Android plugin is present
- * before configuring, because getByType<CommonExtension> fails in AGP 8.x —
+ * before configuring, because getByType<CommonExtension> fails in AGP 8.x â€”
  * the concrete type registered is BaseAppModuleExtension, not CommonExtension.
  */
 class AndroidComposeConventionPlugin : Plugin<Project> {
