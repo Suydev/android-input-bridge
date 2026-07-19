@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    USB device filter for the Portronics Key2 Combo USB receiver.
+    The device appears as a standard HID class device.
+    Vendor/product IDs are left unspecified so any HID device is accepted.
+    Restrict further if only Portronics devices should be claimed.
+-->
+<resources>
+    <!-- Accept any USB HID device (class 3) -->
+    <usb-device class="3" />
+</resources>

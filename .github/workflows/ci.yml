@@ -1,0 +1,146 @@
+name: Android CI
+
+on:
+  push:
+    branches: [ main, develop, "feature/**", "phase/**" ]
+  pull_request:
+    branches: [ main, develop ]
+
+# Cancel in-progress runs when a new push comes in on the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.caching=true"
+
+jobs:
+  # ── Build debug APKs ────────────────────────────────────────────────────────
+  build:
+    name: Build Debug APKs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v3
+
+      - name: Build Debug APKs
+        run: ./gradlew :app-bridge:assembleDebug :app-receiver:assembleDebug --stacktrace
+
+      - name: Upload Bridge APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-debug-apk-${{ github.run_number }}
+          path: app-bridge/build/outputs/apk/debug/app-bridge-debug.apk
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload Receiver APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: receiver-debug-apk-${{ github.run_number }}
+          path: app-receiver/build/outputs/apk/debug/app-receiver-debug.apk
+          retention-days: 30
+          if-no-files-found: error
+
+  # ── Unit tests ──────────────────────────────────────────────────────────────
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Run Unit Tests
+        run: ./gradlew :shared-core:test :protocol:test :input-capture:test :transport-wifi:test --stacktrace
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-${{ github.run_number }}
+          path: |
+            **/build/reports/tests/
+            **/build/test-results/
+          retention-days: 14
+
+  # ── Release APKs (only on main with signing secrets) ───────────────────────
+  release:
+    name: Build Release APKs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [ build, test ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      # Signing is optional — produces unsigned release APKs if secrets are absent
+      - name: Decode Keystore
+        if: ${{ env.SIGNING_KEYSTORE_BASE64 != '' }}
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+        run: |
+          echo "$SIGNING_KEYSTORE_BASE64" | base64 --decode > release.jks
+
+      - name: Build Release APKs
+        env:
+          SIGNING_KEYSTORE_PATH: ${{ github.workspace }}/release.jks
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+        run: ./gradlew :app-bridge:assembleRelease :app-receiver:assembleRelease --stacktrace
+
+      - name: Upload Release APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apks-${{ github.run_number }}
+          path: |
+            app-bridge/build/outputs/apk/release/*.apk
+            app-receiver/build/outputs/apk/release/*.apk
+          retention-days: 90

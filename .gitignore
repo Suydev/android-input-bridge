@@ -1,0 +1,33 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# APK files (built by CI — don't commit)
+*.apk
+*.aab
+
+# Keystore files (NEVER commit)
+*.jks
+*.keystore
+
+# Secrets
+secrets.properties
+
+# Generated code
+app-bridge/build/
+app-receiver/build/
+shared-core/build/
+protocol/build/
+input-capture/build/
+transport-wifi/build/
+transport-bluetooth-hid/build/
+accessibility-receiver/build/
+diagnostics/build/
+build-logic/build/

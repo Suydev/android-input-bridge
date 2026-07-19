@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">InputBridge</string>
+    <string name="notification_channel_name">Bridge Service</string>
+    <string name="notification_channel_desc">Keeps the USB input bridge alive in the background</string>
+    <string name="notification_title">InputBridge Active</string>
+    <string name="notification_text">Forwarding keyboard and mouse input</string>
+    <string name="notification_text_connecting">Connecting to receiver…</string>
+    <string name="notification_text_disconnected">Disconnected — tap to reconnect</string>
+</resources>

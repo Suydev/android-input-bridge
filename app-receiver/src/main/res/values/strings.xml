@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">InputBridge Receiver</string>
+    <string name="accessibility_service_label">InputBridge Input Controller</string>
+    <string name="accessibility_service_description">Receives keyboard and mouse events from a paired Redmi bridge device and injects them as screen gestures. No data leaves your device. Required for remote control.</string>
+    <string name="notification_channel_name">Receiver Service</string>
+    <string name="notification_channel_desc">Keeps the input receiver alive in the background</string>
+    <string name="notification_title">InputBridge Receiver Active</string>
+    <string name="notification_text">Listening for input from bridge device</string>
+</resources>
