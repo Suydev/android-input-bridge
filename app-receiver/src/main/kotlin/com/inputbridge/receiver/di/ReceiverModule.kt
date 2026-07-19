@@ -1,9 +1,16 @@
 package com.inputbridge.receiver
 
+import com.inputbridge.receiver.prefs.ReceiverPreferences
 import com.inputbridge.receiver.viewmodel.ReceiverViewModel
 import org.koin.androidx.viewmodel.dsl.viewModel
 import org.koin.dsl.module
 
+/**
+ * Koin dependency injection module for the receiver app.
+ */
 val receiverModule = module {
-    viewModel { ReceiverViewModel(androidContext()) }
+    // Persistent config — shared between ViewModel (writes) and ReceiverService (reads)
+    single { ReceiverPreferences(get()) }
+
+    viewModel { ReceiverViewModel(androidContext(), get()) }
 }

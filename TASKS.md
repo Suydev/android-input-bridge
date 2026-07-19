@@ -40,33 +40,48 @@ Complete checklist of all project tasks. Never delete completed tasks. Always ap
 
 ---
 
-## Phase 2 — USB Input Capture 🔲
+## Phase 2 — USB Input Capture ✅
 
-- [ ] BridgeService: USB device attach/detach broadcast receiver
-- [ ] BridgeService: request USB permission flow (UsbManager.requestPermission)
-- [ ] BridgeService: UsbInputCapture.start() on device attach
-- [ ] BridgeService: UsbInputCapture.stop() on device detach
-- [ ] BridgeService: collect InputEvents from UsbInputCapture.events
-- [ ] Test with real Portronics Key2 Combo hardware
+- [x] protocol: PacketToEventConverter (Packet → InputEvent, used by ReceiverService)
+- [x] app-bridge: BridgePreferences (SharedPreferences wrapper for target IP + port)
+- [x] app-receiver: ReceiverPreferences (SharedPreferences wrapper for listen port)
+- [x] BridgeService: dynamic BroadcastReceiver for USB attach/detach/permission
+- [x] BridgeService: request USB permission flow (UsbManager.requestPermission)
+- [x] BridgeService: UsbInputCapture.start() on device attach (permission granted)
+- [x] BridgeService: UsbInputCapture.stop() on device detach
+- [x] BridgeService: collect InputEvents from UsbInputCapture.events
+- [x] BridgeService: pipe events through EventPacketFactory.fromEvent() → UdpTransport.send()
+- [x] BridgeService: DiagnosticsManager.onPacketSent() / onSendFailed() per packet
+- [x] BridgeService: 1s periodic DiagnosticsManager.flushCounters()
+- [x] BridgeService: detect pre-attached USB HID device on service start
+- [x] ReceiverService: UdpTransport in receive mode (bind to configurable port)
+- [x] ReceiverService: collect incomingPackets → PacketToEventConverter → AccessibilityCommandBus
+- [x] ReceiverService: DiagnosticsManager.onPacketReceived() per packet
+- [x] ReceiverService: 1s periodic DiagnosticsManager.flushCounters()
+- [x] ReceiverService: WakeLock (was missing in Phase 1 stub)
+- [x] BridgeViewModel: injected BridgePreferences; setTargetIp()/setPort() persist to prefs
+- [x] BridgeViewModel: config pre-loaded from prefs on init
+- [x] ReceiverViewModel: injected ReceiverPreferences; setListenPort() persists to prefs
+- [ ] Manual test with real Portronics Key2 Combo hardware
 - [ ] Verify KeyMap covers all keys on the Portronics keyboard
-- [ ] Diagnostics: update usbDeviceConnected, usbDeviceName, inputCaptureActive
-- [ ] Handle Rollkur Error: keyboard and mouse on separate HID interfaces
+- [ ] Diagnostics screen live-updates during bridging session
 
 ---
 
 ## Phase 3 — Network Transport + Pairing 🔲
 
-- [ ] BridgeService: wire EventPacketFactory → UdpTransport.send()
-- [ ] ReceiverService: wire UdpTransport → incoming packets → AccessibilityCommandBus
-- [ ] Pairing: shared token generation (16-byte random)
-- [ ] Pairing: QR code display on receiver, scan on bridge
+- [ ] BridgeService: PING/PONG on 1s keep-alive timer
+- [ ] ReceiverService: respond to PING with PONG; record latency
+- [ ] Pairing: shared token generation (16-byte random, SecureRandom)
 - [ ] Pairing: PAIR_REQUEST / PAIR_RESPONSE / PAIR_CONFIRM packet flow
-- [ ] Pairing: token persistence (DataStore)
-- [ ] Pairing: packet source validation (reject unrecognized senders)
-- [ ] Keep-alive: PING/PONG with latency measurement
+- [ ] Pairing: QR code display on receiver, manual entry on bridge
+- [ ] Pairing: token persistence (SharedPreferences / DataStore)
+- [ ] Pairing: packet source validation (drop packets from un-paired senders)
+- [ ] Keep-alive: latency measurement in DiagnosticsManager.recordLatency()
 - [ ] Reconnect: exponential backoff, max attempts
+- [ ] Reconnect: UI state during reconnect (amber dot + attempt counter)
 - [ ] Wi-Fi Direct transport: group formation, peer discovery
-- [ ] Diagnostics: latencyMs, packetsSent, packetsReceived, transportConnected
+- [ ] Diagnostics: latencyMs, packetsSent, packetsReceived, transportConnected all live
 
 ---
 
@@ -113,7 +128,7 @@ Complete checklist of all project tasks. Never delete completed tasks. Always ap
 - [ ] Minimum brightness: brightness slider in settings
 - [ ] Auto-start settings: UI toggle for AUTO_START_ON_BOOT
 - [ ] Emergency stop hotkey: physical button combo to stop bridge
-- [ ] Settings persistence: save all config to DataStore
+- [ ] Settings persistence: migrate SharedPreferences → DataStore
 - [ ] Clipboard sync: CLIPBOARD_SYNC_ENABLED feature
 - [ ] Macro recording: MACROS_ENABLED feature (future)
 - [ ] Help text: onboarding tooltips
