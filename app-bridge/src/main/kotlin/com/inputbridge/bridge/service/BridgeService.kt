@@ -35,11 +35,11 @@ private const val COUNTER_FLUSH_INTERVAL_MS = 1_000L
  * 3. USB device detached → stopCapture()
  * 4. ACTION_STOP intent → stopSelf() → onDestroy → full cleanup
  *
- * WakeLock: partial WakeLock held while service is alive so the pipeline
- * continues while the screen is off.
+ * Idempotency: startPipeline() is guarded by [pipelineStarted] so repeated
+ * onStartCommand calls (e.g. BootReceiver firing while already running) are no-ops.
  *
- * Target IP: read from SharedPreferences (BridgePreferences). Set it in the
- * Settings screen before starting the bridge.
+ * Teardown: individual jobs are cancelled first, then resources are cleaned up
+ * in a NonCancellable context before serviceScope is cancelled.
  */
 class BridgeService : Service() {
 
@@ -55,12 +55,20 @@ class BridgeService : Service() {
     private var captureJob: Job? = null
     private var counterFlushJob: Job? = null
 
+    /** Guards against duplicate pipeline starts from repeated onStartCommand calls. */
+    @Volatile private var pipelineStarted = false
+
     // ── USB BroadcastReceiver ─────────────────────────────────────────────────
 
     private val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            @Suppress("DEPRECATION")
-            val device: UsbDevice = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE) ?: return
+            val device: UsbDevice = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+            } ?: return
+
             when (intent.action) {
                 UsbManager.ACTION_USB_DEVICE_ATTACHED -> onUsbAttached(device)
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> onUsbDetached(device)
@@ -101,6 +109,11 @@ class BridgeService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        // Guard: ignore repeated starts (e.g. BootReceiver firing on an already-running service)
+        if (pipelineStarted) {
+            BridgeLogger.d(TAG, "onStartCommand: pipeline already running, ignoring")
+            return START_STICKY
+        }
         serviceScope.launch { startPipeline() }
         return START_STICKY
     }
@@ -108,12 +121,27 @@ class BridgeService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         unregisterUsbReceiver()
-        serviceScope.launch {
-            stopCapture()
-            udpTransport?.disconnect()
-            udpTransport = null
+
+        // 1. Cancel tracked jobs to stop new work immediately
+        counterFlushJob?.cancel()
+        captureJob?.cancel()
+
+        // 2. Clean up resources (USB + socket) in NonCancellable context so teardown
+        //    completes even though serviceScope will be cancelled next.
+        //    runBlocking is acceptable here: onDestroy is called on the main thread,
+        //    these operations are fast (cancel internal jobs + close file/socket).
+        runBlocking {
+            withContext(NonCancellable + Dispatchers.IO) {
+                runCatching { usbCapture?.stop() }
+                runCatching { udpTransport?.disconnect() }
+            }
         }
+        usbCapture = null
+        udpTransport = null
+
+        // 3. Cancel the scope after resources are freed
         serviceScope.cancel()
+        pipelineStarted = false
         releaseWakeLock()
         DiagnosticsManager.update {
             copy(
@@ -131,31 +159,30 @@ class BridgeService : Service() {
     // ── Pipeline setup ────────────────────────────────────────────────────────
 
     private suspend fun startPipeline() {
+        pipelineStarted = true
         val targetIp = prefs.targetIp
         val port = prefs.port
 
         if (targetIp.isBlank()) {
-            BridgeLogger.w(TAG, "Target IP not configured — set it in Settings before starting bridge")
+            BridgeLogger.w(TAG, "Target IP not configured — set it in Settings")
             updateNotification("Set receiver IP in Settings first")
             DiagnosticsManager.update { copy(lastError = "Target IP not configured") }
-            // Still register for USB so the user can at least see device info
         } else {
             val config = TransportConfig(targetIp = targetIp, port = port)
             val transport = UdpTransport(config, isSender = true)
             udpTransport = transport
-            val connected = transport.connect()
-            if (connected) {
+            if (transport.connect()) {
                 BridgeLogger.i(TAG, "UDP transport ready → $targetIp:$port")
                 DiagnosticsManager.update { copy(transportConnected = true, targetIp = targetIp) }
                 updateNotification("Ready — waiting for USB device…")
             } else {
-                BridgeLogger.w(TAG, "UDP transport connect failed (target=$targetIp:$port)")
+                BridgeLogger.w(TAG, "UDP connect failed ($targetIp:$port)")
                 updateNotification("Transport error — check Settings")
                 DiagnosticsManager.update { copy(lastError = "UDP connect failed") }
             }
         }
 
-        // Periodic counter flush — keeps Diagnostics screen live
+        // Periodic diagnostics counter flush (1 s interval)
         counterFlushJob = serviceScope.launch {
             while (isActive) {
                 delay(COUNTER_FLUSH_INTERVAL_MS)
@@ -170,7 +197,7 @@ class BridgeService : Service() {
             }
         }
         if (preAttached != null) {
-            BridgeLogger.i(TAG, "Pre-attached HID device found: ${preAttached.deviceName}")
+            BridgeLogger.i(TAG, "Pre-attached HID device: ${preAttached.deviceName}")
             onUsbAttached(preAttached)
         }
     }
@@ -193,19 +220,14 @@ class BridgeService : Service() {
         BridgeLogger.i(TAG, "USB device detached: ${device.deviceName}")
         serviceScope.launch { stopCapture() }
         DiagnosticsManager.update {
-            copy(
-                usbDeviceConnected = false,
-                usbDeviceName = "None",
-                inputCaptureActive = false,
-            )
+            copy(usbDeviceConnected = false, usbDeviceName = "None", inputCaptureActive = false)
         }
         updateNotification("USB device disconnected")
     }
 
     private fun requestUsbPermission(device: UsbDevice) {
         val pi = PendingIntent.getBroadcast(
-            this,
-            0,
+            this, 0,
             Intent(ACTION_USB_PERMISSION),
             PendingIntent.FLAG_IMMUTABLE,
         )
@@ -214,13 +236,12 @@ class BridgeService : Service() {
     }
 
     private suspend fun startCapture(device: UsbDevice) {
-        stopCapture() // cancel any existing capture before starting a new one
+        stopCapture() // cancel any previous capture first
 
         val capture = UsbInputCapture(this, device)
         usbCapture = capture
 
-        val started = capture.start()
-        if (!started) {
+        if (!capture.start()) {
             BridgeLogger.e(TAG, "UsbInputCapture failed to start for ${device.deviceName}")
             DiagnosticsManager.update {
                 copy(inputCaptureActive = false, lastError = "USB capture start failed")
@@ -261,7 +282,6 @@ class BridgeService : Service() {
             addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
             addAction(ACTION_USB_PERMISSION)
         }
-        // Export flag required on API 33+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(usbReceiver, filter, RECEIVER_NOT_EXPORTED)
         } else {
@@ -298,14 +318,11 @@ class BridgeService : Service() {
     }
 
     private fun createNotificationChannel() {
-        val ch = NotificationChannel(
-            CHANNEL_ID,
-            "Bridge Service",
-            NotificationManager.IMPORTANCE_LOW,
-        ).apply {
-            description = "Keeps the USB input bridge alive"
-            setShowBadge(false)
-        }
+        val ch = NotificationChannel(CHANNEL_ID, "Bridge Service", NotificationManager.IMPORTANCE_LOW)
+            .apply {
+                description = "Keeps the USB input bridge alive"
+                setShowBadge(false)
+            }
         (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(ch)
     }
 
@@ -316,7 +333,7 @@ class BridgeService : Service() {
         wakeLock = pm.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "InputBridge::BridgeWakeLock",
-        ).also { it.acquire(12 * 60 * 60 * 1000L /* 12 hours */) }
+        ).also { it.acquire(12 * 60 * 60 * 1000L) }
     }
 
     private fun releaseWakeLock() {

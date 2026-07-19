@@ -30,10 +30,11 @@ private const val COUNTER_FLUSH_INTERVAL_MS = 1_000L
  *    - Posts InputEvents to AccessibilityCommandBus for injection
  * 2. ACTION_STOP → stopSelf() → onDestroy → disconnect transport + release WakeLock
  *
- * AccessibilityCommandBus is a singleton; it requires the AccessibilityService
- * to be enabled by the user before events can actually be injected.
+ * Idempotency: startListening() is guarded by [listenerStarted] so repeated
+ * onStartCommand calls are no-ops.
  *
- * WakeLock: partial WakeLock held so UDP receive continues while screen is off.
+ * Teardown: individual jobs are cancelled first, then the socket is closed in
+ * a NonCancellable context before serviceScope is cancelled.
  */
 class ReceiverService : Service() {
 
@@ -44,6 +45,9 @@ class ReceiverService : Service() {
     private var udpTransport: UdpTransport? = null
     private var receiveJob: Job? = null
     private var counterFlushJob: Job? = null
+
+    /** Guards against duplicate listener starts from repeated onStartCommand calls. */
+    @Volatile private var listenerStarted = false
 
     // ── Service lifecycle ─────────────────────────────────────────────────────
 
@@ -63,19 +67,36 @@ class ReceiverService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        // Guard: ignore repeated starts (e.g. BootReceiver on already-running service)
+        if (listenerStarted) {
+            BridgeLogger.d(TAG, "onStartCommand: listener already running, ignoring")
+            return START_STICKY
+        }
         serviceScope.launch { startListening() }
         return START_STICKY
     }
 
     override fun onDestroy() {
         super.onDestroy()
+
+        // 1. Cancel tracked jobs to stop new work immediately
         receiveJob?.cancel()
         counterFlushJob?.cancel()
-        serviceScope.launch {
-            udpTransport?.disconnect()
-            udpTransport = null
+
+        // 2. Disconnect the UDP socket in NonCancellable context so the port is
+        //    released even though serviceScope will be cancelled next.
+        //    runBlocking is acceptable: onDestroy is on the main thread,
+        //    disconnect() is fast (cancel receive loop + close DatagramSocket).
+        runBlocking {
+            withContext(NonCancellable + Dispatchers.IO) {
+                runCatching { udpTransport?.disconnect() }
+            }
         }
+        udpTransport = null
+
+        // 3. Cancel the scope after resources are freed
         serviceScope.cancel()
+        listenerStarted = false
         releaseWakeLock()
         DiagnosticsManager.update { copy(receiverServiceRunning = false, transportConnected = false) }
         BridgeLogger.i(TAG, "ReceiverService destroyed")
@@ -86,16 +107,17 @@ class ReceiverService : Service() {
     // ── Receive pipeline ──────────────────────────────────────────────────────
 
     private suspend fun startListening() {
+        listenerStarted = true
         val port = prefs.port
         val config = TransportConfig(port = port)
         val transport = UdpTransport(config, isSender = false)
         udpTransport = transport
 
-        val connected = transport.connect()
-        if (!connected) {
+        if (!transport.connect()) {
             BridgeLogger.e(TAG, "Failed to bind UDP socket on port $port")
             updateNotification("UDP bind failed on port $port")
             DiagnosticsManager.update { copy(lastError = "UDP bind failed on port $port") }
+            listenerStarted = false  // allow retry on next start
             return
         }
 
@@ -103,7 +125,7 @@ class ReceiverService : Service() {
         updateNotification("Listening on UDP :$port")
         DiagnosticsManager.update { copy(transportConnected = true) }
 
-        // Periodic counter flush — keeps Diagnostics screen live
+        // Periodic diagnostics counter flush (1 s interval)
         counterFlushJob = serviceScope.launch {
             while (isActive) {
                 delay(COUNTER_FLUSH_INTERVAL_MS)
@@ -119,7 +141,7 @@ class ReceiverService : Service() {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                     AccessibilityCommandBus.post(event)
                 } else {
-                    BridgeLogger.w(TAG, "Android N+ required for accessibility injection")
+                    BridgeLogger.w(TAG, "Android N+ required for accessibility injection — skipping")
                 }
             }
         }
@@ -129,7 +151,9 @@ class ReceiverService : Service() {
 
     private fun buildNotification(status: String): Notification {
         val pi = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
+            this, 0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE,
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("InputBridge Receiver")
@@ -159,7 +183,7 @@ class ReceiverService : Service() {
         wakeLock = pm.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "InputBridge::ReceiverWakeLock",
-        ).also { it.acquire(12 * 60 * 60 * 1000L /* 12 hours */) }
+        ).also { it.acquire(12 * 60 * 60 * 1000L) }
     }
 
     private fun releaseWakeLock() {
