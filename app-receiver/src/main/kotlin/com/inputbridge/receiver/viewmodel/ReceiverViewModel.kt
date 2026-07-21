@@ -5,6 +5,7 @@ import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.inputbridge.core.config.AppConfig
+import com.inputbridge.core.config.MouseConfig
 import com.inputbridge.core.config.TransportConfig
 import com.inputbridge.diagnostics.DiagnosticsData
 import com.inputbridge.diagnostics.DiagnosticsManager
@@ -39,7 +40,10 @@ class ReceiverViewModel(
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     private val _config = MutableStateFlow(
-        AppConfig(transport = TransportConfig(port = prefs.port))
+        AppConfig(
+            transport = TransportConfig(port = prefs.port),
+            mouse = MouseConfig(sensitivity = prefs.mouseSensitivity),
+        )
     )
     val config: StateFlow<AppConfig> = _config.asStateFlow()
 
@@ -48,6 +52,23 @@ class ReceiverViewModel(
             transport = _config.value.transport.copy(port = port)
         )
         prefs.port = port  // persist for ReceiverService to read at start
+    }
+
+    /**
+     * Update the mouse sensitivity multiplier.
+     * Range 0.1–5.0. Persisted to prefs and applied to AccessibilityCommandBus
+     * the next time ReceiverService starts.
+     */
+    fun setMouseSensitivity(sensitivity: Float) {
+        val clamped = sensitivity.coerceIn(0.1f, 5.0f)
+        _config.value = _config.value.copy(
+            mouse = _config.value.mouse.copy(sensitivity = clamped)
+        )
+        prefs.mouseSensitivity = clamped
+        // If the service is running, apply immediately without restart
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+            com.inputbridge.accessibility.AccessibilityCommandBus.setSensitivity(clamped)
+        }
     }
 
     fun startReceiver() {

@@ -39,12 +39,17 @@ fun ReceiverSettingsScreen(onBack: () -> Unit, viewModel: ReceiverViewModel) {
         containerColor = ReceiverBackground,
     ) { padding ->
         Column(
-            modifier = Modifier.padding(padding).padding(horizontal = 20.dp).verticalScroll(rememberScrollState()),
+            modifier = Modifier
+                .padding(padding)
+                .padding(horizontal = 20.dp)
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Spacer(Modifier.height(8.dp))
-            Text("TRANSPORT", color = ReceiverPrimary, fontSize = 11.sp,
-                fontFamily = FontFamily.Monospace, letterSpacing = 2.sp)
+
+            // ── Transport section ─────────────────────────────────────────────
+            SectionHeader("Transport")
+
             OutlinedTextField(
                 value = portInput,
                 onValueChange = {
@@ -54,15 +59,67 @@ fun ReceiverSettingsScreen(onBack: () -> Unit, viewModel: ReceiverViewModel) {
                 label = { Text("Listen Port", fontFamily = FontFamily.Monospace) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.fillMaxWidth(),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = ReceiverPrimary, unfocusedBorderColor = ReceiverDim,
-                    focusedLabelColor = ReceiverPrimary, unfocusedLabelColor = ReceiverDim,
-                    focusedTextColor = ReceiverOnSurface, unfocusedTextColor = ReceiverOnSurface,
+                colors = receiverTextFieldColors(),
+            )
+            Text(
+                "Must match the port set in the bridge app.",
+                color = ReceiverDim,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+            )
+
+            HorizontalDivider(color = ReceiverDim.copy(alpha = 0.3f))
+
+            // ── Mouse section ─────────────────────────────────────────────────
+            SectionHeader("Mouse")
+
+            Text(
+                "Pointer Sensitivity: %.1f×".format(config.mouse.sensitivity),
+                color = ReceiverOnSurface,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 13.sp,
+            )
+            Slider(
+                value = config.mouse.sensitivity,
+                onValueChange = { viewModel.setMouseSensitivity(it) },
+                valueRange = 0.1f..5.0f,
+                steps = 48,  // 0.1 increments across 0.1–5.0 range
+                colors = SliderDefaults.colors(
+                    thumbColor = ReceiverPrimary,
+                    activeTrackColor = ReceiverPrimary,
+                    inactiveTrackColor = ReceiverDim.copy(alpha = 0.3f),
                 ),
             )
-            Text("Must match the port set in the bridge app.", color = ReceiverDim,
-                fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+            Text(
+                "Adjust if the pointer feels too fast or too slow. Changes apply immediately.",
+                color = ReceiverDim,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+            )
+
             Spacer(Modifier.height(32.dp))
         }
     }
 }
+
+@Composable
+private fun SectionHeader(title: String) {
+    Text(
+        text = title.uppercase(),
+        color = ReceiverPrimary,
+        fontSize = 11.sp,
+        fontFamily = FontFamily.Monospace,
+        letterSpacing = 2.sp,
+    )
+}
+
+@Composable
+private fun receiverTextFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedBorderColor = ReceiverPrimary,
+    unfocusedBorderColor = ReceiverDim,
+    focusedLabelColor = ReceiverPrimary,
+    unfocusedLabelColor = ReceiverDim,
+    focusedTextColor = ReceiverOnSurface,
+    unfocusedTextColor = ReceiverOnSurface,
+    cursorColor = ReceiverPrimary,
+)

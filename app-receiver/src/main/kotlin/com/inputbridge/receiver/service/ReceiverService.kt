@@ -8,7 +8,9 @@ import com.inputbridge.accessibility.AccessibilityCommandBus
 import com.inputbridge.core.config.TransportConfig
 import com.inputbridge.core.logging.BridgeLogger
 import com.inputbridge.diagnostics.DiagnosticsManager
+import com.inputbridge.protocol.EventPacketFactory
 import com.inputbridge.protocol.PacketToEventConverter
+import com.inputbridge.protocol.PacketType
 import com.inputbridge.receiver.prefs.ReceiverPreferences
 import com.inputbridge.receiver.ui.MainActivity
 import com.inputbridge.transport.wifi.UdpTransport
@@ -26,9 +28,10 @@ private const val COUNTER_FLUSH_INTERVAL_MS = 1_000L
  * Lifecycle:
  * 1. startForegroundService() → onCreate → onStartCommand → startListening()
  *    - Binds UdpTransport to the configured port (default 54321)
+ *    - Applies persisted mouse sensitivity to AccessibilityCommandBus
  *    - Collects incoming Packet objects from UdpTransport.incomingPackets
- *    - Converts each Packet → InputEvent via PacketToEventConverter
- *    - Posts InputEvents to AccessibilityCommandBus for injection
+ *    - Control packets (PING) are handled immediately with a PONG reply
+ *    - Input packets are converted via PacketToEventConverter → AccessibilityCommandBus
  * 2. ACTION_STOP → stopSelf() → onDestroy → disconnect transport + release WakeLock
  *
  * Idempotency: startListening() is guarded by [listenerStarted] so repeated
@@ -46,6 +49,9 @@ class ReceiverService : Service() {
     private var udpTransport: UdpTransport? = null
     private var receiveJob: Job? = null
     private var counterFlushJob: Job? = null
+
+    /** Packet factory used to generate PONG replies. */
+    private val packetFactory = EventPacketFactory()
 
     /**
      * Guards against duplicate listener starts from repeated onStartCommand calls.
@@ -113,7 +119,11 @@ class ReceiverService : Service() {
     // ── Receive pipeline ──────────────────────────────────────────────────────
 
     private suspend fun startListening() {
-        // listenerStarted was already set to true atomically in onStartCommand
+        // Apply persisted sensitivity to the command bus before receiving any events.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            AccessibilityCommandBus.setSensitivity(prefs.mouseSensitivity)
+        }
+
         val port = prefs.port
         val config = TransportConfig(port = port)
         val transport = UdpTransport(config, isSender = false)
@@ -139,15 +149,40 @@ class ReceiverService : Service() {
             }
         }
 
-        // Hot path: Packet → InputEvent → AccessibilityCommandBus
+        // Hot path: Packet → control handling / InputEvent → AccessibilityCommandBus
         receiveJob = serviceScope.launch {
             transport.incomingPackets.collect { packet ->
                 DiagnosticsManager.onPacketReceived()
-                val event = PacketToEventConverter.toInputEvent(packet) ?: return@collect
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    AccessibilityCommandBus.post(event)
-                } else {
-                    BridgeLogger.w(TAG, "Android N+ required for accessibility injection — skipping")
+
+                when (packet.type) {
+                    // ── Control packets handled directly ──────────────────────
+                    PacketType.PING -> {
+                        // Respond with a PONG so the bridge can measure round-trip latency.
+                        val pong = packetFactory.makePong(packet.sequenceNo)
+                        transport.send(pong)
+                        BridgeLogger.d(TAG, "PING received → PONG sent (seq=${packet.sequenceNo})")
+                    }
+
+                    PacketType.KEEP_ALIVE -> {
+                        // Keep-alive heartbeat — no action needed, receipt is sufficient.
+                        BridgeLogger.d(TAG, "KEEP_ALIVE received")
+                    }
+
+                    PacketType.DISCONNECT -> {
+                        BridgeLogger.i(TAG, "DISCONNECT received from bridge")
+                        DiagnosticsManager.update { copy(transportConnected = false) }
+                        updateNotification("Bridge disconnected")
+                    }
+
+                    // ── Input event packets forwarded to accessibility ─────────
+                    else -> {
+                        val event = PacketToEventConverter.toInputEvent(packet) ?: return@collect
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                            AccessibilityCommandBus.post(event)
+                        } else {
+                            BridgeLogger.w(TAG, "Android N+ required for injection — skipping")
+                        }
+                    }
                 }
             }
         }

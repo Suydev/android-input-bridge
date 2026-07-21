@@ -12,6 +12,7 @@ import com.inputbridge.core.logging.BridgeLogger
 import com.inputbridge.diagnostics.DiagnosticsManager
 import com.inputbridge.input.UsbInputCapture
 import com.inputbridge.protocol.EventPacketFactory
+import com.inputbridge.protocol.PacketType
 import com.inputbridge.transport.wifi.UdpTransport
 import kotlinx.coroutines.*
 import java.util.concurrent.atomic.AtomicBoolean
@@ -20,6 +21,7 @@ private const val TAG = "BridgeService"
 private const val NOTIFICATION_ID = 1001
 private const val CHANNEL_ID = "bridge_service"
 private const val COUNTER_FLUSH_INTERVAL_MS = 1_000L
+private const val PING_INTERVAL_MS = 1_000L  // send a PING every second for latency tracking
 
 /**
  * Foreground service that owns the USB input capture and UDP transport pipeline.
@@ -27,6 +29,8 @@ private const val COUNTER_FLUSH_INTERVAL_MS = 1_000L
  * Lifecycle:
  * 1. startForegroundService() → onCreate → onStartCommand → startPipeline()
  *    - Connects UdpTransport (sender mode)
+ *    - Starts PING/PONG keep-alive loop (every 1 s)
+ *    - Collects PONG replies to measure round-trip latency
  *    - Registers dynamic BroadcastReceiver for USB events
  *    - Checks for pre-attached USB devices
  * 2. USB device attached → request permission (if needed) → startCapture()
@@ -55,11 +59,16 @@ class BridgeService : Service() {
     private var usbCapture: UsbInputCapture? = null
     private var captureJob: Job? = null
     private var counterFlushJob: Job? = null
+    private var pingJob: Job? = null
+    private var pongResponseJob: Job? = null
+
+    /** Timestamp when the last PING was sent. Used to compute round-trip latency on PONG. */
+    @Volatile private var lastPingSentAtMs = 0L
 
     /**
      * Guards against duplicate pipeline starts from repeated onStartCommand calls.
      * Set atomically via compareAndSet in onStartCommand BEFORE launching the coroutine,
-     * so concurrent rapid starts cannot both pass the check.
+     * so concurrent rapid rapid starts cannot both pass the check.
      */
     private val pipelineStarted = AtomicBoolean(false)
 
@@ -131,6 +140,8 @@ class BridgeService : Service() {
         // 1. Cancel tracked jobs to stop new work immediately
         counterFlushJob?.cancel()
         captureJob?.cancel()
+        pingJob?.cancel()
+        pongResponseJob?.cancel()
 
         // 2. Clean up resources (USB + socket) in NonCancellable context so teardown
         //    completes even though serviceScope will be cancelled next.
@@ -181,6 +192,10 @@ class BridgeService : Service() {
                 BridgeLogger.i(TAG, "UDP transport ready → $targetIp:$port")
                 DiagnosticsManager.update { copy(transportConnected = true, targetIp = targetIp) }
                 updateNotification("Ready — waiting for USB device…")
+
+                // Start PING/PONG keep-alive once transport is connected.
+                startPingLoop(transport)
+                startPongResponseLoop(transport)
             } else {
                 BridgeLogger.w(TAG, "UDP connect failed ($targetIp:$port)")
                 updateNotification("Transport error — check Settings")
@@ -205,6 +220,51 @@ class BridgeService : Service() {
         if (preAttached != null) {
             BridgeLogger.i(TAG, "Pre-attached HID device: ${preAttached.deviceName}")
             onUsbAttached(preAttached)
+        }
+    }
+
+    // ── PING/PONG keep-alive ──────────────────────────────────────────────────
+
+    /**
+     * Sends a PING packet every [PING_INTERVAL_MS] milliseconds.
+     * The receiver responds with PONG, which [startPongResponseLoop] uses to
+     * compute round-trip latency and update [DiagnosticsManager].
+     */
+    private fun startPingLoop(transport: UdpTransport) {
+        pingJob = serviceScope.launch {
+            while (isActive) {
+                delay(PING_INTERVAL_MS)
+                val ping = packetFactory.makePing()
+                lastPingSentAtMs = System.currentTimeMillis()
+                DiagnosticsManager.update { copy(lastPingSentMs = lastPingSentAtMs) }
+                transport.send(ping)
+                BridgeLogger.d(TAG, "PING sent (seq=${ping.sequenceNo})")
+            }
+        }
+    }
+
+    /**
+     * Collects incoming packets from the transport and handles PONG replies.
+     * Latency = time between last PING send and PONG arrival.
+     */
+    private fun startPongResponseLoop(transport: UdpTransport) {
+        pongResponseJob = serviceScope.launch {
+            transport.incomingPackets.collect { packet ->
+                when (packet.type) {
+                    PacketType.PONG -> {
+                        val sentAt = lastPingSentAtMs
+                        if (sentAt > 0L) {
+                            val latency = System.currentTimeMillis() - sentAt
+                            // Sanity check: ignore obviously stale/reordered PONGs
+                            if (latency in 0L..10_000L) {
+                                DiagnosticsManager.recordLatency(latency)
+                                BridgeLogger.d(TAG, "PONG received — latency=${latency}ms")
+                            }
+                        }
+                    }
+                    else -> Unit  // other incoming packets (e.g. future receiver→bridge control) ignored
+                }
+            }
         }
     }
 
