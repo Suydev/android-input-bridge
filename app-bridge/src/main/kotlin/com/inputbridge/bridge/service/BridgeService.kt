@@ -8,12 +8,14 @@ import androidx.core.app.NotificationCompat
 import com.inputbridge.bridge.prefs.BridgePreferences
 import com.inputbridge.bridge.ui.MainActivity
 import com.inputbridge.core.config.TransportConfig
+import com.inputbridge.core.config.TransportMode
 import com.inputbridge.core.logging.BridgeLogger
 import com.inputbridge.diagnostics.DiagnosticsManager
 import com.inputbridge.input.UsbInputCapture
 import com.inputbridge.protocol.EventPacketFactory
 import com.inputbridge.protocol.PacketSerializer
 import com.inputbridge.protocol.PacketType
+import com.inputbridge.transport.bt.BluetoothHidTransport
 import com.inputbridge.transport.wifi.UdpTransport
 import kotlinx.coroutines.*
 import java.util.concurrent.atomic.AtomicBoolean
@@ -30,21 +32,20 @@ private const val WATCHDOG_GRACE_MS = 15_000L  // wait before first watchdog che
 private const val PAIR_TIMEOUT_MS = 10_000L    // wait this long for PAIR_RESPONSE
 
 /**
- * Foreground service that owns the USB input capture and UDP transport pipeline.
+ * Foreground service that owns the USB input capture pipeline and the active transport.
+ *
+ * Transport modes:
+ *   UDP (default): UdpTransport + pairing handshake + PING/PONG + auto-reconnect.
+ *   BT HID (Phase 6): BluetoothHidTransport — raw HID reports sent directly to host;
+ *     no receiver app required on the host; no pairing or PING/PONG needed.
  *
  * Lifecycle:
  * 1. startForegroundService() → onCreate → onStartCommand → startPipeline()
- *    - Connects UdpTransport (sender mode)
- *    - Registers incoming-packet collector (handles PAIR_RESPONSE + PONG)
- *    - Performs pairing handshake if PIN is configured and not yet paired
- *    - Starts PING/PONG keep-alive loop (every 1 s)
- *    - Starts watchdog (reconnects automatically on PONG timeout)
- *    - Registers dynamic BroadcastReceiver for USB events
- *    - Checks for pre-attached USB devices
- * 2. USB device attached → request permission (if needed) → startCapture()
+ *    - Dispatches to startUdpPipeline() or startBluetoothHidPipeline() based on prefs
+ * 2. USB device attached → request permission → startCapture()
  *    - UsbInputCapture emits InputEvents on IO thread
- *    - Events flow through EventPacketFactory → UdpTransport.send()
- * 3. Watchdog detects PONG timeout → triggerReconnect() → exponential backoff
+ *    - Events dispatched to UDP or BT HID transport depending on active mode
+ * 3. (UDP only) Watchdog detects PONG timeout → triggerReconnect() → exponential backoff
  * 4. ACTION_STOP intent → stopSelf() → onDestroy → full cleanup
  *
  * Idempotency: startPipeline() is guarded by [pipelineStarted] so repeated
@@ -59,7 +60,12 @@ class BridgeService : Service() {
     private lateinit var prefs: BridgePreferences
 
     private val packetFactory = EventPacketFactory()
+
+    // ── Transport instances (only one active at a time) ───────────────────────
     private var udpTransport: UdpTransport? = null
+    private var btTransport: BluetoothHidTransport? = null
+
+    // ── Jobs ──────────────────────────────────────────────────────────────────
     private var usbCapture: UsbInputCapture? = null
     private var captureJob: Job? = null
     private var counterFlushJob: Job? = null
@@ -89,7 +95,7 @@ class BridgeService : Service() {
     private val reconnectInProgress = AtomicBoolean(false)
 
     /**
-     * Hot-path latency trace: time from InputEvent emission to UdpTransport.send() return
+     * Hot-path latency trace: time from InputEvent emission to transport send() return
      * in microseconds. Written by the captureJob on IO thread; flushed to DiagnosticsData
      * every second by counterFlushJob.
      */
@@ -170,10 +176,12 @@ class BridgeService : Service() {
             withContext(NonCancellable + Dispatchers.IO) {
                 runCatching { usbCapture?.stop() }
                 runCatching { udpTransport?.disconnect() }
+                runCatching { btTransport?.disconnect() }
             }
         }
-        usbCapture = null
-        udpTransport = null
+        usbCapture    = null
+        udpTransport  = null
+        btTransport   = null
 
         // 3. Cancel scope
         serviceScope.cancel()
@@ -187,6 +195,8 @@ class BridgeService : Service() {
                 inputCaptureActive = false,
                 usbDeviceConnected = false,
                 isReconnecting = false,
+                btConnected = false,
+                btDeviceName = "",
             )
         }
         BridgeLogger.i(TAG, "BridgeService destroyed")
@@ -194,9 +204,21 @@ class BridgeService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    // ── Pipeline setup ────────────────────────────────────────────────────────
+    // ── Pipeline dispatcher ───────────────────────────────────────────────────
 
+    /**
+     * Dispatch to the correct pipeline based on the user's saved transport mode.
+     */
     private suspend fun startPipeline() {
+        when (prefs.transportMode) {
+            TransportMode.BLUETOOTH_HID -> startBluetoothHidPipeline()
+            else                        -> startUdpPipeline()
+        }
+    }
+
+    // ── UDP pipeline ──────────────────────────────────────────────────────────
+
+    private suspend fun startUdpPipeline() {
         val targetIp = prefs.targetIp
         val port = prefs.port
 
@@ -221,7 +243,9 @@ class BridgeService : Service() {
         }
 
         BridgeLogger.i(TAG, "UDP transport ready → $targetIp:$port")
-        DiagnosticsManager.update { copy(transportConnected = true, targetIp = targetIp) }
+        DiagnosticsManager.update {
+            copy(transportMode = "UDP", transportConnected = true, targetIp = targetIp)
+        }
 
         // Register incoming-packet collector BEFORE sending any packet, so
         // PAIR_RESPONSE is never missed even under very low latency.
@@ -261,18 +285,58 @@ class BridgeService : Service() {
         startWatchdog()
 
         // Handle USB devices already attached before service started
-        val preAttached = usbManager.deviceList.values.firstOrNull { device ->
-            (0 until device.interfaceCount).any { i ->
-                device.getInterface(i).interfaceClass == UsbConstants.USB_CLASS_HID
-            }
-        }
-        if (preAttached != null) {
-            BridgeLogger.i(TAG, "Pre-attached HID device: ${preAttached.deviceName}")
-            onUsbAttached(preAttached)
-        }
+        checkPreAttachedUsb()
     }
 
-    // ── Incoming-packet loop ──────────────────────────────────────────────────
+    // ── Bluetooth HID pipeline ────────────────────────────────────────────────
+
+    /**
+     * Registers the phone as a Bluetooth HID keyboard+mouse device.
+     * No pairing PIN, no PING/PONG — the BT stack handles connectivity.
+     * Any Bluetooth host (tablet, PC, etc.) that pairs with the phone receives
+     * a real system-level cursor and keyboard without needing the receiver app.
+     */
+    private suspend fun startBluetoothHidPipeline() {
+        BridgeLogger.i(TAG, "Starting BT HID pipeline")
+        updateNotification("Connecting via Bluetooth HID…")
+
+        val bt = BluetoothHidTransport(this)
+        bt.targetDeviceAddress = prefs.btTargetDeviceAddress
+        btTransport = bt
+
+        DiagnosticsManager.update { copy(transportMode = "BT HID") }
+
+        if (!bt.connect()) {
+            BridgeLogger.w(TAG, "BT HID connect failed")
+            updateNotification("BT HID failed — enable Bluetooth and pair host device")
+            DiagnosticsManager.update {
+                copy(
+                    lastError = "BT HID connect failed — check Bluetooth is on and host is already paired",
+                )
+            }
+            pipelineStarted.set(false)
+            return
+        }
+
+        BridgeLogger.i(TAG, "BT HID transport ready")
+        DiagnosticsManager.update { copy(transportConnected = true) }
+        updateNotification("BT HID ready — waiting for USB device…")
+
+        counterFlushJob = serviceScope.launch {
+            while (isActive) {
+                delay(COUNTER_FLUSH_INTERVAL_MS)
+                DiagnosticsManager.flushCounters()
+                val captureUs = lastCaptureToSendUs.get()
+                if (captureUs > 0L) {
+                    DiagnosticsManager.update { copy(captureToSendUs = captureUs) }
+                }
+            }
+        }
+
+        checkPreAttachedUsb()
+    }
+
+    // ── Incoming-packet loop (UDP only) ───────────────────────────────────────
 
     /**
      * Collect ALL packets arriving from the receiver in a single coroutine.
@@ -311,7 +375,7 @@ class BridgeService : Service() {
         }
     }
 
-    // ── Pairing ───────────────────────────────────────────────────────────────
+    // ── Pairing (UDP only) ────────────────────────────────────────────────────
 
     /**
      * Send a PAIR_REQUEST with the user's PIN and wait up to [PAIR_TIMEOUT_MS]
@@ -349,7 +413,7 @@ class BridgeService : Service() {
         }
     }
 
-    // ── PING keep-alive ───────────────────────────────────────────────────────
+    // ── PING keep-alive (UDP only) ────────────────────────────────────────────
 
     private fun startPingLoop(transport: UdpTransport) {
         pingJob = serviceScope.launch {
@@ -364,7 +428,7 @@ class BridgeService : Service() {
         }
     }
 
-    // ── Watchdog + reconnect ──────────────────────────────────────────────────
+    // ── Watchdog + reconnect (UDP only) ──────────────────────────────────────
 
     /**
      * Periodically checks whether PONGs are still arriving.
@@ -388,7 +452,7 @@ class BridgeService : Service() {
     }
 
     /**
-     * Exponential-backoff reconnect loop.
+     * Exponential-backoff reconnect loop (UDP only).
      * Attempts: 1 s, 2 s, 4 s, 8 s, 16 s, 30 s, … (up to 10 attempts).
      * Guarded by [reconnectInProgress] so only one loop runs at a time.
      */
@@ -396,9 +460,9 @@ class BridgeService : Service() {
         if (!reconnectInProgress.compareAndSet(false, true)) return
 
         // Cancel currently running I/O jobs (but keep serviceScope alive)
-        pingJob?.cancel();        pingJob = null
+        pingJob?.cancel();         pingJob = null
         pongResponseJob?.cancel(); pongResponseJob = null
-        watchdogJob?.cancel();    watchdogJob = null
+        watchdogJob?.cancel();     watchdogJob = null
         runCatching { udpTransport?.disconnect() }
         udpTransport = null
         lastPingSentAtMs = 0L
@@ -459,6 +523,19 @@ class BridgeService : Service() {
 
     // ── USB device lifecycle ──────────────────────────────────────────────────
 
+    /** Check for HID devices already connected when the service starts. */
+    private fun checkPreAttachedUsb() {
+        val preAttached = usbManager.deviceList.values.firstOrNull { device ->
+            (0 until device.interfaceCount).any { i ->
+                device.getInterface(i).interfaceClass == UsbConstants.USB_CLASS_HID
+            }
+        }
+        if (preAttached != null) {
+            BridgeLogger.i(TAG, "Pre-attached HID device: ${preAttached.deviceName}")
+            onUsbAttached(preAttached)
+        }
+    }
+
     private fun onUsbAttached(device: UsbDevice) {
         BridgeLogger.i(TAG, "USB HID device attached: ${device.deviceName}")
         DiagnosticsManager.update { copy(usbDeviceName = device.deviceName) }
@@ -511,17 +588,27 @@ class BridgeService : Service() {
         updateNotification("Bridging — ${device.deviceName}")
         BridgeLogger.i(TAG, "USB capture active for ${device.deviceName}")
 
+        // Local snapshots for hot-path dispatch (avoids repeated volatile reads)
         captureJob = serviceScope.launch {
             capture.events.collect { event ->
                 val t0 = System.nanoTime()
-                val packet = packetFactory.fromEvent(event) ?: return@collect
-                val sent = udpTransport?.send(packet) ?: false
-                if (sent) {
-                    DiagnosticsManager.onPacketSent()
-                    // Update hot-path trace; flushed to DiagnosticsData every second.
+                val bt = btTransport
+                if (bt != null) {
+                    // ── BT HID mode: send raw HID report directly (no packet layer) ──
+                    val sent = bt.sendInputEvent(event)
+                    if (sent) DiagnosticsManager.onPacketSent()
+                    else DiagnosticsManager.onSendFailed()
                     lastCaptureToSendUs.set((System.nanoTime() - t0) / 1_000L)
                 } else {
-                    DiagnosticsManager.onSendFailed()
+                    // ── UDP mode: serialize to Packet and send ──────────────────────
+                    val packet = packetFactory.fromEvent(event) ?: return@collect
+                    val sent = udpTransport?.send(packet) ?: false
+                    if (sent) {
+                        DiagnosticsManager.onPacketSent()
+                        lastCaptureToSendUs.set((System.nanoTime() - t0) / 1_000L)
+                    } else {
+                        DiagnosticsManager.onSendFailed()
+                    }
                 }
             }
         }

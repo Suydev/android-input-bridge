@@ -1,7 +1,7 @@
 # Project State
 
 ## Current Version
-`0.5.1` — CI unblock (BUG-011 ACTION_SELECT_ALL) + automatic GitHub Release workflow
+`0.6.0` — Phase 6: Bluetooth HID transport wired into BridgeService + Settings UI
 
 ## Repository
 **GitHub:** https://github.com/Suydev/android-input-bridge  
@@ -11,6 +11,7 @@
 ## CI Status
 | Run | SHA | Status | Notes |
 |-----|-----|--------|-------|
+| TBD | session 009 | ⏳ pending | Phase 6 BT HID wiring |
 | TBD | session 008 | ⏳ pending | BUG-011 fix + release.yml |
 | #31 | `117eea9` | ❌ failure | BUG-011: ACTION_SELECT_ALL unresolved (all runs #27–#31 failed for same root cause) |
 | #30 | `c0bbe0e` | ❌ failure | BUG-011: same root cause |
@@ -33,7 +34,7 @@
 | 3     | Keep-alive / pairing     | ✅ Done     | 95%      |
 | 4     | Accessibility receiver   | ✅ Done     | 90%      |
 | 5     | Latency + reconnect      | ✅ Done     | 95%      |
-| 6     | Bluetooth HID (Path A)   | 🔒 Blocked  | 0%       |
+| 6     | Bluetooth HID (Path A)   | ✅ Done     | 95%      |
 | 7     | Release + distribution   | 🔒 Blocked  | 0%       |
 
 ## What Session 006 Delivers

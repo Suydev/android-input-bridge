@@ -409,6 +409,78 @@ Continued from session 006. Pairing, reconnect, and packet-loss detection were d
 
 ---
 
+## Session 009 — Phase 6: Bluetooth HID Transport
+
+**Date**: 2026-07-21
+**Agent**: Claude (Replit)
+**Version**: 0.5.1 → 0.6.0
+**Status**: ✅ Complete (pushed, CI pending)
+
+### Context
+
+Phase 6 (Bluetooth HID) transport files (`BluetoothHidTransport.kt`, `HidDescriptor.kt`,
+`HidReportBuilder.kt`) had already been written in the transport-bluetooth-hid module but
+were not wired into BridgeService, BridgePreferences, BridgeViewModel, or SettingsScreen.
+`DiagnosticsData` was also missing the `btConnected`/`btDeviceName` fields that
+`BluetoothHidTransport` referenced — causing a would-be compile error.
+
+### What Was Done
+
+**DiagnosticsData:**
+- Added `btConnected: Boolean = false`
+- Added `btDeviceName: String = ""`
+
+**BridgePreferences:**
+- Added `transportMode: TransportMode` (persisted as Int via `TransportMode.id`)
+- Added `btTargetDeviceAddress: String` (empty = wait for host to connect)
+
+**BridgeViewModel:**
+- `setTransportMode()` now persists mode to prefs (previously only updated in-memory config)
+- Transport mode loaded from prefs on init
+- Added `_btTargetAddress: MutableStateFlow<String>` + `btTargetAddress: StateFlow<String>`
+- Added `setBtTargetAddress(address: String)` — updates state and persists to prefs
+
+**BridgeService:**
+- `startPipeline()` is now a dispatcher: routes to `startUdpPipeline()` or
+  `startBluetoothHidPipeline()` based on `prefs.transportMode`
+- `startUdpPipeline()`: existing UDP logic, renamed and unchanged
+- `startBluetoothHidPipeline()`: creates `BluetoothHidTransport`, calls `bt.connect()`,
+  updates DiagnosticsData, starts counter-flush loop, checks for pre-attached USB devices.
+  No PING/PONG, no pairing, no watchdog (all UDP-only features)
+- `startCapture()`: captureJob now dispatches to BT HID or UDP based on which transport
+  is non-null (`btTransport?.sendInputEvent(event)` vs `udpTransport?.send(packet)`)
+- `onDestroy()`: disconnects both transports safely
+- Extracted `checkPreAttachedUsb()` helper (called from both pipelines)
+
+**SettingsScreen:**
+- Added "Transport Mode" section at top with `SingleChoiceSegmentedButtonRow` (UDP / BT HID)
+- UDP section: visible only when UDP mode is active
+- BT HID section: MAC address field (auto-formatted to uppercase, max 17 chars); visible only in BT HID mode
+- Pairing section: hidden in BT HID mode (no PIN needed for BT pairing)
+- Restart warning shown when mode is changed
+
+**DiagnosticsScreen (bridge):**
+- Added "BT Host" row showing connected host name or "—"
+
+### Key decisions
+- BT HID capture dispatch uses `btTransport != null` check (not `prefs.transportMode`) on
+  the hot path to avoid SharedPreferences access per event
+- No PING/PONG/reconnect in BT HID mode — the Android BT stack handles re-connections;
+  `onConnectionStateChanged()` in `BluetoothHidTransport` updates DiagnosticsData
+- Pairing section hidden in BT HID mode — BT-level pairing happens in Android Settings,
+  not in the app
+
+### Files changed
+- `diagnostics/src/main/kotlin/com/inputbridge/diagnostics/DiagnosticsData.kt` — btConnected, btDeviceName
+- `app-bridge/src/main/kotlin/com/inputbridge/bridge/prefs/BridgePreferences.kt` — transportMode, btTargetDeviceAddress
+- `app-bridge/src/main/kotlin/com/inputbridge/bridge/viewmodel/BridgeViewModel.kt` — mode persistence, btTargetAddress
+- `app-bridge/src/main/kotlin/com/inputbridge/bridge/service/BridgeService.kt` — mode-aware pipeline
+- `app-bridge/src/main/kotlin/com/inputbridge/bridge/ui/screens/SettingsScreen.kt` — BT HID settings
+- `app-bridge/src/main/kotlin/com/inputbridge/bridge/ui/screens/DiagnosticsScreen.kt` — BT Host row
+- `CHANGELOG.md`, `TASKS.md`, `PROJECT_STATE.md`, `ROADMAP.md`, `AI_CONTEXT.md`, `SESSION_LOG.md` — updated
+
+---
+
 ## Session 008 — CI Unblock + Automatic Release Workflow
 
 **Date**: 2026-07-21

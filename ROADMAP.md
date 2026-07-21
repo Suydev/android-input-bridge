@@ -156,7 +156,7 @@ and forward packets to the receiver app over UDP.
 
 **Risk level**: High — Bluetooth HID Device role may not be available on Redmi 9's MIUI Bluetooth stack
 
-**Completion**: 0% 🔲
+**Completion**: 95% ✅ (code complete; hardware test on real devices pending)
 
 ---
 

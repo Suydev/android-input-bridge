@@ -152,16 +152,21 @@ Complete checklist of all project tasks. Never delete completed tasks. Always ap
 
 ---
 
-## Phase 6 — Bluetooth HID 🔲
+## Phase 6 — Bluetooth HID ✅ (Session 009)
 
-- [ ] BluetoothHidTransport: BluetoothHidDevice registration
-- [ ] BluetoothHidTransport: HID descriptor (keyboard + mouse combo)
-- [ ] BluetoothHidTransport: report generation for key events
-- [ ] BluetoothHidTransport: report generation for mouse events
-- [ ] Feature flag: BLUETOOTH_HID_ENABLED guard
-- [ ] Graceful fallback: if HID device API not supported, fall back to UDP
-- [ ] UI: mode indicator shows "HID" vs "Accessibility"
-- [ ] Testing: verify OnePlus Pad Go shows real hardware cursor
+- [x] BluetoothHidTransport: BluetoothHidDevice registration
+- [x] BluetoothHidTransport: HID descriptor (keyboard + mouse combo)
+- [x] BluetoothHidTransport: report generation for key events
+- [x] BluetoothHidTransport: report generation for mouse events
+- [x] Feature flag: BLUETOOTH_HID_ENABLED guard
+- [x] Graceful fallback: if HID device API not supported, connect() returns false
+- [x] UI: transport mode segmented button (UDP / BT HID) in SettingsScreen
+- [x] DiagnosticsData: btConnected + btDeviceName fields
+- [x] BridgePreferences: transportMode + btTargetDeviceAddress persisted
+- [x] BridgeService: mode-aware pipeline dispatcher + startBluetoothHidPipeline()
+- [x] BridgeService: startCapture() dispatches events to BT HID or UDP based on active transport
+- [x] DiagnosticsScreen: BT Host row
+- [ ] Testing: verify OnePlus Pad Go shows real hardware cursor (requires hardware)
 
 ---
 

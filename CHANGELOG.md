@@ -4,6 +4,40 @@ All meaningful changes recorded chronologically.
 
 ---
 
+## [0.6.0] — 2026-07-21
+
+**Phase 6: Bluetooth HID transport — full implementation.**
+
+### Added
+
+- `DiagnosticsData`: `btConnected: Boolean` + `btDeviceName: String` fields (required by
+  `BluetoothHidTransport` — fixes compile error that would block CI)
+- `BridgePreferences`: `transportMode: TransportMode` + `btTargetDeviceAddress: String`
+  (persisted via SharedPreferences)
+- `BridgeViewModel`: `btTargetAddress` StateFlow + `setBtTargetAddress()`;
+  `setTransportMode()` now persists the choice to prefs; transport mode loaded from
+  prefs on init
+- `BridgeService`: mode-aware pipeline dispatcher — `startPipeline()` routes to
+  `startUdpPipeline()` (renamed from the old body, unchanged) or the new
+  `startBluetoothHidPipeline()`; `startCapture()` dispatches events to UDP or BT HID
+  based on which transport is active; `onDestroy()` disconnects both transports safely
+- `SettingsScreen`: transport mode segmented button (UDP / BT HID); BT HID section with
+  MAC address field; Pairing section hidden in BT HID mode; restart warning shown on
+  mode change
+- `DiagnosticsScreen` (bridge): "BT Host" row showing connected host name/address
+
+### Notes
+
+- `HidDescriptor.kt`, `HidReportBuilder.kt`, `BluetoothHidTransport.kt` were already
+  written in session 008 as forward declarations; this session wires them into the app.
+- Bluetooth HID requires Android 9+ (API 28) and device BT stack must support
+  `HID_DEVICE` profile. `BluetoothHidTransport.connect()` returns false gracefully if
+  the role is not supported.
+- No PING/PONG or pairing handshake in BT HID mode — connectivity is managed by the
+  Android Bluetooth stack. Watchdog/reconnect are UDP-only.
+
+---
+
 ## [0.5.1] — 2026-07-21
 
 **CI unblock: fix Ctrl+A compile error + add automatic GitHub Release workflow.**

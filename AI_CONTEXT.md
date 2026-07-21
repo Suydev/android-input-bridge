@@ -148,7 +148,11 @@ See DECISIONS.md for full records. Short summary:
 
 ## Current milestone
 
-**Phase 5 complete (95%)** — Latency trace (capture→send µs, recv→inject µs) and rolling 10-sample PONG average added. Phase 4 robust error handling (secure window detection + try-catch in injectKeyCode/injectText) complete. Phases 1–5 done. Phase 6 (Bluetooth HID) is next.
+**Phase 6 complete (95%)** — Bluetooth HID transport fully wired. `BluetoothHidTransport`,
+`HidDescriptor`, `HidReportBuilder` all implemented. `BridgeService` now dispatches to
+`startUdpPipeline()` or `startBluetoothHidPipeline()` based on `BridgePreferences.transportMode`.
+Settings screen has transport mode toggle (UDP / BT HID) and BT MAC address field.
+DiagnosticsData has `btConnected`/`btDeviceName` fields. Remaining: hardware test on real devices.
 
 ## Current TODO
 

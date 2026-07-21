@@ -22,6 +22,12 @@ data class DiagnosticsData(
     val packetsReceived: Long = 0L,
     val packetsSendFailed: Long = 0L,
 
+    // ── Bluetooth HID (Phase 6) ───────────────────────────────────────────────
+    /** True when a Bluetooth host is actively connected to the HID device role. */
+    val btConnected: Boolean = false,
+    /** Display name + address of the connected BT host, or "" if none. */
+    val btDeviceName: String = "",
+
     // ── Latency ───────────────────────────────────────────────────────────────
     val latencyMs: Long = 0L,
     val lastPingSentMs: Long = 0L,

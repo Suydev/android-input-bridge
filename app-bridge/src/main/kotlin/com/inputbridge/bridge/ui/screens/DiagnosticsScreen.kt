@@ -60,6 +60,9 @@ fun DiagnosticsScreen(
             DiagRow("Transport", diagnostics.transportMode, true)
             DiagRow("Connection", if (diagnostics.transportConnected) "CONNECTED" else "DISCONNECTED",
                 diagnostics.transportConnected)
+            DiagRow("BT Host",
+                if (diagnostics.btConnected) diagnostics.btDeviceName.ifEmpty { "CONNECTED" } else "—",
+                diagnostics.btConnected)
             DiagRow("Target IP", diagnostics.targetIp.ifEmpty { "Not set" }, diagnostics.targetIp.isNotEmpty())
             DiagRow("Latency (last)", "${diagnostics.latencyMs}ms", diagnostics.latencyMs in 1..100)
             DiagRow("Latency (avg)", "${diagnostics.latencyAvgMs}ms", diagnostics.latencyAvgMs in 1..100)

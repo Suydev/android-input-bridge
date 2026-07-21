@@ -1,6 +1,7 @@
 package com.inputbridge.bridge.prefs
 
 import android.content.Context
+import com.inputbridge.core.config.TransportMode
 
 /**
  * Lightweight SharedPreferences wrapper for persisting bridge configuration.
@@ -52,12 +53,33 @@ class BridgePreferences(context: Context) {
             .apply()
     }
 
+    // ── Phase 6 — Bluetooth HID ───────────────────────────────────────────────
+
+    /**
+     * Active transport mode. Persisted so the user's choice survives service
+     * restart. Defaults to UDP.
+     */
+    var transportMode: TransportMode
+        get() = TransportMode.fromId(prefs.getInt(KEY_TRANSPORT_MODE, TransportMode.UDP.id))
+        set(value) = prefs.edit().putInt(KEY_TRANSPORT_MODE, value.id).apply()
+
+    /**
+     * Bluetooth MAC address of the HID host to connect to when in
+     * [TransportMode.BLUETOOTH_HID] mode (e.g. "A1:B2:C3:D4:E5:F6").
+     * Empty = register as HID device and wait for the host to connect.
+     */
+    var btTargetDeviceAddress: String
+        get() = prefs.getString(KEY_BT_TARGET_ADDRESS, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_BT_TARGET_ADDRESS, value).apply()
+
     companion object {
-        private const val PREF_FILE    = "bridge_config"
-        private const val KEY_TARGET_IP  = "target_ip"
-        private const val KEY_PORT       = "port"
-        private const val KEY_PAIRING_PIN = "pairing_pin"
-        private const val KEY_IS_PAIRED  = "is_paired"
+        private const val PREF_FILE             = "bridge_config"
+        private const val KEY_TARGET_IP         = "target_ip"
+        private const val KEY_PORT              = "port"
+        private const val KEY_PAIRING_PIN       = "pairing_pin"
+        private const val KEY_IS_PAIRED         = "is_paired"
+        private const val KEY_TRANSPORT_MODE    = "transport_mode"
+        private const val KEY_BT_TARGET_ADDRESS = "bt_target_address"
         const val DEFAULT_PORT = 54321
     }
 }

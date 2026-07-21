@@ -50,8 +50,9 @@ class BridgeViewModel(
     private val _config = MutableStateFlow(
         AppConfig(
             transport = TransportConfig(
+                mode     = prefs.transportMode,
                 targetIp = prefs.targetIp,
-                port = prefs.port,
+                port     = prefs.port,
             ),
             security = com.inputbridge.core.config.SecurityConfig(
                 pairingToken = prefs.pairingPin,
@@ -65,12 +66,31 @@ class BridgeViewModel(
         .map { it.isPaired }
         .stateIn(viewModelScope, SharingStarted.Eagerly, prefs.isPaired)
 
+    // ── Bluetooth HID settings ────────────────────────────────────────────────
+
+    /**
+     * Bluetooth MAC address of the HID host to connect to.
+     * Empty = wait for any host to connect after BT HID registration.
+     */
+    private val _btTargetAddress = MutableStateFlow(prefs.btTargetDeviceAddress)
+    val btTargetAddress: StateFlow<String> = _btTargetAddress.asStateFlow()
+
+    fun setBtTargetAddress(address: String) {
+        _btTargetAddress.value = address
+        prefs.btTargetDeviceAddress = address
+    }
+
     // ── Transport settings ────────────────────────────────────────────────────
 
+    /**
+     * Switch the active transport mode and persist the choice.
+     * Takes effect on the next BridgeService start.
+     */
     fun setTransportMode(mode: TransportMode) {
         _config.value = _config.value.copy(
             transport = _config.value.transport.copy(mode = mode)
         )
+        prefs.transportMode = mode
     }
 
     fun setTargetIp(ip: String) {
