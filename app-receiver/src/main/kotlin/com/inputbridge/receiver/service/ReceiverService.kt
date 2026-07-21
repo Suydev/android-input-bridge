@@ -93,6 +93,33 @@ class ReceiverService : Service() {
         BridgeLogger.i(TAG, "ReceiverService created")
     }
 
+    // ── Phase 7 — cursor overlay lifecycle ────────────────────────────────────
+
+    /**
+     * Start the cursor dot overlay service if the user has enabled it and the
+     * required SYSTEM_ALERT_WINDOW permission is granted.
+     * Called after UDP transport connects successfully so the cursor is live
+     * before any events arrive.
+     */
+    private fun startCursorOverlayIfNeeded() {
+        if (!prefs.showCursorOverlay) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            !android.provider.Settings.canDrawOverlays(this)) {
+            BridgeLogger.w(TAG, "Cursor overlay requested but canDrawOverlays() is false — skipping")
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            BridgeLogger.i(TAG, "Starting cursor overlay service")
+            startService(android.content.Intent(this, CursorOverlayService::class.java))
+        }
+    }
+
+    private fun stopCursorOverlay() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopService(android.content.Intent(this, CursorOverlayService::class.java))
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             BridgeLogger.i(TAG, "Stop action received")
@@ -126,6 +153,10 @@ class ReceiverService : Service() {
         serviceScope.cancel()
         listenerStarted.set(false)
         releaseWakeLock()
+
+        // Phase 7: tear down cursor overlay
+        stopCursorOverlay()
+
         DiagnosticsManager.update {
             copy(receiverServiceRunning = false, transportConnected = false, isReconnecting = false)
         }
@@ -174,6 +205,9 @@ class ReceiverService : Service() {
         BridgeLogger.i(TAG, "Listening for packets on UDP port $port (PIN=$sessionPin)")
         updateNotification("Listening on UDP :$port — PIN: $sessionPin")
         DiagnosticsManager.update { copy(transportConnected = true) }
+
+        // Phase 7: start cursor overlay now that the transport is live
+        startCursorOverlayIfNeeded()
 
         // Periodic diagnostics flush (includes sequence drop count)
         counterFlushJob = serviceScope.launch {

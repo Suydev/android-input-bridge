@@ -9,6 +9,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicLong
 
@@ -27,6 +30,7 @@ private const val TAG = "AccessibilityCommandBus"
  * - Left click dispatches a tap gesture at the current virtual position.
  * - Right click dispatches a long-press.
  * - The position starts at the screen centre; clamped to screen bounds.
+ * - Current position is exposed via [cursorPosition] StateFlow for the overlay service.
  *
  * Keyboard injection:
  * - KeyDown events are forwarded to [InputBridgeAccessibilityService.injectKeyCode].
@@ -47,8 +51,6 @@ object AccessibilityCommandBus {
     /**
      * Time taken by the most recent [handleEvent] call in microseconds.
      * Written on Dispatchers.Main; read on the counter-flush IO coroutine.
-     * Used to report receive-to-inject latency in diagnostics without touching
-     * the hot path on every event emission.
      */
     private val lastInjectUs = AtomicLong(0L)
 
@@ -57,10 +59,24 @@ object AccessibilityCommandBus {
 
     // ── Virtual cursor ────────────────────────────────────────────────────────
 
-    private var cursorX = 0f
-    private var cursorY = 0f
-    private var screenWidth = 1080f
+    @Volatile private var cursorX = 0f
+    @Volatile private var cursorY = 0f
+    private var screenWidth  = 1080f
     private var screenHeight = 2400f
+
+    /**
+     * Current virtual cursor position in screen pixels.
+     * Updated on every [InputEvent.MouseMove].
+     * The [CursorOverlayService] collects this flow to reposition the dot overlay.
+     */
+    private val _cursorPosition = MutableStateFlow(Pair(0f, 0f))
+    val cursorPosition: StateFlow<Pair<Float, Float>> = _cursorPosition.asStateFlow()
+
+    /** Snapshot of the current cursor X coordinate (safe to read from any thread). */
+    fun getCursorX(): Float = cursorX
+
+    /** Snapshot of the current cursor Y coordinate (safe to read from any thread). */
+    fun getCursorY(): Float = cursorY
 
     // ── Configuration ─────────────────────────────────────────────────────────
 
@@ -71,7 +87,7 @@ object AccessibilityCommandBus {
     @Volatile var mouseSensitivity: Float = 1.0f
         private set
 
-    /** Update the pointer sensitivity multiplier (0.1 – 10). */
+    /** Update the pointer sensitivity multiplier (0.1–10). */
     fun setSensitivity(s: Float) {
         mouseSensitivity = s.coerceIn(0.1f, 10f)
         BridgeLogger.d(TAG, "Sensitivity set to $mouseSensitivity")
@@ -90,11 +106,12 @@ object AccessibilityCommandBus {
     }
 
     fun setScreenSize(width: Int, height: Int) {
-        screenWidth = width.toFloat()
+        screenWidth  = width.toFloat()
         screenHeight = height.toFloat()
         // Re-centre the virtual cursor when screen size is (re-)established.
         cursorX = screenWidth / 2f
         cursorY = screenHeight / 2f
+        _cursorPosition.value = Pair(cursorX, cursorY)
         BridgeLogger.i(TAG, "Screen size updated: ${width}×${height}, cursor centred")
     }
 
@@ -129,16 +146,17 @@ object AccessibilityCommandBus {
             is InputEvent.MouseMove -> {
                 cursorX = (cursorX + event.dx * mouseSensitivity).coerceIn(0f, screenWidth - 1f)
                 cursorY = (cursorY + event.dy * mouseSensitivity).coerceIn(0f, screenHeight - 1f)
-                // Cursor overlay update will go here in Phase 7 (visual dot).
+                // Publish new position to the cursor overlay (non-blocking).
+                _cursorPosition.value = Pair(cursorX, cursorY)
             }
 
             // ── Mouse clicks ──────────────────────────────────────────────────
             is InputEvent.MouseButtonDown -> {
                 when (event.button) {
-                    MouseButton.LEFT   -> svc.tap(cursorX, cursorY)
-                    MouseButton.RIGHT  -> svc.longPress(cursorX, cursorY)
-                    MouseButton.MIDDLE -> Unit // no accessibility equivalent
-                    MouseButton.BACK   -> svc.goBack()
+                    MouseButton.LEFT    -> svc.tap(cursorX, cursorY)
+                    MouseButton.RIGHT   -> svc.longPress(cursorX, cursorY)
+                    MouseButton.MIDDLE  -> Unit // no accessibility equivalent
+                    MouseButton.BACK    -> svc.goBack()
                     MouseButton.FORWARD -> Unit
                 }
             }
@@ -148,9 +166,6 @@ object AccessibilityCommandBus {
 
             // ── Scroll ────────────────────────────────────────────────────────
             is InputEvent.Scroll -> {
-                // Simulate scroll as a short swipe from cursor position.
-                // dy > 0 = content scrolls down (finger swipes up) = negative Y delta.
-                // dy < 0 = content scrolls up  (finger swipes down) = positive Y delta.
                 val scrollDx = event.dx * SCROLL_PIXEL_MULTIPLIER * mouseSensitivity
                 val scrollDy = event.dy * SCROLL_PIXEL_MULTIPLIER * mouseSensitivity
                 svc.swipe(
@@ -163,17 +178,13 @@ object AccessibilityCommandBus {
             }
 
             // ── Keyboard ──────────────────────────────────────────────────────
-            is InputEvent.KeyDown -> {
-                svc.injectKeyCode(event.keyCode, event.modifiers)
-            }
+            is InputEvent.KeyDown -> svc.injectKeyCode(event.keyCode, event.modifiers)
 
             // KeyUp: no action needed — injection is complete on KeyDown.
             is InputEvent.KeyUp -> Unit
 
             // ── Text injection ────────────────────────────────────────────────
-            is InputEvent.TextInput -> {
-                svc.injectText(event.text)
-            }
+            is InputEvent.TextInput -> svc.injectText(event.text)
 
             // ── Navigation ────────────────────────────────────────────────────
             is InputEvent.NavigationAction -> when (event.action) {
@@ -187,9 +198,7 @@ object AccessibilityCommandBus {
                 AndroidNavAction.SCREENSHOT    -> Unit // Require system-level privileges
             }
 
-            // ── Modifier state change ─────────────────────────────────────────
-            // No direct accessibility action needed; modifiers are already embedded
-            // in subsequent KeyDown events via ModifierState.
+            // Modifier state change: modifiers are embedded in subsequent KeyDown events.
             is InputEvent.ModifierStateChanged -> Unit
 
             else -> BridgeLogger.d(TAG, "Unhandled event type: $event")

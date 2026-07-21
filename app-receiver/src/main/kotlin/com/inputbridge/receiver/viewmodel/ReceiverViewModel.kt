@@ -5,6 +5,7 @@ import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.inputbridge.core.config.AppConfig
+import com.inputbridge.core.config.DisplayConfig
 import com.inputbridge.core.config.MouseConfig
 import com.inputbridge.core.config.TransportConfig
 import com.inputbridge.diagnostics.DiagnosticsData
@@ -30,7 +31,7 @@ class ReceiverViewModel(
         DiagnosticsManager.update {
             copy(
                 sessionPin = prefs.sessionPin,
-                isPaired = prefs.isPaired,
+                isPaired   = prefs.isPaired,
                 pairedPeerIp = prefs.pairedBridgeIp,
             )
         }
@@ -66,20 +67,28 @@ class ReceiverViewModel(
         .map { it.isPaired }
         .stateIn(viewModelScope, SharingStarted.Eagerly, prefs.isPaired)
 
+    // ── Full app config ───────────────────────────────────────────────────────
+
     private val _config = MutableStateFlow(
         AppConfig(
             transport = TransportConfig(port = prefs.port),
-            mouse = MouseConfig(sensitivity = prefs.mouseSensitivity),
+            mouse     = MouseConfig(sensitivity = prefs.mouseSensitivity),
+            display   = DisplayConfig(
+                showCursorOverlay = prefs.showCursorOverlay,
+                autoStartOnBoot   = prefs.autoStartOnBoot,
+            ),
         )
     )
     val config: StateFlow<AppConfig> = _config.asStateFlow()
 
+    // ── Transport settings ────────────────────────────────────────────────────
+
     fun setListenPort(port: Int) {
-        _config.value = _config.value.copy(
-            transport = _config.value.transport.copy(port = port)
-        )
+        _config.update { it.copy(transport = it.transport.copy(port = port)) }
         prefs.port = port
     }
+
+    // ── Mouse settings ────────────────────────────────────────────────────────
 
     /**
      * Update the mouse sensitivity multiplier.
@@ -87,14 +96,36 @@ class ReceiverViewModel(
      */
     fun setMouseSensitivity(sensitivity: Float) {
         val clamped = sensitivity.coerceIn(0.1f, 5.0f)
-        _config.value = _config.value.copy(
-            mouse = _config.value.mouse.copy(sensitivity = clamped)
-        )
+        _config.update { it.copy(mouse = it.mouse.copy(sensitivity = clamped)) }
         prefs.mouseSensitivity = clamped
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
             com.inputbridge.accessibility.AccessibilityCommandBus.setSensitivity(clamped)
         }
     }
+
+    // ── Display / system settings ─────────────────────────────────────────────
+
+    /**
+     * Enable/disable the floating cursor dot overlay.
+     * Requires canDrawOverlays() permission. The Settings screen should check
+     * this before calling — if permission is absent, direct the user to
+     * Settings.ACTION_MANAGE_OVERLAY_PERMISSION first.
+     */
+    fun setCursorOverlayEnabled(enabled: Boolean) {
+        _config.update { it.copy(display = it.display.copy(showCursorOverlay = enabled)) }
+        prefs.showCursorOverlay = enabled
+    }
+
+    /**
+     * Enable or disable auto-start on device boot.
+     * BootReceiver reads this pref before starting ReceiverService.
+     */
+    fun setAutoStartOnBoot(enabled: Boolean) {
+        _config.update { it.copy(display = it.display.copy(autoStartOnBoot = enabled)) }
+        prefs.autoStartOnBoot = enabled
+    }
+
+    // ── Pairing ───────────────────────────────────────────────────────────────
 
     /**
      * Generate a fresh session PIN and clear any existing pairing.
@@ -104,6 +135,8 @@ class ReceiverViewModel(
         val pin = prefs.generateNewPin()
         DiagnosticsManager.update { copy(sessionPin = pin, isPaired = false, pairedPeerIp = "") }
     }
+
+    // ── Service control ───────────────────────────────────────────────────────
 
     fun startReceiver() {
         viewModelScope.launch {

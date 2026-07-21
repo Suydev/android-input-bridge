@@ -2,7 +2,7 @@ package com.inputbridge.core.config
 
 /**
  * Top-level app configuration, shared between bridge and receiver.
- * Values are loaded from DataStore and exposed via ConfigRepository.
+ * Values are loaded from SharedPreferences (DataStore migration: Phase 7).
  */
 data class AppConfig(
     val transport: TransportConfig = TransportConfig(),
@@ -38,12 +38,26 @@ data class MouseConfig(
 )
 
 data class DisplayConfig(
-    /** Enable black screen mode on the bridge device. */
+    /** Enable black screen mode on the bridge device (hides UI, dims to minimum brightness). */
     val blackScreenMode: Boolean = false,
     /** Show latency overlay in the bridge UI. */
     val showLatencyOverlay: Boolean = true,
-    /** Keep screen on while bridge is active. */
+    /** Keep screen on while bridge/receiver is active. */
     val keepScreenOn: Boolean = true,
+    /**
+     * Screen brightness override.
+     * -1f = follow system default.
+     *  0f = minimum (but backlight still on).
+     *  1f = maximum.
+     */
+    val screenBrightness: Float = -1f,
+    /** Auto-start the service on device boot. */
+    val autoStartOnBoot: Boolean = true,
+    /**
+     * Show a floating cursor-position dot overlay (receiver only).
+     * Requires SYSTEM_ALERT_WINDOW / canDrawOverlays permission.
+     */
+    val showCursorOverlay: Boolean = false,
 )
 
 data class SecurityConfig(
@@ -56,9 +70,9 @@ data class SecurityConfig(
 enum class TransportMode(val id: Int) {
     /** UDP over same LAN or hotspot — default, lowest latency. */
     UDP(0),
-    /** Wi-Fi Direct peer-to-peer. */
+    /** Wi-Fi Direct peer-to-peer (stub — Phase 8). */
     WIFI_DIRECT(1),
-    /** TCP over local network. */
+    /** TCP over local network (stub — Phase 8). */
     TCP(2),
     /** Bluetooth HID (bridge → tablet system cursor). */
     BLUETOOTH_HID(3);

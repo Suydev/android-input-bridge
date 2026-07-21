@@ -10,7 +10,7 @@ import kotlin.random.Random
  * pairing state at service start, and by [ReceiverViewModel] to persist user
  * changes from the Settings and Connection screens.
  *
- * Will be migrated to DataStore in Phase 7 when all settings are fully wired.
+ * Will be migrated to DataStore in a future phase.
  */
 class ReceiverPreferences(context: Context) {
 
@@ -32,7 +32,6 @@ class ReceiverPreferences(context: Context) {
     /**
      * 6-digit session PIN displayed to the user so the bridge operator can enter
      * it in the bridge app to complete pairing.
-     * Empty until [generateNewPin] is first called.
      */
     var sessionPin: String
         get() = prefs.getString(KEY_SESSION_PIN, "") ?: ""
@@ -40,8 +39,7 @@ class ReceiverPreferences(context: Context) {
 
     /**
      * IP address of the bridge device that successfully completed pairing.
-     * Empty = not yet paired. Cleared when the bridge sends DISCONNECT or
-     * when the user regenerates the PIN.
+     * Empty = not yet paired.
      */
     var pairedBridgeIp: String
         get() = prefs.getString(KEY_PAIRED_BRIDGE_IP, "") ?: ""
@@ -66,6 +64,25 @@ class ReceiverPreferences(context: Context) {
         return pin
     }
 
+    // ── Phase 7 — Polish ──────────────────────────────────────────────────────
+
+    /**
+     * When true, a floating crosshair dot is drawn at the current virtual cursor
+     * position using SYSTEM_ALERT_WINDOW overlay.
+     * Requires canDrawOverlays() permission — guided by the Settings screen.
+     */
+    var showCursorOverlay: Boolean
+        get() = prefs.getBoolean(KEY_SHOW_CURSOR_OVERLAY, false)
+        set(value) = prefs.edit().putBoolean(KEY_SHOW_CURSOR_OVERLAY, value).apply()
+
+    /**
+     * When true, [BootReceiver] starts ReceiverService automatically after reboot.
+     * User can disable via Settings → System.
+     */
+    var autoStartOnBoot: Boolean
+        get() = prefs.getBoolean(KEY_AUTO_START_ON_BOOT, true)
+        set(value) = prefs.edit().putBoolean(KEY_AUTO_START_ON_BOOT, value).apply()
+
     companion object {
         private const val PREF_FILE              = "receiver_config"
         private const val KEY_PORT               = "port"
@@ -73,6 +90,9 @@ class ReceiverPreferences(context: Context) {
         private const val KEY_SESSION_PIN        = "session_pin"
         private const val KEY_PAIRED_BRIDGE_IP   = "paired_bridge_ip"
         private const val KEY_IS_PAIRED          = "is_paired"
+        // Phase 7
+        private const val KEY_SHOW_CURSOR_OVERLAY = "show_cursor_overlay"
+        private const val KEY_AUTO_START_ON_BOOT  = "auto_start_on_boot"
         const val DEFAULT_PORT        = 54321
         const val DEFAULT_SENSITIVITY = 1.0f
     }

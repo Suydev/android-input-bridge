@@ -1,41 +1,68 @@
 package com.inputbridge.receiver.ui
 
 import android.os.Bundle
+import android.os.SystemClock
+import android.view.KeyEvent
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.inputbridge.receiver.ui.screens.*
 import com.inputbridge.receiver.ui.theme.ReceiverTheme
 import com.inputbridge.receiver.viewmodel.ReceiverViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.koin.androidx.viewmodel.ext.android.viewModel
 
+/**
+ * Single-activity host for the receiver app.
+ *
+ * Phase 7 additions:
+ * - Volume-Down hold (3 seconds) triggers emergency stop of the receiver service.
+ * - Portrait lock removed from manifest — the receiver tablet should support both
+ *   orientations freely.
+ */
 class MainActivity : ComponentActivity() {
 
     private val viewModel: ReceiverViewModel by viewModel()
 
+    // ── Emergency stop via Volume Down hold ───────────────────────────────────
+
+    @Volatile private var volumeDownPressedAt = 0L
+    private var emergencyStopJob: Job? = null
+
+    private companion object {
+        const val EMERGENCY_HOLD_MS = 3_000L
+    }
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
         setContent {
             ReceiverTheme {
                 val navController = rememberNavController()
                 NavHost(navController = navController, startDestination = ReceiverRoute.WELCOME) {
                     composable(ReceiverRoute.WELCOME) {
                         WelcomeScreen(
-                            onStart = { navController.navigate(ReceiverRoute.CONNECTION) },
+                            onStart         = { navController.navigate(ReceiverRoute.CONNECTION) },
                             onAccessibility = { navController.navigate(ReceiverRoute.ACCESSIBILITY) },
-                            onSettings = { navController.navigate(ReceiverRoute.SETTINGS) },
-                            viewModel = viewModel,
+                            onSettings      = { navController.navigate(ReceiverRoute.SETTINGS) },
+                            viewModel       = viewModel,
                         )
                     }
                     composable(ReceiverRoute.CONNECTION) {
                         ConnectionScreen(
-                            onSettings = { navController.navigate(ReceiverRoute.SETTINGS) },
+                            onSettings    = { navController.navigate(ReceiverRoute.SETTINGS) },
                             onDiagnostics = { navController.navigate(ReceiverRoute.DIAGNOSTICS) },
-                            viewModel = viewModel,
+                            viewModel     = viewModel,
                         )
                     }
                     composable(ReceiverRoute.ACCESSIBILITY) {
@@ -43,19 +70,52 @@ class MainActivity : ComponentActivity() {
                     }
                     composable(ReceiverRoute.SETTINGS) {
                         ReceiverSettingsScreen(
-                            onBack = { navController.popBackStack() },
+                            onBack    = { navController.popBackStack() },
                             viewModel = viewModel,
                         )
                     }
                     composable(ReceiverRoute.DIAGNOSTICS) {
                         ReceiverDiagnosticsScreen(
-                            onBack = { navController.popBackStack() },
+                            onBack    = { navController.popBackStack() },
                             viewModel = viewModel,
                         )
                     }
                 }
             }
         }
+    }
+
+    // ── Volume-Down emergency stop ────────────────────────────────────────────
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN && event.repeatCount == 0) {
+            volumeDownPressedAt = SystemClock.elapsedRealtime()
+            emergencyStopJob?.cancel()
+            emergencyStopJob = lifecycleScope.launch {
+                delay(EMERGENCY_HOLD_MS)
+                viewModel.stopReceiver()
+                Toast.makeText(
+                    this@MainActivity,
+                    "Emergency stop — receiver service stopped",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+            return true  // consume to suppress volume change
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            val heldMs = if (volumeDownPressedAt > 0L)
+                SystemClock.elapsedRealtime() - volumeDownPressedAt else 0L
+            emergencyStopJob?.cancel()
+            emergencyStopJob = null
+            volumeDownPressedAt = 0L
+            if (heldMs < 500L) return false  // short press: pass to system volume handler
+            return true
+        }
+        return super.onKeyUp(keyCode, event)
     }
 }
 

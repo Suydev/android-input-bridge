@@ -16,6 +16,7 @@
     <!-- Foreground service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- Auto-start on boot -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -26,6 +27,17 @@
     <!-- Battery -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!-- Notifications (API 33+) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
+        Phase 7: cursor dot overlay.
+        Required by CursorOverlayService to draw a floating crosshair on top of
+        all other apps. User grants this via Settings.ACTION_MANAGE_OVERLAY_PERMISSION.
+        Guarded in the Settings screen and in CursorOverlayService itself.
+    -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
     <application
         android:name=".ReceiverApplication"
         android:allowBackup="false"
@@ -35,11 +47,16 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.InputBridgeReceiver">
 
+        <!--
+            Phase 7: screenOrientation removed (was "portrait").
+            The receiver tablet should support both orientations freely.
+            android:configChanges handles rotation without restarting the activity.
+        -->
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
-            android:screenOrientation="portrait">
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -51,6 +68,17 @@
             android:name=".service.ReceiverService"
             android:exported="false"
             android:foregroundServiceType="dataSync"
+            android:enabled="true" />
+
+        <!--
+            Phase 7: cursor dot overlay service.
+            Not a foreground service — just a lightweight WindowManager overlay.
+            Only started when the user enables showCursorOverlay AND canDrawOverlays()
+            returns true. Uses TYPE_APPLICATION_OVERLAY (API 26+).
+        -->
+        <service
+            android:name=".service.CursorOverlayService"
+            android:exported="false"
             android:enabled="true" />
 
         <!-- Accessibility service for input injection -->

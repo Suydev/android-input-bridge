@@ -170,17 +170,27 @@ Complete checklist of all project tasks. Never delete completed tasks. Always ap
 
 ---
 
-## Phase 7 — Polish 🔲
+## Phase 7 — Polish ✅ (Session 010)
 
-- [ ] Black screen mode: screen brightness → 0, UI fully black
-- [ ] Minimum brightness: brightness slider in settings
-- [ ] Auto-start settings: UI toggle for AUTO_START_ON_BOOT
-- [ ] Emergency stop hotkey: physical button combo to stop bridge
-- [ ] Settings persistence: migrate SharedPreferences → DataStore
-- [ ] Clipboard sync: CLIPBOARD_SYNC_ENABLED feature
-- [ ] Macro recording: MACROS_ENABLED feature (future)
-- [ ] Help text: onboarding tooltips
-- [ ] Version info: BuildConfig display in About screen
-- [ ] Accessibility mode cursor overlay: visible dot at virtual cursor position
-- [ ] Sensitivity calibration: live preview in settings ✅ (done in Phase 4 for receiver)
-- [ ] Bridge sensitivity setting: mouse sensitivity on bridge side too
+- [x] Black screen mode: BridgeScreen goes pitch-black, window brightness set to 0.001f
+- [x] Screen brightness slider: per-window override in Settings → Display (-1=system, 0–100%)
+- [x] Keep Screen On toggle: FLAG_KEEP_SCREEN_ON now controlled by BridgePreferences.keepScreenOn
+- [x] Show Latency toggle: latency number visibility on BridgeScreen controlled by pref
+- [x] Bridge sensitivity setting: bridge-side mouse sensitivity 0.1–5× wired in SettingsScreen
+- [x] Auto-start on Boot toggle: BridgePreferences.autoStartOnBoot + ReceiverPreferences.autoStartOnBoot
+- [x] BootReceivers: both now read from user pref instead of FeatureFlags constant
+- [x] Emergency stop hotkey (bridge): hold Volume Down 3 s → stopBridge() + toast
+- [x] Emergency stop hotkey (receiver): hold Volume Down 3 s → stopReceiver() + toast
+- [x] Accessibility mode cursor overlay: CursorOverlayService (SYSTEM_ALERT_WINDOW, floating crosshair dot)
+- [x] Cursor overlay toggle: ReceiverSettingsScreen — auto-prompts for overlay permission if absent
+- [x] AccessibilityCommandBus: cursorPosition StateFlow for overlay + getCursorX()/getCursorY()
+- [x] Live PermissionsScreen: battery opt, BLUETOOTH_CONNECT, NEARBY_WIFI_DEVICES, POST_NOTIFICATIONS
+- [x] WelcomeScreen cleanup: WIFI_DIRECT/TCP stubs hidden; only UDP + BT HID shown
+- [x] Landscape support: screenOrientation="portrait" removed from receiver manifest
+- [x] ReceiverService: starts/stops CursorOverlayService based on pref + canDrawOverlays()
+- [x] app-receiver/AndroidManifest: SYSTEM_ALERT_WINDOW, POST_NOTIFICATIONS, CursorOverlayService entry
+- [ ] Settings persistence: migrate SharedPreferences → DataStore (deferred — risky without compilation)
+- [ ] Clipboard sync: CLIPBOARD_SYNC_ENABLED feature (Phase 8)
+- [ ] Macro recording: MACROS_ENABLED feature (Phase 8)
+- [ ] Help text: onboarding tooltips (Phase 8)
+- [x] Version info: BuildConfig display in About screen (already done in Phase 5)

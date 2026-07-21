@@ -45,12 +45,17 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.InputBridgeBridge">
 
+        <!--
+            Phase 7: screenOrientation kept as "portrait" for the bridge phone —
+            portrait-only is intentional since the bridge is typically held or
+            placed face-down while typing. keepScreenOn is now controlled at
+            runtime via BridgePreferences.keepScreenOn / FLAG_KEEP_SCREEN_ON.
+        -->
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
-            android:screenOrientation="portrait"
-            android:keepScreenOn="true">
+            android:screenOrientation="portrait">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

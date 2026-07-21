@@ -22,7 +22,7 @@ data class DiagnosticsData(
     val packetsReceived: Long = 0L,
     val packetsSendFailed: Long = 0L,
 
-    // ── Bluetooth HID (Phase 6) ───────────────────────────────────────────────
+    // ── Bluetooth HID ─────────────────────────────────────────────────────────
     /** True when a Bluetooth host is actively connected to the HID device role. */
     val btConnected: Boolean = false,
     /** Display name + address of the connected BT host, or "" if none. */
@@ -69,23 +69,29 @@ data class DiagnosticsData(
     val latencyAvgMs: Long = 0L,
     /**
      * Bridge: time from InputEvent emission to UdpTransport.send() return (microseconds).
-     * Measures serialization + socket-write cost on the hot path.
      */
     val captureToSendUs: Long = 0L,
     /**
      * Receiver: time from incomingPackets.collect callback to AccessibilityCommandBus
-     * handleEvent() return (microseconds). Measures deserialize + injection cost.
+     * handleEvent() return (microseconds).
      */
     val receiveToInjectUs: Long = 0L,
 
     // ── Accessibility injection state (receiver) ──────────────────────────────
-    /**
-     * True when the last injection attempt was blocked by a secure window
-     * (e.g. lock-screen PIN entry). Cleared as soon as injection succeeds again.
-     */
     val isSecureWindow: Boolean = false,
     /** Most recent accessibility injection exception message, if any. */
     val lastInjectionError: String? = null,
+
+    // ── Phase 7 — display / system ────────────────────────────────────────────
+    /**
+     * True when the bridge is in black-screen mode (minimum brightness, all-black UI).
+     * Read by BridgeScreen and MainActivity to apply the correct window brightness.
+     */
+    val blackScreenMode: Boolean = false,
+    /**
+     * True when the cursor overlay service is actively drawing the dot.
+     */
+    val cursorOverlayActive: Boolean = false,
 
     // ── Errors ────────────────────────────────────────────────────────────────
     val lastError: String? = null,

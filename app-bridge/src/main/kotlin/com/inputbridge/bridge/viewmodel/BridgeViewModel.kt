@@ -7,6 +7,9 @@ import androidx.lifecycle.viewModelScope
 import com.inputbridge.bridge.prefs.BridgePreferences
 import com.inputbridge.bridge.service.BridgeService
 import com.inputbridge.core.config.AppConfig
+import com.inputbridge.core.config.DisplayConfig
+import com.inputbridge.core.config.MouseConfig
+import com.inputbridge.core.config.SecurityConfig
 import com.inputbridge.core.config.TransportConfig
 import com.inputbridge.core.config.TransportMode
 import com.inputbridge.diagnostics.DiagnosticsData
@@ -18,7 +21,7 @@ import kotlinx.coroutines.launch
  * ViewModel for the bridge app.
  * Observes DiagnosticsManager and exposes UI state to Compose screens.
  * Controls BridgeService start/stop.
- * Persists transport config and pairing settings to [BridgePreferences].
+ * Persists transport config, display settings, and pairing settings to [BridgePreferences].
  */
 class BridgeViewModel(
     private val context: Context,
@@ -45,7 +48,7 @@ class BridgeViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, "Bridge stopped")
 
-    // ── Current config (editable in settings, persisted to SharedPreferences) ─
+    // ── Full app config (persisted to SharedPreferences) ──────────────────────
 
     private val _config = MutableStateFlow(
         AppConfig(
@@ -54,8 +57,18 @@ class BridgeViewModel(
                 targetIp = prefs.targetIp,
                 port     = prefs.port,
             ),
-            security = com.inputbridge.core.config.SecurityConfig(
+            security = SecurityConfig(
                 pairingToken = prefs.pairingPin,
+            ),
+            display = DisplayConfig(
+                blackScreenMode    = prefs.blackScreenMode,
+                keepScreenOn       = prefs.keepScreenOn,
+                showLatencyOverlay = prefs.showLatencyOverlay,
+                autoStartOnBoot    = prefs.autoStartOnBoot,
+                screenBrightness   = prefs.screenBrightness,
+            ),
+            mouse = MouseConfig(
+                sensitivity = prefs.bridgeSensitivity,
             ),
         )
     )
@@ -68,10 +81,6 @@ class BridgeViewModel(
 
     // ── Bluetooth HID settings ────────────────────────────────────────────────
 
-    /**
-     * Bluetooth MAC address of the HID host to connect to.
-     * Empty = wait for any host to connect after BT HID registration.
-     */
     private val _btTargetAddress = MutableStateFlow(prefs.btTargetDeviceAddress)
     val btTargetAddress: StateFlow<String> = _btTargetAddress.asStateFlow()
 
@@ -82,57 +91,91 @@ class BridgeViewModel(
 
     // ── Transport settings ────────────────────────────────────────────────────
 
-    /**
-     * Switch the active transport mode and persist the choice.
-     * Takes effect on the next BridgeService start.
-     */
     fun setTransportMode(mode: TransportMode) {
-        _config.value = _config.value.copy(
-            transport = _config.value.transport.copy(mode = mode)
-        )
+        _config.update { it.copy(transport = it.transport.copy(mode = mode)) }
         prefs.transportMode = mode
     }
 
     fun setTargetIp(ip: String) {
-        _config.value = _config.value.copy(
-            transport = _config.value.transport.copy(targetIp = ip)
-        )
+        _config.update { it.copy(transport = it.transport.copy(targetIp = ip)) }
         prefs.targetIp = ip
-        // Changing the target IP invalidates existing pairing
-        if (prefs.isPaired) {
-            prefs.isPaired = false
-        }
+        if (prefs.isPaired) prefs.isPaired = false
     }
 
     fun setPort(port: Int) {
-        _config.value = _config.value.copy(
-            transport = _config.value.transport.copy(port = port)
-        )
+        _config.update { it.copy(transport = it.transport.copy(port = port)) }
         prefs.port = port
     }
 
     // ── Pairing settings ──────────────────────────────────────────────────────
 
-    /**
-     * Set the pairing PIN entered by the user (copied from the receiver's display).
-     * Automatically clears any existing pairing so the next service start
-     * performs a fresh PAIR_REQUEST handshake.
-     */
     fun setPairingPin(pin: String) {
         val trimmed = pin.trim()
-        _config.value = _config.value.copy(
-            security = _config.value.security.copy(pairingToken = trimmed)
-        )
+        _config.update { it.copy(security = it.security.copy(pairingToken = trimmed)) }
         prefs.setPinAndClearPairing(trimmed)
     }
 
-    /**
-     * Clear the stored pairing so the next service start re-pairs.
-     * Does not change the PIN itself.
-     */
     fun clearPairing() {
         prefs.isPaired = false
         DiagnosticsManager.update { copy(isPaired = false) }
+    }
+
+    // ── Mouse settings ────────────────────────────────────────────────────────
+
+    /**
+     * Set bridge-side mouse sensitivity (0.1–5.0).
+     * Applied by UsbInputCapture before forwarding events.
+     */
+    fun setBridgeSensitivity(sensitivity: Float) {
+        val clamped = sensitivity.coerceIn(0.1f, 5.0f)
+        _config.update { it.copy(mouse = it.mouse.copy(sensitivity = clamped)) }
+        prefs.bridgeSensitivity = clamped
+    }
+
+    // ── Display settings ──────────────────────────────────────────────────────
+
+    /**
+     * Toggle black-screen mode.
+     * When true: BridgeScreen shows pitch-black UI and window brightness is set to minimum.
+     * Useful for keeping the phone face-down while bridging.
+     */
+    fun setBlackScreenMode(enabled: Boolean) {
+        _config.update { it.copy(display = it.display.copy(blackScreenMode = enabled)) }
+        prefs.blackScreenMode = enabled
+        DiagnosticsManager.update { copy(blackScreenMode = enabled) }
+    }
+
+    /** Control whether FLAG_KEEP_SCREEN_ON is applied to the activity window. */
+    fun setKeepScreenOn(enabled: Boolean) {
+        _config.update { it.copy(display = it.display.copy(keepScreenOn = enabled)) }
+        prefs.keepScreenOn = enabled
+    }
+
+    /** Show/hide the latency figure on the active bridge screen. */
+    fun setShowLatencyOverlay(enabled: Boolean) {
+        _config.update { it.copy(display = it.display.copy(showLatencyOverlay = enabled)) }
+        prefs.showLatencyOverlay = enabled
+    }
+
+    /**
+     * Set screen brightness override (-1 = system default, 0.0–1.0 = explicit).
+     * Only applied when black-screen mode is off.
+     */
+    fun setScreenBrightness(brightness: Float) {
+        val clamped = if (brightness < 0f) -1f else brightness.coerceIn(0f, 1f)
+        _config.update { it.copy(display = it.display.copy(screenBrightness = clamped)) }
+        prefs.screenBrightness = clamped
+    }
+
+    // ── System settings ───────────────────────────────────────────────────────
+
+    /**
+     * Enable or disable auto-start on device boot.
+     * BootReceiver reads this pref before starting BridgeService.
+     */
+    fun setAutoStartOnBoot(enabled: Boolean) {
+        _config.update { it.copy(display = it.display.copy(autoStartOnBoot = enabled)) }
+        prefs.autoStartOnBoot = enabled
     }
 
     // ── Service control ───────────────────────────────────────────────────────

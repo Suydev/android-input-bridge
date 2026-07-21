@@ -18,6 +18,9 @@ import com.inputbridge.core.config.TransportMode
 /**
  * Welcome screen: first launch experience.
  * Shows mode selection and a permission status summary before starting.
+ *
+ * Phase 7: Only the two implemented transport modes (UDP + BT HID) are shown.
+ * WIFI_DIRECT and TCP are stubs not yet wired; hiding them prevents confusion.
  */
 @Composable
 fun WelcomeScreen(
@@ -27,7 +30,10 @@ fun WelcomeScreen(
     viewModel: BridgeViewModel,
 ) {
     val diagnostics by viewModel.diagnostics.collectAsStateWithLifecycle()
-    val config by viewModel.config.collectAsStateWithLifecycle()
+    val config      by viewModel.config.collectAsStateWithLifecycle()
+
+    // Only show implemented transport modes
+    val availableModes = listOf(TransportMode.UDP, TransportMode.BLUETOOTH_HID)
 
     Column(
         modifier = Modifier
@@ -47,14 +53,14 @@ fun WelcomeScreen(
                 fontFamily = FontFamily.Monospace,
             )
             Text(
-                text = "Redmi 9 → OnePlus Pad Go",
+                text = "Offline Input Bridge",
                 color = BridgeDim,
                 fontSize = 14.sp,
                 fontFamily = FontFamily.Monospace,
             )
         }
 
-        // Mode selector
+        // Transport mode selector
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(
                 text = "Transport Mode",
@@ -62,7 +68,7 @@ fun WelcomeScreen(
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold,
             )
-            TransportMode.entries.forEach { mode ->
+            availableModes.forEach { mode ->
                 val selected = config.transport.mode == mode
                 OutlinedButton(
                     onClick = { viewModel.setTransportMode(mode) },
@@ -71,22 +77,41 @@ fun WelcomeScreen(
                         contentColor = if (selected) BridgePrimary else BridgeDim,
                     ),
                 ) {
-                    Text(
-                        text = mode.name.replace("_", " "),
-                        fontFamily = FontFamily.Monospace,
-                    )
+                    Column {
+                        Text(
+                            text = when (mode) {
+                                TransportMode.UDP            -> "UDP  —  Wi-Fi LAN"
+                                TransportMode.BLUETOOTH_HID  -> "BT HID  —  Bluetooth Keyboard+Mouse"
+                                else                          -> mode.name.replace("_", " ")
+                            },
+                            fontFamily = FontFamily.Monospace,
+                            fontSize   = 13.sp,
+                        )
+                        if (selected) {
+                            Text(
+                                text = when (mode) {
+                                    TransportMode.UDP           -> "Low latency · Requires receiver app on tablet"
+                                    TransportMode.BLUETOOTH_HID -> "Real cursor · Works with any BT device"
+                                    else                         -> ""
+                                },
+                                color      = BridgeDim,
+                                fontSize   = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                        }
+                    }
                 }
             }
         }
 
-        // Status summary
+        // Permission / status summary
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            StatusRow("USB Device", diagnostics.usbDeviceConnected)
-            StatusRow("Network", true) // always available
+            StatusRow("USB Device",           diagnostics.usbDeviceConnected)
+            StatusRow("Network",              true)
             StatusRow("Battery Optimization", diagnostics.batteryOptimizationIgnored)
         }
 
-        // Actions
+        // Action buttons
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(
                 onClick = onContinue,
@@ -117,12 +142,12 @@ private fun StatusRow(label: String, ok: Boolean) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
-            text = if (ok) "✓" else "✗",
+            text  = if (ok) "✓" else "✗",
             color = if (ok) BridgePrimary else BridgeError,
             fontFamily = FontFamily.Monospace,
         )
         Text(
-            text = label,
+            text  = label,
             color = if (ok) BridgeOnSurface else BridgeDim,
             fontSize = 14.sp,
             fontFamily = FontFamily.Monospace,
