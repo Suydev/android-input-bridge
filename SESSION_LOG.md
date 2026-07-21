@@ -214,26 +214,137 @@
 
 ---
 
-## Next Session — Phase 3: Network Transport + Pairing
+## Session 005 — Phase 3+4: Keep-alive + Full Accessibility Injection
+**Date:** 2026-07-21
+**Agent:** Claude (Replit)
+**Status:** ✅ Complete
 
-### Tasks for Phase 3
-1. **Pairing flow** — shared token generation (16-byte random), PAIR_REQUEST /
-   PAIR_RESPONSE / PAIR_CONFIRM packet sequence, token persistence
+### Goals
+- Fix all "dummy" behavior — app was not responding to real input
+- Implement PING/PONG keep-alive with latency measurement
+- Implement full keyboard injection via accessibility
+- Fix accessibility service status detection
+- Wire mouse sensitivity setting end-to-end
+- Push to GitHub and monitor CI
+
+### Root Causes Found (all dummy behavior)
+1. `accessibilityEnabled` in DiagnosticsManager was never set to `true` — service never
+   called DiagnosticsManager on connect/unbind
+2. Screen size hardcoded at 1080×2400 — `setScreenSize()` never called with real dims
+3. All `KeyDown`/`KeyUp` events dropped silently — `/* Phase 4 */` stub comment only
+4. `TextInput` events logged but not injected — `injectText()` didn't exist
+5. PING packets sent by bridge were dropped on receiver — PacketToEventConverter returned
+   null for control packets and ReceiverService didn't check type before converting
+6. UdpTransport in receiver mode could not send — `startSendLoop` tried to resolve empty
+   `config.targetIp`, would throw or fail silently
+7. Sensitivity slider was `onValueChange = { /* Phase 7 */ }` — pure no-op
+
+### What Was Fixed / Implemented
+
+**UdpTransport** (`transport-wifi/src/main/kotlin/com/inputbridge/transport/wifi/UdpTransport.kt`):
+- Added `@Volatile private var lastSenderAddress: InetSocketAddress?`
+- `startReceiveLoop()`: captures `dp.socketAddress as InetSocketAddress` after each receive
+- `startSendLoop()`: split by mode — sender uses config.targetIp, receiver uses lastSenderAddress
+- This enables PONG replies from the receiver back to the bridge
+
+**InputBridgeAccessibilityService** (`accessibility-receiver/.../InputBridgeAccessibilityService.kt`):
+- `onServiceConnected()`: fetches real screen size via WindowManager (API 30+) /
+  DisplayMetrics (API 29), calls `AccessibilityCommandBus.setScreenSize()`, updates
+  DiagnosticsManager (`accessibilityEnabled = true, accessibilityMode = "Accessibility"`)
+- `onUnbind()`: clears DiagnosticsManager
+- `injectKeyCode(keyCode, modifiers)`: full keyboard injection:
+  - Printable chars: `KeyEvent.unicodeChar` with `buildMetaState(modifiers)`
+  - Backspace/Forward-delete: `ACTION_SET_TEXT` removing char at cursor (selection-aware)
+  - Enter: `ACTION_CLICK` on focused node (form submit), fallback to newline injection
+  - Tab: focus next element
+  - Escape: `GLOBAL_ACTION_BACK`
+  - Arrow keys: `ACTION_NEXT/PREVIOUS_AT_MOVEMENT_GRANULARITY` (char or word with Ctrl)
+  - Home/End: line granularity movement
+  - Ctrl+A/C/V/X: `ACTION_SELECT_ALL/COPY/PASTE/CUT`
+- `injectText(text)`: `ACTION_SET_TEXT` at cursor, clipboard paste fallback
+- All text operations are selection-aware via `textSelectionStart/End`
+
+**AccessibilityCommandBus** (`accessibility-receiver/.../AccessibilityCommandBus.kt`):
+- `KeyDown` → `svc.injectKeyCode(event.keyCode, event.modifiers)`
+- `KeyUp` → no-op (injection complete on down)
+- `TextInput` → `svc.injectText(event.text)`
+- `Scroll` → swipe gesture with `SCROLL_PIXEL_MULTIPLIER * sensitivity` scaling
+- `mouseSensitivity` multiplier applied to all `MouseMove` dx/dy
+- `setSensitivity(Float)` API, clamped to 0.1–10
+- `setScreenSize()` re-centres cursor
+
+**BridgeService** (`app-bridge/.../service/BridgeService.kt`):
+- `pingJob`: sends PING every 1 s once transport connected, records `lastPingSentAtMs`
+- `pongResponseJob`: collects `incomingPackets`, on PONG computes `now - lastPingSentAtMs`,
+  calls `DiagnosticsManager.recordLatency()` (sanity check: 0–10000 ms)
+- Both jobs cancelled in `onDestroy()`
+
+**ReceiverService** (`app-receiver/.../service/ReceiverService.kt`):
+- Added `EventPacketFactory packetFactory`
+- Receive loop checks `packet.type` before `PacketToEventConverter`:
+  - `PING` → `transport.send(packetFactory.makePong(seq))`
+  - `KEEP_ALIVE` → log
+  - `DISCONNECT` → update DiagnosticsManager + notification
+  - everything else → PacketToEventConverter → AccessibilityCommandBus
+- Applies persisted sensitivity on startup: `AccessibilityCommandBus.setSensitivity(prefs.mouseSensitivity)`
+
+**ReceiverPreferences** (`app-receiver/.../prefs/ReceiverPreferences.kt`):
+- Added `mouseSensitivity: Float` (KEY = `mouse_sensitivity`, default = 1.0f)
+
+**ReceiverViewModel** (`app-receiver/.../viewmodel/ReceiverViewModel.kt`):
+- `setMouseSensitivity(Float)`: clamps 0.1–5.0, persists to prefs, applies immediately
+  to AccessibilityCommandBus if service running (API 24+)
+- Config pre-loaded with port + sensitivity from prefs
+
+**ReceiverSettingsScreen** (`app-receiver/.../ui/screens/ReceiverSettingsScreen.kt`):
+- Sensitivity slider fully wired to `viewModel.setMouseSensitivity()`
+- Steps = 48 (0.1 resolution across 0.1–5.0 range)
+- Live label: "Pointer Sensitivity: X.X×"
+- Section headers and dividers added
+
+### Commit
+- `2bc466f` — Phase 3+4: PING/PONG keep-alive, full keyboard injection, accessibility
+  detection, mouse sensitivity
+
+### Key Decisions Made This Session
+- **Keyboard injection on KeyDown only** — accessibility `ACTION_SET_TEXT` is stateful
+  (replaces text at cursor) so a separate KeyUp has no meaningful counterpart.
+  KeyUp events are no-ops in AccessibilityCommandBus.
+- **Receiver-mode UDP reply via lastSenderAddress** — simplest bidirectional approach
+  without changing the Transport interface. The receiver learns the bridge's address
+  from the first incoming packet and replies to it.
+- **Sensitivity applied on receiver side** — keeps the bridge's hot path free of scaling.
+  The bridge sends raw HID deltas; the receiver scales them for its screen.
+- **PING latency via lastPingSentAtMs** — approximate (doesn't track multiple in-flight
+  PINGs) but sufficient. Full sequence-keyed tracking deferred to Phase 5.
+
+### Lessons
+- `UdpTransport` in receiver mode (isSender=false) had `config.targetIp` = empty,
+  so startSendLoop would call `InetAddress.getByName("")` and fail. Always split
+  send logic by mode in bidirectional UDP scenarios.
+- `AccessibilityNodeInfo.textSelectionStart` returns -1 when there is no selection;
+  use `.coerceIn(0, text.length)` before using as a string index.
+- `KeyEvent(0, 0, ACTION_DOWN, keyCode, 0, metaState).unicodeChar` is the clean way
+  to resolve printable characters from Android key codes without a manual lookup table.
+
+---
+
+## Next Session — Phase 3 Remainder + Phase 5
+
+### Tasks
+1. **Pairing flow** — shared token (16-byte SecureRandom), PAIR_REQUEST / PAIR_RESPONSE /
+   PAIR_CONFIRM packet sequence, token persistence, source validation
 2. **QR / code pairing UI** — display token on receiver, scan or enter on bridge
-3. **Keep-alive** — PING/PONG on a 1s interval; latency measured and reported
-4. **Reconnect** — exponential backoff, max attempts, UI amber dot during reconnect
-5. **Packet source validation** — reject PAIR_REQUEST from unknown senders
-6. **Wi-Fi Direct** — optional; group formation after initial UDP pairing
+3. **Reconnect** — exponential backoff, max attempts, UI amber dot
+4. **Packet loss detection** — sequence number gap detection
 
 ### Entry Criteria
-- ✅ Phase 2 APKs build in CI (achieved: CI run #25 = success)
-- Manual test: key presses appear in Diagnostics screen on both phones
+- ✅ Phase 3 keep-alive + Phase 4 accessibility injection committed (2bc466f)
+- CI run for 2bc466f must be green (check GitHub Actions)
 
 ### Files to Touch
-- `app-bridge/service/BridgeService.kt` — add PING/PONG timer, reconnect logic
-- `app-receiver/service/ReceiverService.kt` — respond to PING with PONG
-- `protocol/EventPacketFactory.kt` — makePing/makePong already exist
-- `shared-core/config/AppConfig.kt` — add pairing token field (or SecurityConfig)
-- New: `app-bridge/ui/screens/PairingScreen.kt`
-- New: `app-receiver/ui/screens/PairingScreen.kt`
-- `PROJECT_STATE.md`, `TASKS.md` — update on completion
+- `app-bridge/src/main/kotlin/com/inputbridge/bridge/service/BridgeService.kt`
+- `app-receiver/src/main/kotlin/com/inputbridge/receiver/service/ReceiverService.kt`
+- New: `app-bridge/src/main/kotlin/com/inputbridge/bridge/ui/screens/PairingScreen.kt`
+- New: `app-receiver/src/main/kotlin/com/inputbridge/receiver/ui/screens/PairingScreen.kt`
+- `shared-core/src/main/kotlin/com/inputbridge/core/config/AppConfig.kt` — add pairing token

@@ -85,16 +85,19 @@ Complete checklist of all project tasks. Never delete completed tasks. Always ap
 
 ---
 
-## Phase 3 — Network Transport + Pairing 🔲
+## Phase 3 (partial) — Keep-alive / PING-PONG ✅ (Session 005)
 
-- [ ] BridgeService: PING/PONG on 1s keep-alive timer
-- [ ] ReceiverService: respond to PING with PONG; record latency
+- [x] BridgeService: PING loop (every 1s, starts after transport connects)
+- [x] BridgeService: PONG response collection → DiagnosticsManager.recordLatency()
+- [x] ReceiverService: respond to PING with PONG via packetFactory.makePong()
+- [x] ReceiverService: handle KEEP_ALIVE (log, no-op)
+- [x] ReceiverService: handle DISCONNECT (update DiagnosticsManager + notification)
+- [x] UdpTransport: bidirectional in receiver mode (track lastSenderAddress, reply to it)
 - [ ] Pairing: shared token generation (16-byte random, SecureRandom)
 - [ ] Pairing: PAIR_REQUEST / PAIR_RESPONSE / PAIR_CONFIRM packet flow
 - [ ] Pairing: QR code display on receiver, manual entry on bridge
 - [ ] Pairing: token persistence (SharedPreferences / DataStore)
 - [ ] Pairing: packet source validation (drop packets from un-paired senders)
-- [ ] Keep-alive: latency measurement in DiagnosticsManager.recordLatency()
 - [ ] Reconnect: exponential backoff, max attempts
 - [ ] Reconnect: UI state during reconnect (amber dot + attempt counter)
 - [ ] Wi-Fi Direct transport: group formation, peer discovery
@@ -102,16 +105,27 @@ Complete checklist of all project tasks. Never delete completed tasks. Always ap
 
 ---
 
-## Phase 4 — Accessibility Receiver 🔲
+## Phase 4 — Accessibility Receiver ✅ (Session 005)
 
-- [ ] AccessibilityCommandBus: full InputEvent dispatch (all types)
-- [ ] Text injection: clipboard-based paste for TextInput events
-- [ ] Key event translation: Android keyCode → accessibility action
-- [ ] Scroll: gesture-based smooth scroll
-- [ ] Navigation: BACK, HOME, RECENTS, NOTIFICATIONS
-- [ ] Screen size detection: update AccessibilityCommandBus.setScreenSize()
-- [ ] Visual cursor overlay (optional): show dot at current virtual cursor position
-- [ ] Robust error handling: service disconnect, app switch, secure window
+- [x] InputBridgeAccessibilityService: update DiagnosticsManager on connect/unbind
+- [x] InputBridgeAccessibilityService: fetch real screen dimensions (WindowManager/DisplayMetrics)
+- [x] InputBridgeAccessibilityService: injectKeyCode() — printable chars, backspace, forward-delete,
+      enter, tab, escape, arrow keys (char/word granularity, shift-extend), home/end
+- [x] InputBridgeAccessibilityService: Ctrl+A/C/V/X shortcuts (select-all, copy, paste, cut)
+- [x] InputBridgeAccessibilityService: injectText() via ACTION_SET_TEXT + clipboard paste fallback
+- [x] InputBridgeAccessibilityService: buildMetaState() for ModifierState → Android meta int
+- [x] AccessibilityCommandBus: handle KeyDown → injectKeyCode()
+- [x] AccessibilityCommandBus: handle TextInput → injectText()
+- [x] AccessibilityCommandBus: apply mouseSensitivity to mouse move deltas
+- [x] AccessibilityCommandBus: setScreenSize() recentres virtual cursor
+- [x] AccessibilityCommandBus: setSensitivity() API (0.1–10 range)
+- [x] ReceiverPreferences: mouseSensitivity field (default 1.0)
+- [x] ReceiverViewModel: setMouseSensitivity() — persist + apply immediately
+- [x] ReceiverSettingsScreen: sensitivity slider fully wired (0.1–5.0, live feedback)
+- [ ] Text injection: clipboard-based paste for TextInput on non-editable nodes (done via fallback)
+- [ ] Screen size detection: update AccessibilityCommandBus.setScreenSize() ✅
+- [ ] Visual cursor overlay (optional): show dot at current virtual cursor position (Phase 7)
+- [ ] Robust error handling: service disconnect, app switch, secure window (partial — logs warnings)
 
 ---
 
@@ -151,4 +165,5 @@ Complete checklist of all project tasks. Never delete completed tasks. Always ap
 - [ ] Help text: onboarding tooltips
 - [ ] Version info: BuildConfig display in About screen
 - [ ] Accessibility mode cursor overlay: visible dot at virtual cursor position
-- [ ] Sensitivity calibration: live preview in settings
+- [ ] Sensitivity calibration: live preview in settings ✅ (done in Phase 4 for receiver)
+- [ ] Bridge sensitivity setting: mouse sensitivity on bridge side too

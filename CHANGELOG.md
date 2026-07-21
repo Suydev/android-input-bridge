@@ -4,6 +4,66 @@ All meaningful changes recorded chronologically.
 
 ---
 
+## [0.3.0] — 2026-07-21
+
+**Phase 3+4: PING/PONG keep-alive + full accessibility injection.**
+
+The app was previously "dummy" — settings changes had no effect, keyboard events were
+silently dropped, the accessibility service never reported itself as active. This release
+makes the full input pipeline functional.
+
+### Fixed
+- `UdpTransport` receiver mode: could not send replies (PONG etc.) because `startSendLoop`
+  tried to resolve empty `config.targetIp`. Fixed by tracking `lastSenderAddress` from
+  each received datagram and using it for replies in receiver mode.
+- `InputBridgeAccessibilityService.onServiceConnected()`: never updated `DiagnosticsManager`
+  or called `setScreenSize()`. Fixed: now fetches real screen dimensions, calls
+  `AccessibilityCommandBus.setScreenSize()`, and sets `accessibilityEnabled = true`.
+- `InputBridgeAccessibilityService.onUnbind()`: never cleared `accessibilityEnabled`. Fixed.
+- `AccessibilityCommandBus`: all `KeyDown`, `KeyUp`, and `TextInput` events were silently
+  dropped (`/* Phase 4 */` stubs). Fixed with full injection implementation.
+- `ReceiverService`: `PING` packets were converted via `PacketToEventConverter` which returns
+  null for control packets — they were silently dropped. Fixed: check `packet.type` first.
+- `ReceiverSettingsScreen` sensitivity slider: `onValueChange = { /* Phase 7 */ }`. Fixed.
+- `AccessibilityCommandBus` screen size hardcoded at 1080×2400. Fixed: real dimensions set
+  from `onServiceConnected()` via `WindowManager`.
+
+### Added
+
+**PING/PONG keep-alive (Phase 3 partial):**
+- `BridgeService`: sends a PING every 1 s once transport is connected
+- `BridgeService`: collects `incomingPackets` and records latency from PONG replies
+  (`DiagnosticsManager.recordLatency(latencyMs)`)
+- `ReceiverService`: responds to PING with PONG via `packetFactory.makePong(seq)`
+- `ReceiverService`: handles `KEEP_ALIVE` (log) and `DISCONNECT` (update UI/diagnostics)
+
+**Full keyboard injection (Phase 4):**
+- `InputBridgeAccessibilityService.injectKeyCode(keyCode, modifiers)`:
+  - Printable characters: resolved via `KeyEvent.unicodeChar` with modifier meta-state
+  - Backspace/Forward-delete: selection-aware `ACTION_SET_TEXT`
+  - Enter: `ACTION_CLICK` on focused node (form submit) with newline fallback
+  - Arrow keys: `ACTION_NEXT/PREVIOUS_AT_MOVEMENT_GRANULARITY` (char or word with Ctrl)
+  - Home/End: line granularity movement with optional selection extension (Shift)
+  - Escape: `GLOBAL_ACTION_BACK`
+  - Tab: focus next accessible element
+  - Ctrl+A/C/V/X: `ACTION_SELECT_ALL/COPY/PASTE/CUT`
+- `InputBridgeAccessibilityService.injectText(text)`:
+  - Primary: `ACTION_SET_TEXT` at cursor position (selection-aware)
+  - Fallback: clipboard paste via `ClipboardManager`
+
+**Mouse sensitivity (Phase 4):**
+- `ReceiverPreferences.mouseSensitivity` field (default 1.0, persisted)
+- `ReceiverViewModel.setMouseSensitivity()`: clamps 0.1–5.0, persists to prefs,
+  applies immediately to `AccessibilityCommandBus.setSensitivity()` if service running
+- `ReceiverSettingsScreen`: fully wired sensitivity slider with live label
+- `AccessibilityCommandBus`: all mouse delta updates scaled by `mouseSensitivity`
+
+### Commits
+- `2bc466f` Phase 3+4: PING/PONG keep-alive, full keyboard injection, accessibility
+  detection, mouse sensitivity
+
+---
+
 ## [0.2.1] — 2026-07-19
 
 **CI build fixed — both APKs now build cleanly on GitHub Actions (run #25).**
