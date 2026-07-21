@@ -148,7 +148,7 @@ See DECISIONS.md for full records. Short summary:
 
 ## Current milestone
 
-**Phase 1** — Project scaffold complete. All modules exist with correct build config. UI shells done for both apps. Protocol serialization + unit tests done.
+**Phase 5 (partial)** — Pairing handshake, source validation, exponential-backoff reconnect, and packet-loss detection are implemented. Phases 1–4 complete, Phase 5 ~60% done.
 
 ## Current TODO
 
@@ -156,20 +156,34 @@ See TASKS.md
 
 ## Current blockers
 
-None for Phase 1.
+None — CI should be green after BUG-010 fix (added :diagnostics to accessibility-receiver).
 
 ## Future roadmap
 
 See ROADMAP.md
 
-## Expected behavior (Phase 1)
+## Expected behavior (current)
 
-Both APKs build successfully. Apps launch, show UI, can navigate all screens. Service can be started/stopped. Diagnostics screen shows live data. No actual USB capture or network transmission yet.
+Both APKs build successfully. Bridge app:
+- Connects to receiver via UDP
+- Performs PAIR_REQUEST / PAIR_RESPONSE / PAIR_CONFIRM handshake using a 6-digit PIN
+- Sends PING every 1 s; computes round-trip latency on PONG
+- Reads USB HID keyboard+mouse events and forwards them as binary packets
+- Auto-reconnects on PONG timeout (exponential backoff, up to 10 attempts)
+
+Receiver app:
+- Displays session PIN on Connection screen
+- Validates incoming PAIR_REQUEST, sends PAIR_RESPONSE, records bridge IP
+- Drops packets from unknown IPs after pairing
+- Injects keyboard/mouse/scroll events via AccessibilityService
+- Detects sequence-number gaps for packet-loss estimation
 
 ## Current testing status
 
 Unit tests exist for protocol serialization and input event models. All tests pass locally.
+Manual hardware test (Portronics Key2 Combo) not yet performed.
 
 ## Recommended next implementation step
 
-**Phase 2**: Wire `UsbInputCapture` into `BridgeService`. Connect the `UsbManager` broadcast receiver for device attach/detach. Test with real hardware.
+**Phase 5 remainder**: rolling latency average display, latency trace timestamps across pipeline stages.
+**Phase 4 remainder**: robust error handling for accessibility service disconnect and secure windows.

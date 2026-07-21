@@ -9,6 +9,7 @@ import com.inputbridge.core.config.TransportConfig
 import com.inputbridge.core.logging.BridgeLogger
 import com.inputbridge.diagnostics.DiagnosticsManager
 import com.inputbridge.protocol.EventPacketFactory
+import com.inputbridge.protocol.PacketSerializer
 import com.inputbridge.protocol.PacketToEventConverter
 import com.inputbridge.protocol.PacketType
 import com.inputbridge.receiver.prefs.ReceiverPreferences
@@ -16,6 +17,7 @@ import com.inputbridge.receiver.ui.MainActivity
 import com.inputbridge.transport.wifi.UdpTransport
 import kotlinx.coroutines.*
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 private const val TAG = "ReceiverService"
 private const val NOTIFICATION_ID = 2001
@@ -27,18 +29,27 @@ private const val COUNTER_FLUSH_INTERVAL_MS = 1_000L
  *
  * Lifecycle:
  * 1. startForegroundService() → onCreate → onStartCommand → startListening()
- *    - Binds UdpTransport to the configured port (default 54321)
+ *    - Ensures a session PIN exists in prefs (generates one if missing)
  *    - Applies persisted mouse sensitivity to AccessibilityCommandBus
+ *    - Binds UdpTransport to the configured port
  *    - Collects incoming Packet objects from UdpTransport.incomingPackets
- *    - Control packets (PING) are handled immediately with a PONG reply
- *    - Input packets are converted via PacketToEventConverter → AccessibilityCommandBus
- * 2. ACTION_STOP → stopSelf() → onDestroy → disconnect transport + release WakeLock
  *
- * Idempotency: startListening() is guarded by [listenerStarted] so repeated
- * onStartCommand calls are no-ops.
+ * Packet handling:
+ *    - PAIR_REQUEST: validate PIN → send PAIR_RESPONSE → record paired bridge IP
+ *    - PAIR_CONFIRM: log (pairing complete on both sides)
+ *    - PING: respond with PONG
+ *    - KEEP_ALIVE: log, no-op
+ *    - DISCONNECT: clear pairing, update status
+ *    - Input events: source validation → PacketToEventConverter → AccessibilityCommandBus
  *
- * Teardown: individual jobs are cancelled first, then the socket is closed in
- * a NonCancellable context before serviceScope is cancelled.
+ * Source validation:
+ *    After pairing, input packets from any IP other than the paired bridge are dropped.
+ *    PAIR_REQUEST packets are always accepted (to allow re-pairing after IP change).
+ *
+ * Packet loss detection:
+ *    Sequence number gaps in input event packets are counted as dropped packets.
+ *
+ * Idempotency: guarded by [listenerStarted] AtomicBoolean.
  */
 class ReceiverService : Service() {
 
@@ -50,15 +61,25 @@ class ReceiverService : Service() {
     private var receiveJob: Job? = null
     private var counterFlushJob: Job? = null
 
-    /** Packet factory used to generate PONG replies. */
     private val packetFactory = EventPacketFactory()
 
     /**
      * Guards against duplicate listener starts from repeated onStartCommand calls.
-     * Set atomically via compareAndSet in onStartCommand BEFORE launching the coroutine,
-     * so concurrent rapid starts cannot both pass the check.
      */
     private val listenerStarted = AtomicBoolean(false)
+
+    // ── Source validation ─────────────────────────────────────────────────────
+
+    /** IP of the bridge device that completed pairing. Empty = not paired. */
+    @Volatile private var pairedBridgeIp: String = ""
+
+    // ── Packet loss detection ─────────────────────────────────────────────────
+
+    /** Last input-event sequence number seen. -1 = no packets yet. */
+    private var lastInputSeqNo = -1
+
+    /** Running count of estimated dropped packets (sequence gaps in input events). */
+    private val droppedSequencePackets = AtomicLong(0)
 
     // ── Service lifecycle ─────────────────────────────────────────────────────
 
@@ -78,8 +99,6 @@ class ReceiverService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        // Atomic guard: compareAndSet ensures only one caller ever launches startListening(),
-        // even under rapid concurrent onStartCommand calls (e.g. BootReceiver + user tap).
         if (!listenerStarted.compareAndSet(false, true)) {
             BridgeLogger.d(TAG, "onStartCommand: listener already starting/running — ignoring")
             return START_STICKY
@@ -91,14 +110,11 @@ class ReceiverService : Service() {
     override fun onDestroy() {
         super.onDestroy()
 
-        // 1. Cancel tracked jobs to stop new work immediately
+        // 1. Cancel tracked jobs
         receiveJob?.cancel()
         counterFlushJob?.cancel()
 
-        // 2. Disconnect the UDP socket in NonCancellable context so the port is
-        //    released even though serviceScope will be cancelled next.
-        //    runBlocking is acceptable: onDestroy is on the main thread,
-        //    disconnect() is fast (cancel receive loop + close DatagramSocket).
+        // 2. Release UDP socket in NonCancellable context
         runBlocking {
             withContext(NonCancellable + Dispatchers.IO) {
                 runCatching { udpTransport?.disconnect() }
@@ -106,11 +122,13 @@ class ReceiverService : Service() {
         }
         udpTransport = null
 
-        // 3. Cancel the scope after resources are freed
+        // 3. Cancel scope
         serviceScope.cancel()
         listenerStarted.set(false)
         releaseWakeLock()
-        DiagnosticsManager.update { copy(receiverServiceRunning = false, transportConnected = false) }
+        DiagnosticsManager.update {
+            copy(receiverServiceRunning = false, transportConnected = false, isReconnecting = false)
+        }
         BridgeLogger.i(TAG, "ReceiverService destroyed")
     }
 
@@ -119,9 +137,25 @@ class ReceiverService : Service() {
     // ── Receive pipeline ──────────────────────────────────────────────────────
 
     private suspend fun startListening() {
-        // Apply persisted sensitivity to the command bus before receiving any events.
+        // Apply persisted sensitivity before receiving any events.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             AccessibilityCommandBus.setSensitivity(prefs.mouseSensitivity)
+        }
+
+        // Ensure a session PIN exists; generate one if this is first run.
+        if (prefs.sessionPin.isEmpty()) {
+            prefs.generateNewPin()
+        }
+        val sessionPin = prefs.sessionPin
+
+        // Load existing pairing state
+        pairedBridgeIp = prefs.pairedBridgeIp
+        DiagnosticsManager.update {
+            copy(
+                sessionPin = sessionPin,
+                isPaired = prefs.isPaired,
+                pairedPeerIp = pairedBridgeIp,
+            )
         }
 
         val port = prefs.port
@@ -133,54 +167,107 @@ class ReceiverService : Service() {
             BridgeLogger.e(TAG, "Failed to bind UDP socket on port $port")
             updateNotification("UDP bind failed on port $port")
             DiagnosticsManager.update { copy(lastError = "UDP bind failed on port $port") }
-            listenerStarted.set(false)  // allow retry on next start command
+            listenerStarted.set(false)
             return
         }
 
-        BridgeLogger.i(TAG, "Listening for packets on UDP port $port")
-        updateNotification("Listening on UDP :$port")
+        BridgeLogger.i(TAG, "Listening for packets on UDP port $port (PIN=$sessionPin)")
+        updateNotification("Listening on UDP :$port — PIN: $sessionPin")
         DiagnosticsManager.update { copy(transportConnected = true) }
 
-        // Periodic diagnostics counter flush (1 s interval)
+        // Periodic diagnostics flush (includes sequence drop count)
         counterFlushJob = serviceScope.launch {
             while (isActive) {
                 delay(COUNTER_FLUSH_INTERVAL_MS)
                 DiagnosticsManager.flushCounters()
+                val dropped = droppedSequencePackets.get()
+                if (dropped > 0L) {
+                    DiagnosticsManager.update { copy(packetsDroppedSequence = dropped) }
+                }
             }
         }
 
-        // Hot path: Packet → control handling / InputEvent → AccessibilityCommandBus
+        // Hot receive loop
         receiveJob = serviceScope.launch {
             transport.incomingPackets.collect { packet ->
                 DiagnosticsManager.onPacketReceived()
 
+                // ── Source validation ─────────────────────────────────────────
+                // Accept PAIR_REQUEST from any IP (allows re-pairing after bridge restarts).
+                // All other packet types are dropped if they come from an unknown sender.
+                val senderIp = transport.getLastSenderIp()
+                if (pairedBridgeIp.isNotEmpty() &&
+                    senderIp != pairedBridgeIp &&
+                    packet.type != PacketType.PAIR_REQUEST) {
+                    BridgeLogger.d(
+                        TAG,
+                        "Dropping ${packet.type} from unknown sender $senderIp (paired=$pairedBridgeIp)"
+                    )
+                    return@collect
+                }
+
+                // ── Control packet handling ───────────────────────────────────
                 when (packet.type) {
-                    // ── Control packets handled directly ──────────────────────
+
+                    PacketType.PAIR_REQUEST -> {
+                        val receivedPin = PacketSerializer.parsePairRequestPin(packet.payload)
+                        val accepted = receivedPin == prefs.sessionPin
+                        BridgeLogger.i(TAG, "PAIR_REQUEST from $senderIp — accepted=$accepted")
+                        transport.send(packetFactory.makePairResponse(accepted))
+                        if (accepted && senderIp != null) {
+                            pairedBridgeIp = senderIp
+                            prefs.pairedBridgeIp = senderIp
+                            prefs.isPaired = true
+                            DiagnosticsManager.update {
+                                copy(isPaired = true, pairedPeerIp = senderIp)
+                            }
+                            updateNotification("Paired with bridge ($senderIp)")
+                        } else {
+                            BridgeLogger.w(TAG, "Pairing rejected — wrong PIN")
+                        }
+                    }
+
+                    PacketType.PAIR_CONFIRM -> {
+                        BridgeLogger.i(TAG, "PAIR_CONFIRM received — pairing complete on both sides")
+                    }
+
                     PacketType.PING -> {
-                        // Respond with a PONG so the bridge can measure round-trip latency.
                         val pong = packetFactory.makePong(packet.sequenceNo)
                         transport.send(pong)
-                        BridgeLogger.d(TAG, "PING received → PONG sent (seq=${packet.sequenceNo})")
+                        BridgeLogger.d(TAG, "PING → PONG (seq=${packet.sequenceNo})")
                     }
 
                     PacketType.KEEP_ALIVE -> {
-                        // Keep-alive heartbeat — no action needed, receipt is sufficient.
                         BridgeLogger.d(TAG, "KEEP_ALIVE received")
                     }
 
                     PacketType.DISCONNECT -> {
-                        BridgeLogger.i(TAG, "DISCONNECT received from bridge")
-                        DiagnosticsManager.update { copy(transportConnected = false) }
-                        updateNotification("Bridge disconnected")
+                        BridgeLogger.i(TAG, "DISCONNECT received from bridge — clearing pairing")
+                        pairedBridgeIp = ""
+                        prefs.pairedBridgeIp = ""
+                        prefs.isPaired = false
+                        DiagnosticsManager.update {
+                            copy(transportConnected = false, isPaired = false, pairedPeerIp = "")
+                        }
+                        updateNotification("Bridge disconnected — PIN: $sessionPin")
                     }
 
-                    // ── Input event packets forwarded to accessibility ─────────
+                    // ── Input event packets ───────────────────────────────────
                     else -> {
+                        // Packet loss detection via sequence-number gaps
+                        val seq = packet.sequenceNo
+                        if (lastInputSeqNo >= 0 && seq > lastInputSeqNo + 1) {
+                            val gap = (seq - lastInputSeqNo - 1).toLong()
+                            droppedSequencePackets.addAndGet(gap)
+                            BridgeLogger.d(TAG, "Seq gap: expected ${lastInputSeqNo + 1}, got $seq (~$gap dropped)")
+                        }
+                        lastInputSeqNo = seq
+
                         val event = PacketToEventConverter.toInputEvent(packet) ?: return@collect
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                             AccessibilityCommandBus.post(event)
                         } else {
-                            BridgeLogger.w(TAG, "Android N+ required for injection — skipping")
+                            BridgeLogger.w(TAG, "Android N+ required for accessibility injection — skipping")
                         }
                     }
                 }

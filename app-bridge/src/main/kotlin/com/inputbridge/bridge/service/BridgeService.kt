@@ -12,6 +12,7 @@ import com.inputbridge.core.logging.BridgeLogger
 import com.inputbridge.diagnostics.DiagnosticsManager
 import com.inputbridge.input.UsbInputCapture
 import com.inputbridge.protocol.EventPacketFactory
+import com.inputbridge.protocol.PacketSerializer
 import com.inputbridge.protocol.PacketType
 import com.inputbridge.transport.wifi.UdpTransport
 import kotlinx.coroutines.*
@@ -21,7 +22,11 @@ private const val TAG = "BridgeService"
 private const val NOTIFICATION_ID = 1001
 private const val CHANNEL_ID = "bridge_service"
 private const val COUNTER_FLUSH_INTERVAL_MS = 1_000L
-private const val PING_INTERVAL_MS = 1_000L  // send a PING every second for latency tracking
+private const val PING_INTERVAL_MS = 1_000L
+private const val PONG_TIMEOUT_MS = 10_000L   // no PONG for this long → reconnect
+private const val WATCHDOG_CHECK_MS = 3_000L
+private const val WATCHDOG_GRACE_MS = 15_000L  // wait before first watchdog check
+private const val PAIR_TIMEOUT_MS = 10_000L    // wait this long for PAIR_RESPONSE
 
 /**
  * Foreground service that owns the USB input capture and UDP transport pipeline.
@@ -29,22 +34,20 @@ private const val PING_INTERVAL_MS = 1_000L  // send a PING every second for lat
  * Lifecycle:
  * 1. startForegroundService() → onCreate → onStartCommand → startPipeline()
  *    - Connects UdpTransport (sender mode)
+ *    - Registers incoming-packet collector (handles PAIR_RESPONSE + PONG)
+ *    - Performs pairing handshake if PIN is configured and not yet paired
  *    - Starts PING/PONG keep-alive loop (every 1 s)
- *    - Collects PONG replies to measure round-trip latency
+ *    - Starts watchdog (reconnects automatically on PONG timeout)
  *    - Registers dynamic BroadcastReceiver for USB events
  *    - Checks for pre-attached USB devices
  * 2. USB device attached → request permission (if needed) → startCapture()
  *    - UsbInputCapture emits InputEvents on IO thread
  *    - Events flow through EventPacketFactory → UdpTransport.send()
- *    - DiagnosticsManager counters updated per packet
- * 3. USB device detached → stopCapture()
+ * 3. Watchdog detects PONG timeout → triggerReconnect() → exponential backoff
  * 4. ACTION_STOP intent → stopSelf() → onDestroy → full cleanup
  *
  * Idempotency: startPipeline() is guarded by [pipelineStarted] so repeated
  * onStartCommand calls (e.g. BootReceiver firing while already running) are no-ops.
- *
- * Teardown: individual jobs are cancelled first, then resources are cleaned up
- * in a NonCancellable context before serviceScope is cancelled.
  */
 class BridgeService : Service() {
 
@@ -61,16 +64,28 @@ class BridgeService : Service() {
     private var counterFlushJob: Job? = null
     private var pingJob: Job? = null
     private var pongResponseJob: Job? = null
+    private var watchdogJob: Job? = null
 
-    /** Timestamp when the last PING was sent. Used to compute round-trip latency on PONG. */
+    /** Timestamp when the last PING was sent. */
     @Volatile private var lastPingSentAtMs = 0L
+    /** Timestamp when the last PONG was received. 0 = none received yet. */
+    @Volatile private var lastPongReceivedMs = 0L
+
+    /**
+     * Completes when a PAIR_RESPONSE arrives. Reset to a new instance before
+     * each pairing attempt (on initial connect and on reconnect).
+     */
+    private var pairResponseDeferred = CompletableDeferred<Boolean>()
 
     /**
      * Guards against duplicate pipeline starts from repeated onStartCommand calls.
-     * Set atomically via compareAndSet in onStartCommand BEFORE launching the coroutine,
-     * so concurrent rapid rapid starts cannot both pass the check.
      */
     private val pipelineStarted = AtomicBoolean(false)
+
+    /**
+     * Guards against concurrent reconnect loops. Only one reconnect may run at a time.
+     */
+    private val reconnectInProgress = AtomicBoolean(false)
 
     // ── USB BroadcastReceiver ─────────────────────────────────────────────────
 
@@ -123,8 +138,6 @@ class BridgeService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        // Atomic guard: compareAndSet ensures only one caller ever launches startPipeline(),
-        // even under rapid concurrent onStartCommand calls (e.g. BootReceiver + user tap).
         if (!pipelineStarted.compareAndSet(false, true)) {
             BridgeLogger.d(TAG, "onStartCommand: pipeline already starting/running — ignoring")
             return START_STICKY
@@ -137,16 +150,14 @@ class BridgeService : Service() {
         super.onDestroy()
         unregisterUsbReceiver()
 
-        // 1. Cancel tracked jobs to stop new work immediately
+        // 1. Cancel tracked jobs
         counterFlushJob?.cancel()
         captureJob?.cancel()
         pingJob?.cancel()
         pongResponseJob?.cancel()
+        watchdogJob?.cancel()
 
-        // 2. Clean up resources (USB + socket) in NonCancellable context so teardown
-        //    completes even though serviceScope will be cancelled next.
-        //    runBlocking is acceptable here: onDestroy is called on the main thread,
-        //    these operations are fast (cancel internal jobs + close file/socket).
+        // 2. Release resources in NonCancellable context
         runBlocking {
             withContext(NonCancellable + Dispatchers.IO) {
                 runCatching { usbCapture?.stop() }
@@ -156,9 +167,10 @@ class BridgeService : Service() {
         usbCapture = null
         udpTransport = null
 
-        // 3. Cancel the scope after resources are freed
+        // 3. Cancel scope
         serviceScope.cancel()
         pipelineStarted.set(false)
+        reconnectInProgress.set(false)
         releaseWakeLock()
         DiagnosticsManager.update {
             copy(
@@ -166,6 +178,7 @@ class BridgeService : Service() {
                 transportConnected = false,
                 inputCaptureActive = false,
                 usbDeviceConnected = false,
+                isReconnecting = false,
             )
         }
         BridgeLogger.i(TAG, "BridgeService destroyed")
@@ -176,7 +189,6 @@ class BridgeService : Service() {
     // ── Pipeline setup ────────────────────────────────────────────────────────
 
     private suspend fun startPipeline() {
-        // pipelineStarted was already set to true atomically in onStartCommand
         val targetIp = prefs.targetIp
         val port = prefs.port
 
@@ -184,26 +196,48 @@ class BridgeService : Service() {
             BridgeLogger.w(TAG, "Target IP not configured — set it in Settings")
             updateNotification("Set receiver IP in Settings first")
             DiagnosticsManager.update { copy(lastError = "Target IP not configured") }
-        } else {
-            val config = TransportConfig(targetIp = targetIp, port = port)
-            val transport = UdpTransport(config, isSender = true)
-            udpTransport = transport
-            if (transport.connect()) {
-                BridgeLogger.i(TAG, "UDP transport ready → $targetIp:$port")
-                DiagnosticsManager.update { copy(transportConnected = true, targetIp = targetIp) }
-                updateNotification("Ready — waiting for USB device…")
-
-                // Start PING/PONG keep-alive once transport is connected.
-                startPingLoop(transport)
-                startPongResponseLoop(transport)
-            } else {
-                BridgeLogger.w(TAG, "UDP connect failed ($targetIp:$port)")
-                updateNotification("Transport error — check Settings")
-                DiagnosticsManager.update { copy(lastError = "UDP connect failed") }
-            }
+            pipelineStarted.set(false)
+            return
         }
 
-        // Periodic diagnostics counter flush (1 s interval)
+        val config = TransportConfig(targetIp = targetIp, port = port)
+        val transport = UdpTransport(config, isSender = true)
+        udpTransport = transport
+
+        if (!transport.connect()) {
+            BridgeLogger.w(TAG, "UDP connect failed ($targetIp:$port)")
+            updateNotification("Transport error — check Settings")
+            DiagnosticsManager.update { copy(lastError = "UDP connect failed") }
+            pipelineStarted.set(false)
+            return
+        }
+
+        BridgeLogger.i(TAG, "UDP transport ready → $targetIp:$port")
+        DiagnosticsManager.update { copy(transportConnected = true, targetIp = targetIp) }
+
+        // Register incoming-packet collector BEFORE sending any packet, so
+        // PAIR_RESPONSE is never missed even under very low latency.
+        pairResponseDeferred = CompletableDeferred()
+        startIncomingLoop(transport)
+
+        // Pairing: only attempt if a PIN is configured AND not already paired.
+        if (prefs.pairingPin.isNotEmpty() && !prefs.isPaired) {
+            val paired = doPairing(transport)
+            if (!paired) {
+                // Pairing failed — leave pipelineStarted = true so the service
+                // stays alive (user can fix PIN in Settings and restart).
+                return
+            }
+        } else if (prefs.isPaired) {
+            BridgeLogger.i(TAG, "Already paired — skipping pairing handshake")
+            DiagnosticsManager.update { copy(isPaired = true, pairedPeerIp = targetIp) }
+            updateNotification("Ready (paired) — waiting for USB device…")
+        } else {
+            BridgeLogger.i(TAG, "No PIN configured — connecting in open mode (no pairing)")
+            updateNotification("Ready — waiting for USB device…")
+        }
+
+        // Diagnostics counter flush
         counterFlushJob = serviceScope.launch {
             while (isActive) {
                 delay(COUNTER_FLUSH_INTERVAL_MS)
@@ -211,7 +245,10 @@ class BridgeService : Service() {
             }
         }
 
-        // Handle USB devices that were already attached before service started
+        startPingLoop(transport)
+        startWatchdog()
+
+        // Handle USB devices already attached before service started
         val preAttached = usbManager.deviceList.values.firstOrNull { device ->
             (0 until device.interfaceCount).any { i ->
                 device.getInterface(i).interfaceClass == UsbConstants.USB_CLASS_HID
@@ -223,13 +260,85 @@ class BridgeService : Service() {
         }
     }
 
-    // ── PING/PONG keep-alive ──────────────────────────────────────────────────
+    // ── Incoming-packet loop ──────────────────────────────────────────────────
 
     /**
-     * Sends a PING packet every [PING_INTERVAL_MS] milliseconds.
-     * The receiver responds with PONG, which [startPongResponseLoop] uses to
-     * compute round-trip latency and update [DiagnosticsManager].
+     * Collect ALL packets arriving from the receiver in a single coroutine.
+     * Must be started BEFORE any PAIR_REQUEST or PING is sent, so no packet
+     * is missed due to a collection-start race.
+     *
+     * Handles:
+     * - PAIR_RESPONSE: completes [pairResponseDeferred]
+     * - PONG: measures round-trip latency, resets watchdog timer
      */
+    private fun startIncomingLoop(transport: UdpTransport) {
+        pongResponseJob = serviceScope.launch {
+            transport.incomingPackets.collect { packet ->
+                when (packet.type) {
+                    PacketType.PAIR_RESPONSE -> {
+                        val accepted = PacketSerializer.parsePairResponseAccepted(packet.payload)
+                        BridgeLogger.i(TAG, "PAIR_RESPONSE received: accepted=$accepted")
+                        if (!pairResponseDeferred.isCompleted) {
+                            pairResponseDeferred.complete(accepted)
+                        }
+                    }
+                    PacketType.PONG -> {
+                        val sentAt = lastPingSentAtMs
+                        if (sentAt > 0L) {
+                            val latency = System.currentTimeMillis() - sentAt
+                            if (latency in 0L..10_000L) {
+                                lastPongReceivedMs = System.currentTimeMillis()
+                                DiagnosticsManager.recordLatency(latency)
+                                BridgeLogger.d(TAG, "PONG received — latency=${latency}ms")
+                            }
+                        }
+                    }
+                    else -> Unit  // future receiver→bridge control packets
+                }
+            }
+        }
+    }
+
+    // ── Pairing ───────────────────────────────────────────────────────────────
+
+    /**
+     * Send a PAIR_REQUEST with the user's PIN and wait up to [PAIR_TIMEOUT_MS]
+     * for the receiver to accept or reject.
+     *
+     * Returns true if pairing succeeded (or if no PIN is configured),
+     * false if rejected or timed out.
+     */
+    private suspend fun doPairing(transport: UdpTransport): Boolean {
+        val pin = prefs.pairingPin
+        updateNotification("Pairing — waiting for receiver…")
+        DiagnosticsManager.update { copy(isPaired = false) }
+
+        transport.send(packetFactory.makePairRequest(pin))
+        BridgeLogger.i(TAG, "PAIR_REQUEST sent (pin=****)")
+
+        val accepted = withTimeoutOrNull(PAIR_TIMEOUT_MS) {
+            pairResponseDeferred.await()
+        } ?: false
+
+        return if (accepted) {
+            prefs.isPaired = true
+            transport.send(packetFactory.makePairConfirm())
+            DiagnosticsManager.update { copy(isPaired = true, pairedPeerIp = prefs.targetIp) }
+            BridgeLogger.i(TAG, "Pairing confirmed")
+            updateNotification("Paired — waiting for USB device…")
+            true
+        } else {
+            BridgeLogger.w(TAG, "Pairing rejected or timed out")
+            updateNotification("Pairing failed — check PIN in Settings")
+            DiagnosticsManager.update {
+                copy(isPaired = false, lastError = "Pairing failed — check PIN matches receiver display")
+            }
+            false
+        }
+    }
+
+    // ── PING keep-alive ───────────────────────────────────────────────────────
+
     private fun startPingLoop(transport: UdpTransport) {
         pingJob = serviceScope.launch {
             while (isActive) {
@@ -243,29 +352,97 @@ class BridgeService : Service() {
         }
     }
 
+    // ── Watchdog + reconnect ──────────────────────────────────────────────────
+
     /**
-     * Collects incoming packets from the transport and handles PONG replies.
-     * Latency = time between last PING send and PONG arrival.
+     * Periodically checks whether PONGs are still arriving.
+     * If no PONG for [PONG_TIMEOUT_MS] after the grace period, triggers reconnect.
      */
-    private fun startPongResponseLoop(transport: UdpTransport) {
-        pongResponseJob = serviceScope.launch {
-            transport.incomingPackets.collect { packet ->
-                when (packet.type) {
-                    PacketType.PONG -> {
-                        val sentAt = lastPingSentAtMs
-                        if (sentAt > 0L) {
-                            val latency = System.currentTimeMillis() - sentAt
-                            // Sanity check: ignore obviously stale/reordered PONGs
-                            if (latency in 0L..10_000L) {
-                                DiagnosticsManager.recordLatency(latency)
-                                BridgeLogger.d(TAG, "PONG received — latency=${latency}ms")
-                            }
-                        }
-                    }
-                    else -> Unit  // other incoming packets (e.g. future receiver→bridge control) ignored
+    private fun startWatchdog() {
+        watchdogJob = serviceScope.launch {
+            delay(WATCHDOG_GRACE_MS)  // wait for initial connection to settle
+            while (isActive) {
+                delay(WATCHDOG_CHECK_MS)
+                val now = System.currentTimeMillis()
+                val lastPong = lastPongReceivedMs
+                // Only fire if we've seen at least one PONG (i.e. receiver was reachable)
+                if (lastPong > 0L && (now - lastPong) > PONG_TIMEOUT_MS) {
+                    BridgeLogger.w(TAG, "Watchdog: no PONG for ${now - lastPong}ms — triggering reconnect")
+                    launch { triggerReconnect() }
+                    break
                 }
             }
         }
+    }
+
+    /**
+     * Exponential-backoff reconnect loop.
+     * Attempts: 1 s, 2 s, 4 s, 8 s, 16 s, 30 s, … (up to 10 attempts).
+     * Guarded by [reconnectInProgress] so only one loop runs at a time.
+     */
+    private suspend fun triggerReconnect() {
+        if (!reconnectInProgress.compareAndSet(false, true)) return
+
+        // Cancel currently running I/O jobs (but keep serviceScope alive)
+        pingJob?.cancel();        pingJob = null
+        pongResponseJob?.cancel(); pongResponseJob = null
+        watchdogJob?.cancel();    watchdogJob = null
+        runCatching { udpTransport?.disconnect() }
+        udpTransport = null
+        lastPingSentAtMs = 0L
+        lastPongReceivedMs = 0L
+
+        DiagnosticsManager.update { copy(transportConnected = false, isReconnecting = true) }
+        updateNotification("Reconnecting…")
+
+        val targetIp = prefs.targetIp
+        val port = prefs.port
+        val backoffs = longArrayOf(1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000, 30_000, 30_000, 30_000)
+
+        for (backoffMs in backoffs) {
+            if (!serviceScope.isActive) break
+            DiagnosticsManager.recordReconnectAttempt()
+            BridgeLogger.i(TAG, "Reconnect: waiting ${backoffMs}ms before next attempt")
+            delay(backoffMs)
+            if (!serviceScope.isActive) break
+
+            val config = TransportConfig(targetIp = targetIp, port = port)
+            val transport = UdpTransport(config, isSender = true)
+
+            if (transport.connect()) {
+                udpTransport = transport
+                DiagnosticsManager.update { copy(transportConnected = true, isReconnecting = false) }
+                updateNotification("Reconnected → $targetIp:$port")
+                BridgeLogger.i(TAG, "Reconnect successful")
+
+                // Fresh deferred for new pairing attempt if needed
+                pairResponseDeferred = CompletableDeferred()
+                startIncomingLoop(transport)
+
+                if (!prefs.isPaired && prefs.pairingPin.isNotEmpty()) {
+                    val paired = doPairing(transport)
+                    if (!paired) {
+                        BridgeLogger.e(TAG, "Re-pairing failed after reconnect")
+                        runCatching { transport.disconnect() }
+                        reconnectInProgress.set(false)
+                        return
+                    }
+                }
+
+                startPingLoop(transport)
+                startWatchdog()
+                reconnectInProgress.set(false)
+                return
+            }
+            BridgeLogger.w(TAG, "Reconnect attempt failed to $targetIp:$port")
+        }
+
+        // All attempts exhausted
+        DiagnosticsManager.update {
+            copy(isReconnecting = false, lastError = "Reconnect failed after ${backoffs.size} attempts")
+        }
+        updateNotification("Reconnect failed — restart bridge manually")
+        reconnectInProgress.set(false)
     }
 
     // ── USB device lifecycle ──────────────────────────────────────────────────
@@ -288,7 +465,7 @@ class BridgeService : Service() {
         DiagnosticsManager.update {
             copy(usbDeviceConnected = false, usbDeviceName = "None", inputCaptureActive = false)
         }
-        updateNotification("USB device disconnected")
+        updateNotification(if (prefs.isPaired) "Paired — USB disconnected" else "USB device disconnected")
     }
 
     private fun requestUsbPermission(device: UsbDevice) {
@@ -302,7 +479,7 @@ class BridgeService : Service() {
     }
 
     private suspend fun startCapture(device: UsbDevice) {
-        stopCapture() // cancel any previous capture first
+        stopCapture()
 
         val capture = UsbInputCapture(this, device)
         usbCapture = capture
@@ -322,7 +499,6 @@ class BridgeService : Service() {
         updateNotification("Bridging — ${device.deviceName}")
         BridgeLogger.i(TAG, "USB capture active for ${device.deviceName}")
 
-        // Hot path: InputEvent → Packet → UDP
         captureJob = serviceScope.launch {
             capture.events.collect { event ->
                 val packet = packetFactory.fromEvent(event) ?: return@collect

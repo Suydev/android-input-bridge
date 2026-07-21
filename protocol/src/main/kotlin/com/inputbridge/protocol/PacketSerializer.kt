@@ -128,4 +128,20 @@ object PacketSerializer {
         if (payload.isEmpty()) return null
         return AndroidNavAction.fromId(payload[0])
     }
+
+    // ── Pairing payloads ──────────────────────────────────────────────────────
+
+    /** PAIR_REQUEST payload: PIN string encoded as UTF-8. */
+    fun buildPairRequestPayload(pin: String): ByteArray = pin.toByteArray(Charsets.UTF_8)
+
+    /** Parse the PIN from a PAIR_REQUEST payload. */
+    fun parsePairRequestPin(payload: ByteArray): String = payload.toString(Charsets.UTF_8)
+
+    /** PAIR_RESPONSE payload: single byte — 0x01 = accepted, 0x00 = rejected. */
+    fun buildPairResponsePayload(accepted: Boolean): ByteArray =
+        byteArrayOf(if (accepted) 0x01 else 0x00)
+
+    /** Parse the accepted flag from a PAIR_RESPONSE payload. */
+    fun parsePairResponseAccepted(payload: ByteArray): Boolean =
+        payload.isNotEmpty() && payload[0] == 0x01.toByte()
 }

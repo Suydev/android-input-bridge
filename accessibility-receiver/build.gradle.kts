@@ -9,6 +9,7 @@ android {
 dependencies {
     implementation(project(":shared-core"))
     implementation(project(":protocol"))
+    implementation(project(":diagnostics"))  // DiagnosticsManager used in InputBridgeAccessibilityService
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.timber)

@@ -18,8 +18,7 @@ import kotlinx.coroutines.launch
  * ViewModel for the bridge app.
  * Observes DiagnosticsManager and exposes UI state to Compose screens.
  * Controls BridgeService start/stop.
- * Persists transport config changes to [BridgePreferences] so BridgeService
- * can read them at service start time.
+ * Persists transport config and pairing settings to [BridgePreferences].
  */
 class BridgeViewModel(
     private val context: Context,
@@ -39,6 +38,7 @@ class BridgeViewModel(
         .map { d ->
             when {
                 d.transportConnected   -> "Connected to ${d.targetIp}"
+                d.isReconnecting       -> "Reconnecting… (attempt ${d.reconnectAttempts})"
                 d.bridgeServiceRunning -> "Service running, not connected"
                 else                   -> "Bridge stopped"
             }
@@ -52,12 +52,20 @@ class BridgeViewModel(
             transport = TransportConfig(
                 targetIp = prefs.targetIp,
                 port = prefs.port,
-            )
+            ),
+            security = com.inputbridge.core.config.SecurityConfig(
+                pairingToken = prefs.pairingPin,
+            ),
         )
     )
     val config: StateFlow<AppConfig> = _config.asStateFlow()
 
-    // ── Transport mode selection ───────────────────────────────────────────────
+    /** Whether pairing has been completed with the current target. */
+    val isPaired: StateFlow<Boolean> = diagnostics
+        .map { it.isPaired }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, prefs.isPaired)
+
+    // ── Transport settings ────────────────────────────────────────────────────
 
     fun setTransportMode(mode: TransportMode) {
         _config.value = _config.value.copy(
@@ -69,22 +77,49 @@ class BridgeViewModel(
         _config.value = _config.value.copy(
             transport = _config.value.transport.copy(targetIp = ip)
         )
-        prefs.targetIp = ip  // persist for BridgeService to read at start
+        prefs.targetIp = ip
+        // Changing the target IP invalidates existing pairing
+        if (prefs.isPaired) {
+            prefs.isPaired = false
+        }
     }
 
     fun setPort(port: Int) {
         _config.value = _config.value.copy(
             transport = _config.value.transport.copy(port = port)
         )
-        prefs.port = port  // persist for BridgeService to read at start
+        prefs.port = port
+    }
+
+    // ── Pairing settings ──────────────────────────────────────────────────────
+
+    /**
+     * Set the pairing PIN entered by the user (copied from the receiver's display).
+     * Automatically clears any existing pairing so the next service start
+     * performs a fresh PAIR_REQUEST handshake.
+     */
+    fun setPairingPin(pin: String) {
+        val trimmed = pin.trim()
+        _config.value = _config.value.copy(
+            security = _config.value.security.copy(pairingToken = trimmed)
+        )
+        prefs.setPinAndClearPairing(trimmed)
+    }
+
+    /**
+     * Clear the stored pairing so the next service start re-pairs.
+     * Does not change the PIN itself.
+     */
+    fun clearPairing() {
+        prefs.isPaired = false
+        DiagnosticsManager.update { copy(isPaired = false) }
     }
 
     // ── Service control ───────────────────────────────────────────────────────
 
     fun startBridge() {
         viewModelScope.launch {
-            val intent = Intent(context, BridgeService::class.java)
-            context.startForegroundService(intent)
+            context.startForegroundService(Intent(context, BridgeService::class.java))
         }
     }
 

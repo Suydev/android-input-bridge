@@ -104,4 +104,27 @@ class EventPacketFactory {
         sequenceNo = nextSeq(),
         timestampMs = nowMs()
     )
+
+    /** Bridge → Receiver: initiate pairing, carrying the PIN the user entered. */
+    fun makePairRequest(pin: String): Packet = Packet(
+        type = PacketType.PAIR_REQUEST,
+        sequenceNo = nextSeq(),
+        timestampMs = nowMs(),
+        payload = PacketSerializer.buildPairRequestPayload(pin)
+    )
+
+    /** Receiver → Bridge: respond to pairing request (accepted or rejected). */
+    fun makePairResponse(accepted: Boolean): Packet = Packet(
+        type = PacketType.PAIR_RESPONSE,
+        sequenceNo = nextSeq(),
+        timestampMs = nowMs(),
+        payload = PacketSerializer.buildPairResponsePayload(accepted)
+    )
+
+    /** Bridge → Receiver: acknowledge that PAIR_RESPONSE was received; pairing complete. */
+    fun makePairConfirm(): Packet = Packet(
+        type = PacketType.PAIR_CONFIRM,
+        sequenceNo = nextSeq(),
+        timestampMs = nowMs()
+    )
 }

@@ -93,15 +93,24 @@ Complete checklist of all project tasks. Never delete completed tasks. Always ap
 - [x] ReceiverService: handle KEEP_ALIVE (log, no-op)
 - [x] ReceiverService: handle DISCONNECT (update DiagnosticsManager + notification)
 - [x] UdpTransport: bidirectional in receiver mode (track lastSenderAddress, reply to it)
-- [ ] Pairing: shared token generation (16-byte random, SecureRandom)
-- [ ] Pairing: PAIR_REQUEST / PAIR_RESPONSE / PAIR_CONFIRM packet flow
-- [ ] Pairing: QR code display on receiver, manual entry on bridge
-- [ ] Pairing: token persistence (SharedPreferences / DataStore)
-- [ ] Pairing: packet source validation (drop packets from un-paired senders)
-- [ ] Reconnect: exponential backoff, max attempts
-- [ ] Reconnect: UI state during reconnect (amber dot + attempt counter)
-- [ ] Wi-Fi Direct transport: group formation, peer discovery
-- [ ] Diagnostics: latencyMs, packetsSent, packetsReceived, transportConnected all live
+
+---
+
+## Phase 3 Remainder — Pairing + Source Validation ✅ (Session 006)
+
+- [x] BUG-010: accessibility-receiver/build.gradle.kts missing :diagnostics dependency (CI fix)
+- [x] Pairing: 6-digit random session PIN on receiver (ReceiverPreferences.generateNewPin)
+- [x] Pairing: PAIR_REQUEST / PAIR_RESPONSE / PAIR_CONFIRM packet flow
+    - [x] EventPacketFactory: makePairRequest(), makePairResponse(), makePairConfirm()
+    - [x] PacketSerializer: buildPairRequestPayload(), parsePairRequestPin(), buildPairResponsePayload(), parsePairResponseAccepted()
+- [x] Pairing: PIN display on receiver ConnectionScreen (prominent, regenerate button)
+- [x] Pairing: PIN entry on bridge SettingsScreen (6-digit field, clear-pairing button)
+- [x] Pairing: token persistence (SharedPreferences — BridgePreferences + ReceiverPreferences)
+- [x] Pairing: packet source validation (drop packets from un-paired IP on receiver)
+- [x] Pairing: BridgeService initiates PAIR_REQUEST, waits 10s for PAIR_RESPONSE
+- [x] Pairing: ReceiverService validates PIN, records bridge IP, sends PAIR_RESPONSE
+- [ ] Pairing: QR code display (replaced by manual PIN entry — QR deferred to Phase 7)
+- [ ] Wi-Fi Direct transport: group formation, peer discovery (Phase 6 scope)
 
 ---
 
@@ -129,13 +138,16 @@ Complete checklist of all project tasks. Never delete completed tasks. Always ap
 
 ---
 
-## Phase 5 — Latency + Reconnect 🔲
+## Phase 5 — Latency + Reconnect (partial ✅ Session 006)
 
+- [x] Reconnect: automatic reconnect on PONG timeout (10 s without PONG triggers backoff)
+- [x] Reconnect: exponential backoff (1s, 2s, 4s, 8s, 16s, 30s… up to 10 attempts)
+- [x] Reconnect: re-pairing on reconnect if not already paired
+- [x] Reconnect: UI state during reconnect (connectionLabel shows "Reconnecting… attempt N")
+- [x] Reconnect: DiagnosticsData.isReconnecting + reconnectAttempts + lastReconnectAttempt
+- [x] Packet loss detection: sequence number gap detection on receiver (droppedSequencePackets)
 - [ ] Latency tracing: timestamp at capture, serialization, send, receive, execution
 - [ ] Latency display: rolling average in DiagnosticsScreen and BridgeScreen
-- [ ] Reconnect: automatic reconnect on transport error
-- [ ] Reconnect: UI state during reconnect (amber dot + attempt counter)
-- [ ] Packet loss detection: sequence number gap detection on receiver
 - [ ] Hot path audit: profile and optimize any allocations > 1KB/event
 
 ---

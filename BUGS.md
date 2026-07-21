@@ -161,6 +161,27 @@ service stop, causing port-bind failures or stale resources on restart.
 
 ---
 
+## BUG-010 — accessibility-receiver missing :diagnostics dependency
+
+**Description**: `accessibility-receiver/build.gradle.kts` did not declare
+`implementation(project(":diagnostics"))`, but `InputBridgeAccessibilityService.kt`
+imports and uses `DiagnosticsManager` (from the diagnostics module) in
+`onServiceConnected()` and `onUnbind()`.
+
+**Steps to reproduce**: Build any module that depends on accessibility-receiver.
+
+**Expected behavior**: Compilation succeeds.
+**Actual behavior**: `e: Unresolved reference 'DiagnosticsManager'` in
+InputBridgeAccessibilityService.kt lines 72–85.
+
+**Files involved**: `accessibility-receiver/build.gradle.kts`
+
+**Priority**: Critical (blocks CI for commit 2bc466f)
+**Status**: ✅ FIXED (session 006)
+**Fix**: Added `implementation(project(":diagnostics"))` to the dependencies block.
+
+---
+
 ## BUG-009 — BridgeService/ReceiverService duplicate pipeline on repeated starts
 
 **Description**: `onStartCommand()` launched `startPipeline()` / `startListening()`

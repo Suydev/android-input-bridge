@@ -1,17 +1,18 @@
 # Project State
 
 ## Current Version
-`0.3.0` — Phase 3 (PING/PONG keep-alive) + Phase 4 (accessibility injection) complete
+`0.4.0` — Phase 3 complete (pairing + source validation) + Phase 5 partial (reconnect + packet loss)
 
 ## Repository
 **GitHub:** https://github.com/Suydev/android-input-bridge  
 **Branch:** `main`  
-**Last commit:** `2bc466f` — Phase 3+4: PING/PONG keep-alive, full keyboard injection, accessibility detection, mouse sensitivity
+**Last commit:** session 006 — CI fix + pairing + reconnect + packet loss detection
 
 ## CI Status
 | Run | SHA | Status | Notes |
 |-----|-----|--------|-------|
-| TBD | `2bc466f` | ⏳ pending | Phase 3+4 implementation — awaiting CI |
+| TBD | session 006 | ⏳ pending | BUG-010 fix + pairing + reconnect |
+| TBD | `2bc466f` | ❌ failure | BUG-010: accessibility-receiver missing :diagnostics dependency |
 | #25 | `9931cb8` | ✅ success | Both APKs built, unit tests pass |
 | #24 | `8dbec88` | ❌ failure | androidContext import missing, BuildConfig, ic_menu_receive |
 | #23 | `774ba97` | ❌ failure | AAPT: Theme.Material.NoTitleBar.Fullscreen not found |
@@ -26,105 +27,107 @@
 |-------|--------------------------|-------------|----------|
 | 1     | Project scaffold         | ✅ Done     | 100%     |
 | 2     | USB input wiring         | ✅ Done     | 100%     |
-| 3     | Keep-alive / PING-PONG   | ✅ Done     | 60%      |
+| 3     | Keep-alive / pairing     | ✅ Done     | 95%      |
 | 4     | Accessibility receiver   | ✅ Done     | 80%      |
-| 5     | Latency + reconnect      | 🔒 Blocked  | 0%       |
+| 5     | Latency + reconnect      | 🔄 Partial  | 60%      |
 | 6     | Bluetooth HID (Path A)   | 🔒 Blocked  | 0%       |
 | 7     | Release + distribution   | 🔒 Blocked  | 0%       |
 
-## What This Session (005) Delivers
+## What Session 006 Delivers
 
-### Fixed — app was "dummy" (no real pipeline)
+### BUG-010 Fix (CI blocker)
+- `accessibility-receiver/build.gradle.kts` now declares `implementation(project(":diagnostics"))`
+- `InputBridgeAccessibilityService.kt` imports `DiagnosticsManager` — this was causing CI failure for commit `2bc466f`
 
-**UdpTransport** (`transport-wifi`):
-- Receiver mode now tracks `lastSenderAddress` from every incoming datagram
-- Sends (PONG, etc.) in receiver mode use that address — bidirectional UDP works
-- Previously: `connect.targetIp` was empty in receiver mode, send would crash/fail silently
+### Phase 3 Remainder — Pairing
 
-**InputBridgeAccessibilityService** (`accessibility-receiver`):
-- `onServiceConnected()`: fetches real screen dimensions (WindowManager/DisplayMetrics),
-  calls `AccessibilityCommandBus.setScreenSize()`, updates DiagnosticsManager
-  (`accessibilityEnabled = true, accessibilityMode = "Accessibility"`)
-- `onUnbind()`: clears DiagnosticsManager (`accessibilityEnabled = false`)
-- `injectKeyCode(keyCode, modifiers)`: full keyboard injection —
-  printable chars (via `KeyEvent.unicodeChar`), backspace, forward-delete,
-  enter, arrows (char/word granularity, with shift-extend selection),
-  home/end, escape → back, Ctrl+A/C/V/X
-- `injectText(text)`: ACTION_SET_TEXT at cursor position, clipboard paste fallback
-- `buildMetaState(modifiers)`: converts `ModifierState` → Android meta-state int
+**Protocol layer:**
+- `EventPacketFactory`: `makePairRequest(pin)`, `makePairResponse(accepted)`, `makePairConfirm()`
+- `PacketSerializer`: `buildPairRequestPayload/parsePairRequestPin`, `buildPairResponsePayload/parsePairResponseAccepted`
 
-**AccessibilityCommandBus** (`accessibility-receiver`):
-- Handles `KeyDown` → `svc.injectKeyCode(keyCode, modifiers)`
-- Handles `KeyUp` → no-op (injection complete on KeyDown)
-- Handles `TextInput` → `svc.injectText(text)`
-- Handles `Scroll` → swipe gesture with `SCROLL_PIXEL_MULTIPLIER * sensitivity` scaling
-- `mouseSensitivity` multiplier applied to all mouse delta updates
-- `setSensitivity(Float)` API for external callers (0.1–10 range)
-- `setScreenSize()` recentres the virtual cursor
+**Bridge side (`BridgeService`):**
+- After UDP transport connects: registers incoming-packet collector FIRST (prevents PAIR_RESPONSE miss race)
+- If PIN configured and not yet paired: sends `PAIR_REQUEST`, waits 10 s for `PAIR_RESPONSE`
+- On accept: persists `isPaired = true`, sends `PAIR_CONFIRM`, starts normal operation
+- On reject/timeout: updates notification "Pairing failed — check PIN in Settings"
+- If already paired: skips handshake, logs "Already paired"
+- `BridgePreferences`: added `pairingPin`, `isPaired`, `setPinAndClearPairing()`
 
-**BridgeService** (`app-bridge`):
-- PING loop: sends a PING packet every 1 s when transport is connected
-- PONG response loop: collects `incomingPackets`, on PONG computes
-  `latency = now - lastPingSentAtMs`, calls `DiagnosticsManager.recordLatency()`
-- Jobs cleaned up in `onDestroy()` alongside existing jobs
+**Receiver side (`ReceiverService`):**
+- Generates 6-digit random PIN on first run (persisted to `ReceiverPreferences`)
+- Publishes PIN to `DiagnosticsManager.sessionPin` for UI
+- Tracks `pairedBridgeIp` — source validation: drops packets from other IPs (except `PAIR_REQUEST`)
+- `PAIR_REQUEST` → validates PIN → sends `PAIR_RESPONSE` → if accepted, records bridge IP
+- `PAIR_CONFIRM` → logs; pairing complete
+- `DISCONNECT` → clears pairing state
+- `ReceiverPreferences`: added `sessionPin`, `pairedBridgeIp`, `isPaired`, `generateNewPin()`
 
-**ReceiverService** (`app-receiver`):
-- Handles `PacketType.PING` → sends PONG via `packetFactory.makePong(seq)`
-- Handles `PacketType.KEEP_ALIVE` → logs, no further action
-- Handles `PacketType.DISCONNECT` → updates DiagnosticsManager, updates notification
-- Applies persisted mouse sensitivity on startup via `AccessibilityCommandBus.setSensitivity()`
-- Input packets routed through `PacketToEventConverter` → `AccessibilityCommandBus.post()`
+**UI:**
+- `ConnectionScreen` (receiver): prominent 6-digit PIN display + "REGENERATE PIN" button, paired/unpaired status
+- `SettingsScreen` (bridge): "Pairing" section with PIN entry field, paired status, "Clear" button
 
-**ReceiverPreferences** (`app-receiver`):
-- Added `mouseSensitivity: Float` field (default 1.0)
+**ViewModels:**
+- `BridgeViewModel`: `isPaired`, `setPairingPin(pin)`, `clearPairing()`
+- `ReceiverViewModel`: `sessionPin`, `isPaired`, `generateNewPin()`
 
-**ReceiverViewModel** (`app-receiver`):
-- Added `setMouseSensitivity(Float)` — clamps to 0.1–5.0, persists to prefs,
-  applies immediately to `AccessibilityCommandBus.setSensitivity()`
-- Config pre-loaded with both port and sensitivity from prefs
+### Phase 5 Partial — Reconnect + Packet Loss
 
-**ReceiverSettingsScreen** (`app-receiver`):
-- Sensitivity slider fully wired (0.1–5.0, live feedback label, changes apply immediately)
-- Port field was already wired; added section header structure and dividers
+**Reconnect (BridgeService):**
+- `startWatchdog()`: after 15 s grace period, checks every 3 s if PONG timeout exceeded (10 s)
+- `triggerReconnect()`: exponential backoff (1 → 2 → 4 → 8 → 16 → 30 s, up to 10 attempts)
+- `reconnectInProgress` AtomicBoolean guards against concurrent reconnect loops
+- On success: re-registers incoming loop, re-pairs if needed, restarts ping + watchdog
+- `DiagnosticsData`: `isReconnecting`, `reconnectAttempts`, `lastReconnectAttempt`
+- `connectionLabel` in `BridgeViewModel`: shows "Reconnecting… (attempt N)"
+
+**Packet loss detection (ReceiverService):**
+- Tracks `lastInputSeqNo` across input event packets
+- Gaps in sequence numbers increment `droppedSequencePackets` AtomicLong
+- Flushed to `DiagnosticsData.packetsDroppedSequence` every 1 s
+
+**Transport:**
+- `UdpTransport.getLastSenderIp()`: exposes last sender's IP for source validation
+
+**DiagnosticsData new fields:**
+- `isPaired`, `sessionPin`, `pairedPeerIp`
+- `isReconnecting`
+- `packetsDroppedSequence`
 
 ## Known Issues / Limitations
-- No pairing / token validation yet — any sender's packets are accepted (Phase 3 remainder)
-- No automatic reconnect / exponential backoff yet (Phase 5)
-- No launcher icons created (build warns, doesn't fail for debug APKs)
+- No pairing QR code — manual PIN entry only (QR deferred to Phase 7)
+- No rolling latency average (Phase 5 remainder)
+- No latency trace timestamps across pipeline stages (Phase 5 remainder)
+- No launcher icons (debug builds warn but don't fail)
 - Visual cursor overlay not yet implemented (Phase 7)
 - `BluetoothHidTransport` is Phase 6 stub only
 - Config persisted to SharedPreferences; DataStore migration in Phase 7
 - Manual test on real Portronics Key2 Combo hardware not yet performed
-- CI run for 2bc466f pending — check Actions tab for result
+- Wi-Fi Direct transport not yet implemented
 
-## Next Task — Phase 3 Remainder + Phase 5
+## Next Task — Phase 5 Remainder + Phase 4 Completion
 
-### Phase 3 remaining
-1. **Pairing** — shared token generation, PAIR_REQUEST / PAIR_RESPONSE / PAIR_CONFIRM flow
-2. **Pairing UI** — QR or manual code entry
-3. **Token persistence** — SharedPreferences on both sides
-4. **Packet source validation** — drop packets from un-paired senders
+### Phase 5 remaining
+1. **Latency tracing** — capture → serialize → send → receive → inject timestamps
+2. **Rolling latency average** — display in DiagnosticsScreen and BridgeScreen
 
-### Phase 5
-1. **Automatic reconnect** — exponential backoff, max attempts
-2. **UI state during reconnect** — amber dot + attempt counter
-3. **Packet loss detection** — sequence number gap detection on receiver
+### Phase 4 remaining
+1. **Robust error handling** — accessibility service disconnect, secure window detection
+2. **Visual cursor overlay** (optional, Phase 7)
 
 ## Manual Test Procedure (current build)
 
 ### Receiver (OnePlus Pad Go)
 1. Install `app-receiver` APK
 2. Enable InputBridge Receiver accessibility service in Settings → Accessibility
-3. Open the app → tap "Start Receiver" → status dot turns blue
-4. Verify: connection dot is blue, accessibility status shows "Active"
+3. Open the app → navigate to Connection screen → note the 6-digit PIN
 
 ### Bridge (Redmi 9)
 1. Install `app-bridge` APK
-2. Open app → Settings → enter receiver's IP address → Save
-3. Tap "Start Bridge"
+2. Open app → Settings → enter receiver's IP + the 6-digit PIN shown on receiver → Save
+3. Tap "Start Bridge" — should show "Pairing…" then "Paired"
 4. Plug in Portronics Key2 Combo receiver via USB OTG
 5. Grant the USB permission prompt
-6. Diagnostics screen: USB device connected ✓, capture active ✓
+6. Diagnostics: USB device connected ✓, capture active ✓, paired ✓
 
 ### End-to-end verification
 - Type on keyboard → characters appear in focused text field on tablet
@@ -132,7 +135,7 @@
 - Left click → tap at cursor position
 - Right click → long press
 - Scroll wheel → scroll gesture on tablet
-- Diagnostics → latencyMs should update to the PING round-trip time
+- Unplug bridge's network → should auto-reconnect after 10–60 s
 
 ## Architecture Quick Reference
 ```
@@ -141,10 +144,12 @@
                                     ↓ EventPacketFactory.fromEvent()
                                     ↓ UdpTransport.send() (DatagramSocket)
                                     ↓ Wi-Fi LAN (UDP, fire-and-forget)
-                                    ↓ PING every 1s (keep-alive + latency)
+                                    ↓ PING every 1s + PAIR_REQUEST on start
                                     ↓
                               [OnePlus Pad Go: ReceiverService]
                                     ↓ UdpTransport.incomingPackets
+                                    ↓ Source IP validation (pairedBridgeIp)
+                                    ↓ PAIR_REQUEST → PIN validate → PAIR_RESPONSE
                                     ↓ PING → PONG (latency measurement)
                                     ↓ PacketToEventConverter.toInputEvent()
                                     ↓ AccessibilityCommandBus.post()

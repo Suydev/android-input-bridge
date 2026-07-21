@@ -37,10 +37,26 @@ data class DiagnosticsData(
     val batteryOptimizationIgnored: Boolean = false,
     val overlayPermissionGranted: Boolean = false,
 
-    // ── Errors ────────────────────────────────────────────────────────────────
-    val lastError: String? = null,
+    // ── Pairing ───────────────────────────────────────────────────────────────
+    /** Whether the bridge and receiver have completed the pairing handshake. */
+    val isPaired: Boolean = false,
+    /** 6-digit session PIN displayed on the receiver for the bridge user to enter. */
+    val sessionPin: String = "",
+    /** IP of the peer device (bridge's target or receiver's paired source). */
+    val pairedPeerIp: String = "",
+
+    // ── Reconnect ─────────────────────────────────────────────────────────────
+    /** True while the bridge is running an exponential-backoff reconnect loop. */
+    val isReconnecting: Boolean = false,
     val lastReconnectAttempt: Long = 0L,
     val reconnectAttempts: Int = 0,
+
+    // ── Packet loss ───────────────────────────────────────────────────────────
+    /** Packets estimated dropped on the receiver side via sequence-number gaps. */
+    val packetsDroppedSequence: Long = 0L,
+
+    // ── Errors ────────────────────────────────────────────────────────────────
+    val lastError: String? = null,
 
     // ── Timestamp ────────────────────────────────────────────────────────────
     val snapshotTimestampMs: Long = System.currentTimeMillis(),

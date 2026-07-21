@@ -61,6 +61,13 @@ class UdpTransport(
      */
     @Volatile private var lastSenderAddress: InetSocketAddress? = null
 
+    /**
+     * The IP address string of the most recently seen sender.
+     * Null until the first packet has been received.
+     * Used by ReceiverService for source-address validation after pairing.
+     */
+    fun getLastSenderIp(): String? = lastSenderAddress?.address?.hostAddress
+
     override suspend fun connect(): Boolean {
         if (isConnected) return true
         _connectionState.value = ConnectionState.Connecting

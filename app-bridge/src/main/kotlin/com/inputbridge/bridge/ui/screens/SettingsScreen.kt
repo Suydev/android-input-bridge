@@ -25,7 +25,9 @@ fun SettingsScreen(
     viewModel: BridgeViewModel,
 ) {
     val config by viewModel.config.collectAsStateWithLifecycle()
+    val isPaired by viewModel.isPaired.collectAsStateWithLifecycle()
     var targetIpInput by remember { mutableStateOf(config.transport.targetIp) }
+    var pinInput by remember { mutableStateOf(config.security.pairingToken) }
 
     Scaffold(
         topBar = {
@@ -53,6 +55,8 @@ fun SettingsScreen(
         ) {
             Spacer(Modifier.height(8.dp))
 
+            // ── Transport ─────────────────────────────────────────────────────
+
             SectionHeader("Transport")
 
             OutlinedTextField(
@@ -77,6 +81,61 @@ fun SettingsScreen(
 
             HorizontalDivider(color = BridgeDim.copy(alpha = 0.3f))
 
+            // ── Pairing ───────────────────────────────────────────────────────
+
+            SectionHeader("Pairing")
+
+            Text(
+                text = "Enter the 6-digit PIN shown on the receiver app.",
+                color = BridgeDim,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+            )
+
+            OutlinedTextField(
+                value = pinInput,
+                onValueChange = { v ->
+                    // Only accept up to 6 digits
+                    val digits = v.filter { it.isDigit() }.take(6)
+                    pinInput = digits
+                    viewModel.setPairingPin(digits)
+                },
+                label = { Text("Pairing PIN", fontFamily = FontFamily.Monospace) },
+                placeholder = { Text("123456", fontFamily = FontFamily.Monospace) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                modifier = Modifier.fillMaxWidth(),
+                colors = outlinedTextFieldColors(),
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = if (isPaired) "Status: ✓ Paired" else "Status: Not paired",
+                    color = if (isPaired) BridgePrimary else BridgeDim,
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+                if (isPaired) {
+                    TextButton(
+                        onClick = { viewModel.clearPairing() },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    ) {
+                        Text(
+                            "Clear",
+                            color = BridgeError,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider(color = BridgeDim.copy(alpha = 0.3f))
+
+            // ── Mouse ─────────────────────────────────────────────────────────
+
             SectionHeader("Mouse")
 
             Text("Sensitivity: %.1f×".format(config.mouse.sensitivity),
@@ -89,6 +148,8 @@ fun SettingsScreen(
             )
 
             HorizontalDivider(color = BridgeDim.copy(alpha = 0.3f))
+
+            // ── Display ───────────────────────────────────────────────────────
 
             SectionHeader("Display")
 

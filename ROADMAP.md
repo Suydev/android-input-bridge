@@ -84,7 +84,7 @@ and forward packets to the receiver app over UDP.
 
 **Risk level**: Medium
 
-**Completion**: 0% 🔲
+**Completion**: 95% ✅ (pairing complete; QR code display deferred to Phase 7)
 
 ---
 
@@ -110,7 +110,7 @@ and forward packets to the receiver app over UDP.
 
 **Risk level**: Medium — accessibility injection is less predictable than hardware input
 
-**Completion**: 0% 🔲
+**Completion**: 80% 🔄 (full keyboard/mouse/scroll injection done; cursor overlay + robust error handling pending Phase 7)
 
 ---
 
@@ -132,7 +132,7 @@ and forward packets to the receiver app over UDP.
 
 **Risk level**: Low
 
-**Completion**: 0% 🔲
+**Completion**: 60% 🔄 (reconnect + packet loss detection done; latency traces + rolling average pending)
 
 ---
 
