@@ -302,12 +302,15 @@ class BridgeService : Service() {
 
         val bt = BluetoothHidTransport(this)
         bt.targetDeviceAddress = prefs.btTargetDeviceAddress
-        btTransport = bt
+        // Do NOT assign btTransport yet — only set it after connect() succeeds so that
+        // startCapture()'s dispatch guard (btTransport?.isConnected) stays false on failure.
 
         DiagnosticsManager.update { copy(transportMode = "BT HID") }
 
         if (!bt.connect()) {
             BridgeLogger.w(TAG, "BT HID connect failed")
+            runCatching { bt.disconnect() }  // release any partial BT profile resources
+            // btTransport remains null — startCapture() will not route to BT HID
             updateNotification("BT HID failed — enable Bluetooth and pair host device")
             DiagnosticsManager.update {
                 copy(
@@ -318,6 +321,8 @@ class BridgeService : Service() {
             return
         }
 
+        // Assigned only after successful connect — non-null guarantees a live BT session.
+        btTransport = bt
         BridgeLogger.i(TAG, "BT HID transport ready")
         DiagnosticsManager.update { copy(transportConnected = true) }
         updateNotification("BT HID ready — waiting for USB device…")
@@ -588,11 +593,13 @@ class BridgeService : Service() {
         updateNotification("Bridging — ${device.deviceName}")
         BridgeLogger.i(TAG, "USB capture active for ${device.deviceName}")
 
-        // Local snapshots for hot-path dispatch (avoids repeated volatile reads)
         captureJob = serviceScope.launch {
             capture.events.collect { event ->
                 val t0 = System.nanoTime()
-                val bt = btTransport
+                // Guard: btTransport is only non-null when connect() succeeded.
+                // isConnected is checked in addition for defense-in-depth against
+                // a BT host that disconnects while capture is already running.
+                val bt = btTransport?.takeIf { it.isConnected }
                 if (bt != null) {
                     // ── BT HID mode: send raw HID report directly (no packet layer) ──
                     val sent = bt.sendInputEvent(event)
