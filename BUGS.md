@@ -204,6 +204,35 @@ Both constants exist since API 18 and are stable through API 35.
 
 ---
 
+
+## BUG-012 — transport-bluetooth-hid missing :diagnostics dependency
+
+**Description**: `transport-bluetooth-hid/build.gradle.kts` did not declare
+`implementation(project(":diagnostics"))`, but `BluetoothHidTransport.kt` imports
+and uses `DiagnosticsManager` (from the diagnostics module) for `btConnected`/
+`btDeviceName` updates in `onConnectionStateChanged()`, `handleHostConnected()`, and
+`disconnect()`.
+
+**Steps to reproduce**: Build any module that depends on transport-bluetooth-hid.
+
+**Expected behavior**: Compilation succeeds.
+**Actual behavior**:
+```
+e: BluetoothHidTransport.kt:13:24 Unresolved reference 'diagnostics'.
+e: BluetoothHidTransport.kt:121:21 Unresolved reference 'DiagnosticsManager'.
+e: BluetoothHidTransport.kt:266:13 Unresolved reference 'DiagnosticsManager'.
+e: BluetoothHidTransport.kt:336:9  Unresolved reference 'DiagnosticsManager'.
+```
+
+**Files involved**: `transport-bluetooth-hid/build.gradle.kts`
+
+**Priority**: Critical (blocks CI run #34)
+**Status**: ✅ FIXED (session 009)
+**Fix**: Added `implementation(project(":diagnostics"))` to the dependencies block.
+Pattern is identical to BUG-010 (accessibility-receiver missing :diagnostics).
+
+---
+
 ## BUG-009 — BridgeService/ReceiverService duplicate pipeline on repeated starts
 
 **Description**: `onStartCommand()` launched `startPipeline()` / `startListening()`
