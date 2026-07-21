@@ -55,6 +55,32 @@ data class DiagnosticsData(
     /** Packets estimated dropped on the receiver side via sequence-number gaps. */
     val packetsDroppedSequence: Long = 0L,
 
+    // ── Latency trace (per-stage measurements) ────────────────────────────────
+    /**
+     * Rolling average of the last 10 PING/PONG round-trip samples (ms).
+     * More stable than [latencyMs] which is the most recent sample.
+     */
+    val latencyAvgMs: Long = 0L,
+    /**
+     * Bridge: time from InputEvent emission to UdpTransport.send() return (microseconds).
+     * Measures serialization + socket-write cost on the hot path.
+     */
+    val captureToSendUs: Long = 0L,
+    /**
+     * Receiver: time from incomingPackets.collect callback to AccessibilityCommandBus
+     * handleEvent() return (microseconds). Measures deserialize + injection cost.
+     */
+    val receiveToInjectUs: Long = 0L,
+
+    // ── Accessibility injection state (receiver) ──────────────────────────────
+    /**
+     * True when the last injection attempt was blocked by a secure window
+     * (e.g. lock-screen PIN entry). Cleared as soon as injection succeeds again.
+     */
+    val isSecureWindow: Boolean = false,
+    /** Most recent accessibility injection exception message, if any. */
+    val lastInjectionError: String? = null,
+
     // ── Errors ────────────────────────────────────────────────────────────────
     val lastError: String? = null,
 

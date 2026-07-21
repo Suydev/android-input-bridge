@@ -17,6 +17,7 @@ import com.inputbridge.protocol.PacketType
 import com.inputbridge.transport.wifi.UdpTransport
 import kotlinx.coroutines.*
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 private const val TAG = "BridgeService"
 private const val NOTIFICATION_ID = 1001
@@ -86,6 +87,13 @@ class BridgeService : Service() {
      * Guards against concurrent reconnect loops. Only one reconnect may run at a time.
      */
     private val reconnectInProgress = AtomicBoolean(false)
+
+    /**
+     * Hot-path latency trace: time from InputEvent emission to UdpTransport.send() return
+     * in microseconds. Written by the captureJob on IO thread; flushed to DiagnosticsData
+     * every second by counterFlushJob.
+     */
+    private val lastCaptureToSendUs = AtomicLong(0L)
 
     // ── USB BroadcastReceiver ─────────────────────────────────────────────────
 
@@ -242,6 +250,10 @@ class BridgeService : Service() {
             while (isActive) {
                 delay(COUNTER_FLUSH_INTERVAL_MS)
                 DiagnosticsManager.flushCounters()
+                val captureUs = lastCaptureToSendUs.get()
+                if (captureUs > 0L) {
+                    DiagnosticsManager.update { copy(captureToSendUs = captureUs) }
+                }
             }
         }
 
@@ -501,10 +513,16 @@ class BridgeService : Service() {
 
         captureJob = serviceScope.launch {
             capture.events.collect { event ->
+                val t0 = System.nanoTime()
                 val packet = packetFactory.fromEvent(event) ?: return@collect
                 val sent = udpTransport?.send(packet) ?: false
-                if (sent) DiagnosticsManager.onPacketSent()
-                else DiagnosticsManager.onSendFailed()
+                if (sent) {
+                    DiagnosticsManager.onPacketSent()
+                    // Update hot-path trace; flushed to DiagnosticsData every second.
+                    lastCaptureToSendUs.set((System.nanoTime() - t0) / 1_000L)
+                } else {
+                    DiagnosticsManager.onSendFailed()
+                }
             }
         }
     }

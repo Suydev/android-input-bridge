@@ -134,11 +134,11 @@ Complete checklist of all project tasks. Never delete completed tasks. Always ap
 - [ ] Text injection: clipboard-based paste for TextInput on non-editable nodes (done via fallback)
 - [ ] Screen size detection: update AccessibilityCommandBus.setScreenSize() ✅
 - [ ] Visual cursor overlay (optional): show dot at current virtual cursor position (Phase 7)
-- [ ] Robust error handling: service disconnect, app switch, secure window (partial — logs warnings)
+- [x] Robust error handling: secure window detection (isSecureWindow flag), try-catch in injectKeyCode/injectText, lastInjectionError in DiagnosticsData
 
 ---
 
-## Phase 5 — Latency + Reconnect (partial ✅ Session 006)
+## Phase 5 — Latency + Reconnect ✅ (Session 006 + 007)
 
 - [x] Reconnect: automatic reconnect on PONG timeout (10 s without PONG triggers backoff)
 - [x] Reconnect: exponential backoff (1s, 2s, 4s, 8s, 16s, 30s… up to 10 attempts)
@@ -146,8 +146,8 @@ Complete checklist of all project tasks. Never delete completed tasks. Always ap
 - [x] Reconnect: UI state during reconnect (connectionLabel shows "Reconnecting… attempt N")
 - [x] Reconnect: DiagnosticsData.isReconnecting + reconnectAttempts + lastReconnectAttempt
 - [x] Packet loss detection: sequence number gap detection on receiver (droppedSequencePackets)
-- [ ] Latency tracing: timestamp at capture, serialization, send, receive, execution
-- [ ] Latency display: rolling average in DiagnosticsScreen and BridgeScreen
+- [x] Latency tracing: captureToSendUs (bridge hot-path µs), receiveToInjectUs (receiver µs)
+- [x] Latency display: rolling 10-sample average in DiagnosticsScreen, BridgeScreen, ReceiverDiagnosticsScreen
 - [ ] Hot path audit: profile and optimize any allocations > 1KB/event
 
 ---

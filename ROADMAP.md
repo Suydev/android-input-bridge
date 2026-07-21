@@ -110,7 +110,7 @@ and forward packets to the receiver app over UDP.
 
 **Risk level**: Medium — accessibility injection is less predictable than hardware input
 
-**Completion**: 80% 🔄 (full keyboard/mouse/scroll injection done; cursor overlay + robust error handling pending Phase 7)
+**Completion**: 90% ✅ (full keyboard/mouse/scroll injection + robust error handling done; cursor overlay pending Phase 7)
 
 ---
 
@@ -132,7 +132,7 @@ and forward packets to the receiver app over UDP.
 
 **Risk level**: Low
 
-**Completion**: 60% 🔄 (reconnect + packet loss detection done; latency traces + rolling average pending)
+**Completion**: 95% ✅ (reconnect + packet loss + latency trace + rolling average done; hot-path allocation audit pending)
 
 ---
 

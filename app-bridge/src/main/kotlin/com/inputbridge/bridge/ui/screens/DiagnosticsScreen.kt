@@ -61,16 +61,20 @@ fun DiagnosticsScreen(
             DiagRow("Connection", if (diagnostics.transportConnected) "CONNECTED" else "DISCONNECTED",
                 diagnostics.transportConnected)
             DiagRow("Target IP", diagnostics.targetIp.ifEmpty { "Not set" }, diagnostics.targetIp.isNotEmpty())
-            DiagRow("Latency", "${diagnostics.latencyMs}ms", diagnostics.latencyMs in 1..100)
+            DiagRow("Latency (last)", "${diagnostics.latencyMs}ms", diagnostics.latencyMs in 1..100)
+            DiagRow("Latency (avg)", "${diagnostics.latencyAvgMs}ms", diagnostics.latencyAvgMs in 1..100)
+            DiagRow("Capture→Send", if (diagnostics.captureToSendUs > 0) "${diagnostics.captureToSendUs}µs" else "—", true)
             DiagRow("Packets Sent", diagnostics.packetsSent.toString(), true)
             DiagRow("Packets Recv", diagnostics.packetsReceived.toString(), true)
             DiagRow("Send Failures", diagnostics.packetsSendFailed.toString(),
                 diagnostics.packetsSendFailed == 0L)
+            DiagRow("Paired", if (diagnostics.isPaired) "YES" else "NO", diagnostics.isPaired)
+            DiagRow("Reconnects", diagnostics.reconnectAttempts.toString(), diagnostics.reconnectAttempts == 0)
+            DiagRow("Reconnecting", if (diagnostics.isReconnecting) "YES" else "NO", !diagnostics.isReconnecting)
             DiagRow("USB Permission", if (diagnostics.usbPermissionGranted) "GRANTED" else "DENIED",
                 diagnostics.usbPermissionGranted)
             DiagRow("Battery Opt", if (diagnostics.batteryOptimizationIgnored) "IGNORED" else "ACTIVE",
                 diagnostics.batteryOptimizationIgnored)
-            DiagRow("Reconnects", diagnostics.reconnectAttempts.toString(), diagnostics.reconnectAttempts == 0)
 
             if (diagnostics.lastError != null) {
                 Spacer(Modifier.height(12.dp))

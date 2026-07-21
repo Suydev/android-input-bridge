@@ -184,6 +184,13 @@ class ReceiverService : Service() {
                 if (dropped > 0L) {
                     DiagnosticsManager.update { copy(packetsDroppedSequence = dropped) }
                 }
+                // Flush accessibility inject latency from the command bus timing loop.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    val injectUs = AccessibilityCommandBus.getLastInjectUs()
+                    if (injectUs > 0L) {
+                        DiagnosticsManager.update { copy(receiveToInjectUs = injectUs) }
+                    }
+                }
             }
         }
 

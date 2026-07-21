@@ -329,6 +329,99 @@
 
 ---
 
+## Session 007 — Phase 5 Remainder + Phase 4 Robust Error Handling
+
+**Date**: 2026-07-21
+**Agent**: Claude (Replit)
+**Version**: 0.4.0 → 0.5.0
+**Status**: ✅ Complete (pending CI)
+
+### Context
+Continued from session 006. Pairing, reconnect, and packet-loss detection were done. The following remained:
+- Phase 5: rolling latency average, latency trace timestamps
+- Phase 4: robust error handling for accessibility service (secure window detection, exception wrapping)
+- CHANGELOG.md had no `[0.4.0]` entry (session 006 changes were never recorded)
+- DiagnosticsScreens did not show pairing, reconnect, or drop-count fields despite them existing in DiagnosticsData
+
+### Accomplished
+
+#### DiagnosticsData (new fields)
+- `latencyAvgMs: Long` — rolling 10-sample PING/PONG average
+- `captureToSendUs: Long` — bridge hot-path time µs (event emission → UdpTransport.send return)
+- `receiveToInjectUs: Long` — receiver command bus dispatch time µs
+- `isSecureWindow: Boolean` — True when accessibility injection blocked (lock screen etc.)
+- `lastInjectionError: String?` — last injectKeyCode/injectText exception message
+
+#### DiagnosticsManager
+- `recordLatency()` now maintains a 10-entry `ArrayDeque<Long>` behind a `synchronized` lock
+- Computes rolling average on every PONG receipt; writes `latencyAvgMs` to DiagnosticsData
+
+#### AccessibilityCommandBus
+- Added `private val lastInjectUs = AtomicLong(0L)` — timed in `commandFlow.collect` lambda
+- `handleEvent()` now wrapped with `System.nanoTime()` before/after; stores elapsed µs
+- Added `fun getLastInjectUs(): Long` — exposes timing for ReceiverService flush
+- Added `import com.inputbridge.diagnostics.DiagnosticsManager`
+- Added `import java.util.concurrent.atomic.AtomicLong`
+
+#### InputBridgeAccessibilityService
+- `injectKeyCode()`: checks `rootInActiveWindow == null` → sets `isSecureWindow = true`, returns early; wraps `injectKeyCodeInternal()` in try-catch → writes `lastInjectionError`
+- `injectText()`: same secure-window guard and try-catch wrapping
+- Logic extracted to `injectKeyCodeInternal()` and `injectTextInternal()` private helpers
+
+#### BridgeService
+- Added `private val lastCaptureToSendUs = AtomicLong(0L)`
+- `captureJob`: records `System.nanoTime()` before event processing; stores elapsed µs after successful send
+- `counterFlushJob`: flushes `captureToSendUs` to DiagnosticsData every 1 s
+- Added `import java.util.concurrent.atomic.AtomicLong`
+
+#### ReceiverService
+- `counterFlushJob`: reads `AccessibilityCommandBus.getLastInjectUs()` every 1 s (API 24+ guard); writes to `receiveToInjectUs`
+
+#### UI
+- `BridgeScreen`: latency line now shows `${latencyMs}ms · avg ${latencyAvgMs}ms`
+- `DiagnosticsScreen` (bridge): added rows — Latency (last), Latency (avg), Capture→Send, Paired, Reconnecting
+- `ReceiverDiagnosticsScreen`: added rows — Secure Window, Paired (with peer IP), Session PIN, Latency (avg), Recv→Inject, Dropped (seq), Inject Error section
+
+#### Documentation
+- `CHANGELOG.md`: added `[0.5.0]` entry (this session) and missing `[0.4.0]` entry (session 006)
+- `TASKS.md`: Phase 5 latency/rolling-avg items checked; Phase 4 robust error handling checked
+- `PROJECT_STATE.md`: version bumped to 0.5.0; phase completion updated (Phase 4: 90%, Phase 5: 95%)
+- `ROADMAP.md`: updated phase completion percentages
+- `AI_CONTEXT.md`: updated current milestone
+
+### Files changed
+- `diagnostics/src/main/kotlin/com/inputbridge/diagnostics/DiagnosticsData.kt` — 5 new fields
+- `diagnostics/src/main/kotlin/com/inputbridge/diagnostics/DiagnosticsManager.kt` — rolling average
+- `accessibility-receiver/src/main/kotlin/com/inputbridge/accessibility/AccessibilityCommandBus.kt` — inject timing
+- `accessibility-receiver/src/main/kotlin/com/inputbridge/accessibility/InputBridgeAccessibilityService.kt` — robust error handling
+- `app-bridge/src/main/kotlin/com/inputbridge/bridge/service/BridgeService.kt` — capture-to-send trace
+- `app-receiver/src/main/kotlin/com/inputbridge/receiver/service/ReceiverService.kt` — inject latency flush
+- `app-bridge/src/main/kotlin/com/inputbridge/bridge/ui/screens/BridgeScreen.kt` — avg latency display
+- `app-bridge/src/main/kotlin/com/inputbridge/bridge/ui/screens/DiagnosticsScreen.kt` — new diag rows
+- `app-receiver/src/main/kotlin/com/inputbridge/receiver/ui/screens/ReceiverDiagnosticsScreen.kt` — new diag rows
+- `CHANGELOG.md`, `TASKS.md`, `PROJECT_STATE.md`, `ROADMAP.md`, `AI_CONTEXT.md`, `SESSION_LOG.md` — updated
+
+### Key decisions
+- Rolling average uses a synchronized `ArrayDeque` (not AtomicReference) because latency samples are written by a single coroutine — the synchronization cost is negligible
+- Latency trace uses `System.nanoTime()` (monotonic) for µs precision, not `currentTimeMillis()` (wall clock)
+- Secure window detection in `injectKeyCode`/`injectText` only — tap/swipe/longPress failures are silent (gesture dispatch handles this naturally and the user would notice clicks not landing)
+- Inject timing measured in `AccessibilityCommandBus.handleEvent()` (the whole dispatch), not in ReceiverService, because `post()` is non-blocking; the command bus is where actual injection time accumulates
+
+---
+
+## Next Session — Phase 6 (Bluetooth HID) or Phase 7 (Polish)
+
+### Recommended next steps
+1. **Phase 6 — Bluetooth HID**: `BluetoothHidTransport` implementation, HID descriptor, feature flag gating, graceful fallback
+2. **Phase 7 — Polish**: Black screen mode, DataStore migration, emergency stop hotkey, auto-start UI toggle
+3. **Hot-path audit**: profile allocation rate in `captureJob` at 125 Hz mouse events
+
+### Entry files for Phase 6
+- `transport-bluetooth-hid/src/main/kotlin/com/inputbridge/transport/bluetooth/BluetoothHidTransport.kt` — Phase 6 stub to implement
+- `shared-core/src/main/kotlin/com/inputbridge/core/config/FeatureFlags.kt` — `BLUETOOTH_HID_ENABLED` flag
+
+---
+
 ## Next Session — Phase 3 Remainder + Phase 5
 
 ### Tasks

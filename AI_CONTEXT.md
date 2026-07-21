@@ -148,15 +148,15 @@ See DECISIONS.md for full records. Short summary:
 
 ## Current milestone
 
-**Phase 5 (partial)** — Pairing handshake, source validation, exponential-backoff reconnect, and packet-loss detection are implemented. Phases 1–4 complete, Phase 5 ~60% done.
+**Phase 5 complete (95%)** — Latency trace (capture→send µs, recv→inject µs) and rolling 10-sample PONG average added. Phase 4 robust error handling (secure window detection + try-catch in injectKeyCode/injectText) complete. Phases 1–5 done. Phase 6 (Bluetooth HID) is next.
 
 ## Current TODO
 
-See TASKS.md
+See TASKS.md — Phase 6 (Bluetooth HID) and Phase 7 (Polish) are the remaining phases.
 
 ## Current blockers
 
-None — CI should be green after BUG-010 fix (added :diagnostics to accessibility-receiver).
+None known. CI run for session 007 changes pending (need GitHub PAT to push and monitor).
 
 ## Future roadmap
 

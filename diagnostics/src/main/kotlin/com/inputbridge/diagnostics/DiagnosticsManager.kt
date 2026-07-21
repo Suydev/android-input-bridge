@@ -49,8 +49,25 @@ object DiagnosticsManager {
         }
     }
 
+    // ── Rolling latency average (last LATENCY_WINDOW PONG round-trips) ────────
+
+    private const val LATENCY_WINDOW = 10
+    private val latencySamplesLock = Any()
+    private val latencySamples = ArrayDeque<Long>()
+
     fun recordLatency(latencyMs: Long) {
-        update { copy(latencyMs = latencyMs, lastPongReceivedMs = System.currentTimeMillis()) }
+        val avg = synchronized(latencySamplesLock) {
+            latencySamples.addLast(latencyMs)
+            if (latencySamples.size > LATENCY_WINDOW) latencySamples.removeFirst()
+            latencySamples.average().toLong()
+        }
+        update {
+            copy(
+                latencyMs = latencyMs,
+                latencyAvgMs = avg,
+                lastPongReceivedMs = System.currentTimeMillis(),
+            )
+        }
     }
 
     fun recordError(message: String) {

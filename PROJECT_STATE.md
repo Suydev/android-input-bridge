@@ -1,16 +1,17 @@
 # Project State
 
 ## Current Version
-`0.4.0` — Phase 3 complete (pairing + source validation) + Phase 5 partial (reconnect + packet loss)
+`0.5.0` — Phase 5 complete (latency trace + rolling avg) + Phase 4 complete (robust error handling)
 
 ## Repository
 **GitHub:** https://github.com/Suydev/android-input-bridge  
 **Branch:** `main`  
-**Last commit:** session 006 — CI fix + pairing + reconnect + packet loss detection
+**Last commit:** session 007 — Phase 5 remainder + Phase 4 robust error handling
 
 ## CI Status
 | Run | SHA | Status | Notes |
 |-----|-----|--------|-------|
+| TBD | session 007 | ⏳ pending | Phase 5 latency trace + Phase 4 robust error handling |
 | TBD | session 006 | ⏳ pending | BUG-010 fix + pairing + reconnect |
 | TBD | `2bc466f` | ❌ failure | BUG-010: accessibility-receiver missing :diagnostics dependency |
 | #25 | `9931cb8` | ✅ success | Both APKs built, unit tests pass |
@@ -28,8 +29,8 @@
 | 1     | Project scaffold         | ✅ Done     | 100%     |
 | 2     | USB input wiring         | ✅ Done     | 100%     |
 | 3     | Keep-alive / pairing     | ✅ Done     | 95%      |
-| 4     | Accessibility receiver   | ✅ Done     | 80%      |
-| 5     | Latency + reconnect      | 🔄 Partial  | 60%      |
+| 4     | Accessibility receiver   | ✅ Done     | 90%      |
+| 5     | Latency + reconnect      | ✅ Done     | 95%      |
 | 6     | Bluetooth HID (Path A)   | 🔒 Blocked  | 0%       |
 | 7     | Release + distribution   | 🔒 Blocked  | 0%       |
 

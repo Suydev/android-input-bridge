@@ -4,6 +4,105 @@ All meaningful changes recorded chronologically.
 
 ---
 
+## [0.5.0] — 2026-07-21
+
+**Phase 5 remainder (latency trace + rolling average) + Phase 4 remainder (robust error handling).**
+
+### Added
+
+**Rolling latency average (Phase 5):**
+- `DiagnosticsManager.recordLatency()`: maintains a sliding window of the last 10 PONG samples
+  and computes a rolling average on each new reading (thread-safe via `synchronized`)
+- `DiagnosticsData.latencyAvgMs`: new field, updated by every PONG receipt
+- `BridgeScreen`: latency line now shows both last sample and rolling avg (`15ms · avg 12ms`)
+- `DiagnosticsScreen` (bridge): two rows — "Latency (last)" and "Latency (avg)"
+- `ReceiverDiagnosticsScreen`: same two latency rows
+
+**Latency trace (Phase 5):**
+- `DiagnosticsData.captureToSendUs`: bridge hot-path time from InputEvent emission to
+  `UdpTransport.send()` return, measured in microseconds, flushed every 1 s
+- `DiagnosticsData.receiveToInjectUs`: receiver time inside `AccessibilityCommandBus.handleEvent()`
+  (dequeue → accessibility API return), measured in microseconds, flushed every 1 s
+- `BridgeService.captureJob`: times hot path with `System.nanoTime()`, stores in `lastCaptureToSendUs`
+  `AtomicLong`; flushed to `DiagnosticsData` in the existing 1 s counter-flush loop
+- `AccessibilityCommandBus`: times `handleEvent()` in the `commandFlow.collect` lambda, stores in
+  `lastInjectUs` AtomicLong; exposed via `getLastInjectUs()`
+- `ReceiverService.counterFlushJob`: reads `AccessibilityCommandBus.getLastInjectUs()` every 1 s
+  and writes to `DiagnosticsData.receiveToInjectUs`
+- `DiagnosticsScreen` (bridge): added "Capture→Send" row (µs)
+- `ReceiverDiagnosticsScreen`: added "Recv→Inject" row (µs)
+
+**Robust error handling — accessibility (Phase 4):**
+- `InputBridgeAccessibilityService.injectKeyCode()`: checks `rootInActiveWindow == null`
+  before injection; sets `DiagnosticsData.isSecureWindow = true` and returns early if blocked
+  (lock screen, system dialogs, etc.); wraps injection in try-catch to catch any framework
+  exception and report it in `DiagnosticsData.lastInjectionError`
+- `InputBridgeAccessibilityService.injectText()`: same secure-window guard + try-catch
+- `DiagnosticsData.isSecureWindow`: new field — True while injection is blocked
+- `DiagnosticsData.lastInjectionError`: new field — last injection exception message
+- `ReceiverDiagnosticsScreen`: "Secure Window" row (OK / BLOCKED), "INJECT ERROR" section
+- `AccessibilityCommandBus`: imports `DiagnosticsManager` (`:diagnostics` dependency
+  already declared in `accessibility-receiver/build.gradle.kts`)
+
+**Diagnostics screens:**
+- Bridge `DiagnosticsScreen`: added rows for Latency Avg, Capture→Send, Paired,
+  Reconnects, Reconnecting
+- Receiver `ReceiverDiagnosticsScreen`: added rows for Paired (with peer IP), Session PIN,
+  Latency Avg, Recv→Inject, Dropped (seq), Secure Window, Inject Error section
+
+### Commits
+- Session 007 — Phase 5 remainder + Phase 4 robust error handling
+
+---
+
+## [0.4.0] — 2026-07-21
+
+**Phase 3 remainder (pairing handshake + source validation) + Phase 5 partial (reconnect + packet-loss detection).**
+
+### Fixed
+- BUG-010: `accessibility-receiver/build.gradle.kts` was missing
+  `implementation(project(":diagnostics"))`, causing CI failure for commit `2bc466f`.
+
+### Added
+
+**Pairing (Phase 3):**
+- `PacketSerializer`: `buildPairRequestPayload/parsePairRequestPin`,
+  `buildPairResponsePayload/parsePairResponseAccepted`
+- `EventPacketFactory`: `makePairRequest(pin)`, `makePairResponse(accepted)`, `makePairConfirm()`
+- Receiver generates a 6-digit random session PIN on first run; persisted to `ReceiverPreferences`
+- `BridgeService`: sends `PAIR_REQUEST` after connecting; waits 10 s for `PAIR_RESPONSE`;
+  sends `PAIR_CONFIRM` on accept; updates notification on reject/timeout
+- `ReceiverService`: validates incoming PIN; records `pairedBridgeIp`; drops packets from
+  unknown IPs after pairing; clears pairing on `DISCONNECT`
+- `BridgePreferences`: `pairingPin`, `isPaired`, `setPinAndClearPairing()`
+- `ReceiverPreferences`: `sessionPin`, `pairedBridgeIp`, `isPaired`, `generateNewPin()`
+- `ConnectionScreen` (receiver): prominent 6-digit PIN display + "REGENERATE PIN" button
+- `SettingsScreen` (bridge): "Pairing" section with PIN entry, paired status, "Clear" button
+- `BridgeViewModel`: `isPaired`, `setPairingPin(pin)`, `clearPairing()`
+- `ReceiverViewModel`: `sessionPin`, `isPaired`, `generateNewPin()`
+
+**Reconnect (Phase 5 partial):**
+- `BridgeService`: `startWatchdog()` — 15 s grace period, checks every 3 s for PONG timeout
+- `BridgeService`: `triggerReconnect()` — exponential backoff (1→30 s), up to 10 attempts,
+  guarded by `reconnectInProgress` AtomicBoolean; re-pairs if needed on reconnect
+- `DiagnosticsData`: `isReconnecting`, `reconnectAttempts`, `lastReconnectAttempt`
+- `BridgeViewModel.connectionLabel`: shows "Reconnecting… (attempt N)"
+
+**Packet loss detection (Phase 5 partial):**
+- `ReceiverService`: tracks `lastInputSeqNo`; counts sequence-number gaps as
+  `droppedSequencePackets` AtomicLong; flushed to `DiagnosticsData.packetsDroppedSequence` every 1 s
+
+**Transport:**
+- `UdpTransport.getLastSenderIp()`: exposes last sender's IP address for source validation
+
+**DiagnosticsData new fields:**
+- `isPaired`, `sessionPin`, `pairedPeerIp`, `isReconnecting`, `packetsDroppedSequence`
+
+### Commits
+- Session 006 — BUG-010 fix + pairing + reconnect + packet loss detection
+
+---
+
 ## [0.3.0] — 2026-07-21
 
 **Phase 3+4: PING/PONG keep-alive + full accessibility injection.**

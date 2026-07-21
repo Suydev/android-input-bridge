@@ -178,6 +178,24 @@ class InputBridgeAccessibilityService : AccessibilityService() {
      * - Escape: navigate back
      */
     fun injectKeyCode(keyCode: Int, modifiers: ModifierState) {
+        // Detect secure window (lock screen, PIN entry, etc.) — injection will fail silently.
+        val root = rootInActiveWindow
+        if (root == null) {
+            BridgeLogger.w(TAG, "Secure or inaccessible window — key injection blocked (keyCode=$keyCode)")
+            DiagnosticsManager.update { copy(isSecureWindow = true) }
+            return
+        }
+        DiagnosticsManager.update { copy(isSecureWindow = false) }
+
+        try {
+            injectKeyCodeInternal(keyCode, modifiers)
+        } catch (e: Exception) {
+            BridgeLogger.w(TAG, "injectKeyCode failed (keyCode=$keyCode)", e)
+            DiagnosticsManager.update { copy(lastInjectionError = "Key inject: ${e.message}") }
+        }
+    }
+
+    private fun injectKeyCodeInternal(keyCode: Int, modifiers: ModifierState) {
         // Ctrl shortcuts — handle before printable character resolution
         if (modifiers.ctrl) {
             handleCtrlKey(keyCode)
@@ -316,6 +334,21 @@ class InputBridgeAccessibilityService : AccessibilityService() {
      * Falls back to clipboard paste if the node does not support ACTION_SET_TEXT.
      */
     fun injectText(text: String) {
+        if (rootInActiveWindow == null) {
+            BridgeLogger.w(TAG, "Secure or inaccessible window — text injection blocked")
+            DiagnosticsManager.update { copy(isSecureWindow = true) }
+            return
+        }
+        DiagnosticsManager.update { copy(isSecureWindow = false) }
+        try {
+            injectTextInternal(text)
+        } catch (e: Exception) {
+            BridgeLogger.w(TAG, "injectText failed", e)
+            DiagnosticsManager.update { copy(lastInjectionError = "Text inject: ${e.message}") }
+        }
+    }
+
+    private fun injectTextInternal(text: String) {
         val focused = getFocused()
         if (focused != null) {
             val current = focused.text?.toString() ?: ""
@@ -338,7 +371,7 @@ class InputBridgeAccessibilityService : AccessibilityService() {
             focused?.performAction(AccessibilityNodeInfo.ACTION_PASTE)
                 ?: BridgeLogger.w(TAG, "No focused node for clipboard paste")
         } catch (e: Exception) {
-            BridgeLogger.w(TAG, "Text injection failed", e)
+            BridgeLogger.w(TAG, "Text injection (clipboard fallback) failed", e)
         }
     }
 

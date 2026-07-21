@@ -100,8 +100,10 @@ fun BridgeScreen(
 
             // Latency display
             if (diagnostics.transportConnected && diagnostics.latencyMs > 0) {
+                val avgSuffix = if (diagnostics.latencyAvgMs > 0 && diagnostics.latencyAvgMs != diagnostics.latencyMs)
+                    " · avg ${diagnostics.latencyAvgMs}ms" else ""
                 Text(
-                    text = "${diagnostics.latencyMs}ms",
+                    text = "${diagnostics.latencyMs}ms$avgSuffix",
                     color = BridgeDim,
                     fontSize = 12.sp,
                     fontFamily = FontFamily.Monospace,

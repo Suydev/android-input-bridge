@@ -4,11 +4,13 @@ import android.os.Build
 import androidx.annotation.RequiresApi
 import com.inputbridge.core.logging.BridgeLogger
 import com.inputbridge.core.model.*
+import com.inputbridge.diagnostics.DiagnosticsManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicLong
 
 private const val TAG = "AccessibilityCommandBus"
 
@@ -41,6 +43,17 @@ object AccessibilityCommandBus {
     private val commandFlow = MutableSharedFlow<InputEvent>(extraBufferCapacity = 256)
 
     @Volatile private var service: InputBridgeAccessibilityService? = null
+
+    /**
+     * Time taken by the most recent [handleEvent] call in microseconds.
+     * Written on Dispatchers.Main; read on the counter-flush IO coroutine.
+     * Used to report receive-to-inject latency in diagnostics without touching
+     * the hot path on every event emission.
+     */
+    private val lastInjectUs = AtomicLong(0L)
+
+    /** Expose last inject duration for ReceiverService counter flush. */
+    fun getLastInjectUs(): Long = lastInjectUs.get()
 
     // ── Virtual cursor ────────────────────────────────────────────────────────
 
@@ -97,7 +110,9 @@ object AccessibilityCommandBus {
     init {
         scope.launch {
             commandFlow.collect { event ->
+                val t0 = System.nanoTime()
                 handleEvent(event)
+                lastInjectUs.set((System.nanoTime() - t0) / 1_000L)
             }
         }
     }
