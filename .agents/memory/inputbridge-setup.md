@@ -1,19 +1,34 @@
 ---
 name: InputBridge project setup
-description: Key facts about the InputBridge Android project — where docs live, how to resume, what modules exist
+description: Android multi-module project; docs are the source of truth; read all .md files before coding
 ---
 
-# InputBridge project setup
+# InputBridge Project Setup
 
-**Why:** Every new agent session must read the MD files first — the repo is the single source of truth.
+## Rule
+Read README.md, AI_CONTEXT.md, PROJECT_STATE.md, TASKS.md, ROADMAP.md, DECISIONS.md, SESSION_LOG.md, BUGS.md, BUILD.md before touching any code. The docs are the handoff protocol between agents.
 
-**How to apply:** At session start, read README, AI_CONTEXT, PROJECT_STATE, TASKS, SESSION_LOG in that order. Do not rely on chat history.
+**Why:** Multiple AI agents work on this project across sessions. The docs record every decision, phase completion status, and known bug. Ignoring them causes regressions and duplicated work.
 
-## Key facts
-- Multi-module Kotlin/Gradle Android project (AGP 8.4.2, Kotlin 2.0.0, Compose BOM 2024.06.00)
-- 9 modules: app-bridge, app-receiver, shared-core, protocol, input-capture, transport-wifi, transport-bluetooth-hid, accessibility-receiver, diagnostics
-- GitHub: https://github.com/Suydev/android-input-bridge — CI on every push (GitHub Actions)
-- PacketType IDs are FROZEN — never change existing byte values
-- DiagnosticsManager is a singleton — update from any module, observed by UI via StateFlow
-- Koin for DI (not Hilt), Coroutines+Flow (not RxJava), SharedPreferences now (DataStore in Phase 7)
-- Min SDK 29 (Android 10), target SDK 35
+**How to apply:** First 10 actions of any new session must be reading these files.
+
+## Current state (Session 011)
+- All Phases 1–7 complete. Phase 8 (Wi-Fi Direct, DataStore, clipboard sync, macros) is future work.
+- All bugs BUG-001 through BUG-031 resolved or documented. BUG-027 (USB bulkTransfer) and BUG-030 (scroll sensitivity) are DEFERRED.
+- GitHub: https://github.com/Suydev/android-input-bridge
+- Push with: `git remote set-url origin "https://$(printenv GITHUB_PAT)@github.com/Suydev/android-input-bridge.git" && git push origin main`
+- CI builds on every push to main — check Actions tab for APK artifacts.
+
+## Module layout
+```
+app-bridge/              Bridge APK (Redmi 9)
+app-receiver/            Receiver APK (OnePlus Pad Go)
+shared-core/             InputEvent, AppConfig, FeatureFlags, BridgeLogger
+protocol/                Packet, PacketSerializer, EventPacketFactory
+input-capture/           UsbInputCapture, KeyMap
+transport-wifi/          UdpTransport
+transport-bluetooth-hid/ BluetoothHidTransport (Phase 6)
+accessibility-receiver/  InputBridgeAccessibilityService, AccessibilityCommandBus
+diagnostics/             DiagnosticsData, DiagnosticsManager
+build-logic/             Convention plugins
+```
