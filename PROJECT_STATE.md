@@ -1,7 +1,7 @@
 # Project State
 
 ## Current Version
-`0.5.0` — Phase 5 complete (latency trace + rolling avg) + Phase 4 complete (robust error handling)
+`0.5.1` — CI unblock (BUG-011 ACTION_SELECT_ALL) + automatic GitHub Release workflow
 
 ## Repository
 **GitHub:** https://github.com/Suydev/android-input-bridge  
@@ -11,12 +11,14 @@
 ## CI Status
 | Run | SHA | Status | Notes |
 |-----|-----|--------|-------|
-| TBD | session 007 | ⏳ pending | Phase 5 latency trace + Phase 4 robust error handling |
-| TBD | session 006 | ⏳ pending | BUG-010 fix + pairing + reconnect |
-| TBD | `2bc466f` | ❌ failure | BUG-010: accessibility-receiver missing :diagnostics dependency |
+| TBD | session 008 | ⏳ pending | BUG-011 fix + release.yml |
+| #31 | `117eea9` | ❌ failure | BUG-011: ACTION_SELECT_ALL unresolved (all runs #27–#31 failed for same root cause) |
+| #30 | `c0bbe0e` | ❌ failure | BUG-011: same root cause |
+| #29 | `57fac4e` | ❌ failure | BUG-011: same root cause |
+| #28 | `d2c84ea` | ❌ failure | BUG-011: same root cause |
+| #27 | `2bc466f` | ❌ failure | BUG-010 + BUG-011 compounded |
+| #26 | `75a09b6` | ✅ success | Last green build (before session 005) |
 | #25 | `9931cb8` | ✅ success | Both APKs built, unit tests pass |
-| #24 | `8dbec88` | ❌ failure | androidContext import missing, BuildConfig, ic_menu_receive |
-| #23 | `774ba97` | ❌ failure | AAPT: Theme.Material.NoTitleBar.Fullscreen not found |
 
 **CI pipeline:** `.github/workflows/ci.yml`
 - Builds: `app-bridge` debug APK + `app-receiver` debug APK
@@ -96,14 +98,15 @@
 
 ## Known Issues / Limitations
 - No pairing QR code — manual PIN entry only (QR deferred to Phase 7)
-- No rolling latency average (Phase 5 remainder)
-- No latency trace timestamps across pipeline stages (Phase 5 remainder)
 - No launcher icons (debug builds warn but don't fail)
 - Visual cursor overlay not yet implemented (Phase 7)
 - `BluetoothHidTransport` is Phase 6 stub only
 - Config persisted to SharedPreferences; DataStore migration in Phase 7
 - Manual test on real Portronics Key2 Combo hardware not yet performed
 - Wi-Fi Direct transport not yet implemented
+- No signing secrets configured yet — release APKs are unsigned debug builds until
+  `SIGNING_KEYSTORE_BASE64` / `SIGNING_KEY_ALIAS` / `SIGNING_KEY_PASSWORD` /
+  `SIGNING_STORE_PASSWORD` secrets are added to the GitHub repository
 
 ## Next Task — Phase 5 Remainder + Phase 4 Completion
 

@@ -404,7 +404,17 @@ class InputBridgeAccessibilityService : AccessibilityService() {
     private fun handleCtrlKey(keyCode: Int) {
         val focused = getFocused()
         when (keyCode) {
-            KeyEvent.KEYCODE_A -> focused?.performAction(AccessibilityNodeInfo.ACTION_SELECT_ALL)
+            KeyEvent.KEYCODE_A -> {
+                // Select all: use ACTION_SET_SELECTION spanning the full text range.
+                // ACTION_SELECT_ALL does not exist in the Android SDK — the correct
+                // approach is to set the selection from 0 to text.length.
+                val node = focused ?: return
+                val text = node.text?.toString() ?: ""
+                val args = Bundle()
+                args.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0)
+                args.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, text.length)
+                node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, args)
+            }
             KeyEvent.KEYCODE_C -> focused?.performAction(AccessibilityNodeInfo.ACTION_COPY)
             KeyEvent.KEYCODE_V -> focused?.performAction(AccessibilityNodeInfo.ACTION_PASTE)
             KeyEvent.KEYCODE_X -> focused?.performAction(AccessibilityNodeInfo.ACTION_CUT)

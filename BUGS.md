@@ -182,6 +182,28 @@ InputBridgeAccessibilityService.kt lines 72–85.
 
 ---
 
+## BUG-011 — AccessibilityNodeInfo.ACTION_SELECT_ALL does not exist in Android SDK
+
+**Description**: `InputBridgeAccessibilityService.handleCtrlKey()` referenced
+`AccessibilityNodeInfo.ACTION_SELECT_ALL` for the Ctrl+A (select-all) shortcut.
+This constant does not exist in the Android SDK — it was confused with a non-existent symbol.
+
+**Steps to reproduce**: Build the project.
+
+**Expected behavior**: Compilation succeeds.
+**Actual behavior**: `e: Unresolved reference 'ACTION_SELECT_ALL'` at
+`InputBridgeAccessibilityService.kt:407:80`.
+
+**Files involved**: `accessibility-receiver/.../InputBridgeAccessibilityService.kt`
+
+**Priority**: Critical (blocks CI — all runs #27–#31 failed because of this)
+**Status**: ✅ FIXED (session 008)
+**Fix**: Replace with `AccessibilityNodeInfo.ACTION_SET_SELECTION` passing a Bundle with
+`ACTION_ARGUMENT_SELECTION_START_INT = 0` and `ACTION_ARGUMENT_SELECTION_END_INT = text.length`.
+Both constants exist since API 18 and are stable through API 35.
+
+---
+
 ## BUG-009 — BridgeService/ReceiverService duplicate pipeline on repeated starts
 
 **Description**: `onStartCommand()` launched `startPipeline()` / `startListening()`

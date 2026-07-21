@@ -4,6 +4,30 @@ All meaningful changes recorded chronologically.
 
 ---
 
+## [0.5.1] — 2026-07-21
+
+**CI unblock: fix Ctrl+A compile error + add automatic GitHub Release workflow.**
+
+### Fixed
+
+- **BUG-011**: `AccessibilityNodeInfo.ACTION_SELECT_ALL` does not exist in the
+  Android SDK — caused `Unresolved reference` in CI for all runs #27–#31.
+  Fixed by replacing it with `AccessibilityNodeInfo.ACTION_SET_SELECTION` and a
+  `Bundle` with `ACTION_ARGUMENT_SELECTION_START_INT = 0` and
+  `ACTION_ARGUMENT_SELECTION_END_INT = text.length` (API 18+, stable through API 35).
+
+### Added
+
+- `.github/workflows/release.yml` — automatic GitHub Release workflow:
+  - **Tag push** (`v*`): builds debug + optional signed release APKs, creates a
+    versioned GitHub Release marked as latest.
+  - **CI auto-release**: triggered on every successful `Android CI` run on `main`,
+    creates a pre-release tagged `build-{run}-{sha}` with the debug APKs attached.
+  - Signing is optional — if `SIGNING_KEYSTORE_BASE64` secret is absent, debug APKs
+    are still published. Add signing secrets later to get release APKs.
+
+---
+
 ## [0.5.0] — 2026-07-21
 
 **Phase 5 remainder (latency trace + rolling average) + Phase 4 remainder (robust error handling).**

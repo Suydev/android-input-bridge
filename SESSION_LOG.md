@@ -409,6 +409,72 @@ Continued from session 006. Pairing, reconnect, and packet-loss detection were d
 
 ---
 
+## Session 008 — CI Unblock + Automatic Release Workflow
+
+**Date**: 2026-07-21
+**Agent**: Claude (Replit)
+**Version**: 0.5.0 → 0.5.1
+**Status**: ✅ Complete (pushed, CI pending)
+
+### Context
+All CI runs #27–#31 were failing. The root cause was identified via GitHub Actions logs
+using the stored GITHUB_PAT. Sessions 005–007 had committed new code but never confirmed
+CI was green before the next session started.
+
+### Root Cause Found
+
+**BUG-011: `AccessibilityNodeInfo.ACTION_SELECT_ALL` does not exist**
+
+CI error (all recent runs):
+```
+e: InputBridgeAccessibilityService.kt:407:80 Unresolved reference 'ACTION_SELECT_ALL'.
+```
+
+`AccessibilityNodeInfo` has no `ACTION_SELECT_ALL` constant. The correct approach for
+Ctrl+A (select all text) is `ACTION_SET_SELECTION` with `SELECTION_START=0` and
+`SELECTION_END=text.length` — both stable since API 18.
+
+The error was introduced in session 005 (commit `2bc466f`). Sessions 006 and 007 fixed
+other issues but did not catch this one because they committed on top of failing code
+without checking CI.
+
+### What Was Done
+
+**Bug fix:**
+- `InputBridgeAccessibilityService.handleCtrlKey()`: replaced
+  `focused?.performAction(AccessibilityNodeInfo.ACTION_SELECT_ALL)` with
+  `ACTION_SET_SELECTION` + Bundle(start=0, end=text.length)
+
+**New workflow:**
+- `.github/workflows/release.yml` — two trigger modes:
+  1. **Tag push** (`v*`): builds debug + optional signed release APKs, creates versioned
+     GitHub Release marked as latest
+  2. **CI auto-release**: triggered on every successful `Android CI` run on `main`,
+     creates a pre-release tagged `build-{run_number}-{sha7}` with debug APKs attached
+  - Signing is optional — if `SIGNING_KEYSTORE_BASE64` is absent, only debug APKs are uploaded
+  - Uses `softprops/action-gh-release@v2`, `fail_on_unmatched_files: false` for missing release APKs
+
+**Documentation:**
+- `BUGS.md`: added BUG-011
+- `CHANGELOG.md`: added [0.5.1] entry
+- `PROJECT_STATE.md`: version → 0.5.1, CI table updated (runs #27–#31 all ❌ for BUG-011)
+- `SESSION_LOG.md`: this entry
+
+### Files changed
+- `accessibility-receiver/src/main/kotlin/com/inputbridge/accessibility/InputBridgeAccessibilityService.kt` — BUG-011 fix
+- `.github/workflows/release.yml` — new automatic release workflow
+- `BUGS.md`, `CHANGELOG.md`, `PROJECT_STATE.md`, `SESSION_LOG.md` — updated
+
+### Key decisions
+- Ctrl+A uses `ACTION_SET_SELECTION` (not a hypothetical `ACTION_SELECT_ALL`) — the
+  correct accessibility API for selecting all text in a node since API 18
+- Auto-release creates pre-releases (not stable releases) to avoid polluting the release
+  list with every main commit; only tag pushes create stable releases
+- `fail_on_unmatched_files: false` in the release action — gracefully skips release APK
+  glob if signing secrets are absent, so CI never fails on missing keystore
+
+---
+
 ## Next Session — Phase 6 (Bluetooth HID) or Phase 7 (Polish)
 
 ### Recommended next steps
