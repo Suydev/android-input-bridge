@@ -19,6 +19,21 @@ import com.inputbridge.bridge.ui.theme.*
 import com.inputbridge.bridge.viewmodel.BridgeViewModel
 import com.inputbridge.core.config.TransportMode
 
+/**
+ * Settings screen for the bridge app.
+ *
+ * Bug fixes applied here:
+ *
+ * BUG-018 FIX: Added a "Network Setup" help card above the UDP settings explaining
+ *   how to connect the bridge phone and receiver tablet. This was the most common
+ *   setup hurdle — users didn't know which IP to enter or how to put both devices
+ *   on the same network.
+ *
+ * BUG-026/BUG-029 FIX: Brightness slider redesigned. The old -1f..1f slider had 11
+ *   "dead" positions that all mapped to "System default". Replaced with a dedicated
+ *   "Use System Brightness" toggle + a clean 0–100% slider (only visible when the
+ *   toggle is off). This makes the brightness control unambiguous.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
@@ -45,9 +60,9 @@ fun SettingsScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = BridgeSurface,
+                    containerColor    = BridgeSurface,
                     titleContentColor = BridgeOnSurface,
-                )
+                ),
             )
         },
         containerColor = BridgeBackground,
@@ -114,6 +129,39 @@ fun SettingsScreen(
             if (!isBluetoothHid) {
                 SectionHeader("UDP Transport")
 
+                // ── BUG-018 FIX: Network setup instructions ───────────────────
+                Card(colors = CardDefaults.cardColors(containerColor = BridgeSurface)) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            "NETWORK SETUP",
+                            color = BridgePrimary, fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace, letterSpacing = 2.sp,
+                        )
+                        Text(
+                            "Both devices must be on the SAME Wi-Fi network.\n\n" +
+                                    "★ Easiest — tablet as hotspot:\n" +
+                                    "  1. OnePlus Pad Go: Settings → Hotspot → Enable.\n" +
+                                    "  2. Connect this phone to that hotspot.\n" +
+                                    "  3. Tablet IP = 192.168.43.1  ← enter below.\n\n" +
+                                    "Option B — Same home/office router:\n" +
+                                    "  1. Connect both to the same Wi-Fi.\n" +
+                                    "  2. Tablet: Settings → Wi-Fi → tap network → IP address.\n" +
+                                    "  3. Enter that IP below.\n\n" +
+                                    "Option C — Phone as hotspot:\n" +
+                                    "  1. This phone: Settings → Hotspot → Enable.\n" +
+                                    "  2. Connect the tablet to the phone hotspot.\n" +
+                                    "  3. Find the tablet's IP in Hotspot → Connected devices.",
+                            color    = BridgeDim,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            lineHeight = 16.sp,
+                        )
+                    }
+                }
+
                 OutlinedTextField(
                     value = targetIpInput,
                     onValueChange = { targetIpInput = it; viewModel.setTargetIp(it) },
@@ -139,7 +187,9 @@ fun SettingsScreen(
 
                 Text(
                     "First pair the host device with this phone in Android Bluetooth Settings. " +
-                            "Then optionally enter its MAC address below to auto-connect.",
+                            "Then optionally enter its MAC address below to auto-connect.\n\n" +
+                            "Note: in BT HID mode the receiver app (on the tablet) is NOT needed. " +
+                            "The phone connects directly as a Bluetooth keyboard+mouse.",
                     color = BridgeDim, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
                     lineHeight = 16.sp,
                 )
@@ -268,33 +318,44 @@ fun SettingsScreen(
                 accent = BridgeError,
             )
 
+            // ── BUG-026/BUG-029 FIX: Brightness slider redesign ──────────────
+            // Old: valueRange = -1f..1f with snapping. 11 of 22 positions all mapped to
+            //      "System default" — the left half of the slider was a dead zone.
+            // New: explicit toggle for "system default" + clean 0–100% slider when override is active.
             if (!config.display.blackScreenMode) {
-                Text(
-                    "Screen Brightness: ${
-                        if (config.display.screenBrightness < 0f) "System default"
-                        else "${(config.display.screenBrightness * 100).toInt()}%"
-                    }",
-                    color = BridgeOnSurface, fontFamily = FontFamily.Monospace, fontSize = 13.sp,
-                )
-                Slider(
-                    value = if (config.display.screenBrightness < 0f) -1f
-                            else config.display.screenBrightness,
-                    onValueChange = { v ->
-                        // Snap values near -1 to system default
-                        viewModel.setScreenBrightness(if (v < 0f) -1f else v)
+                val useSystemBrightness = config.display.screenBrightness < 0f
+
+                SettingsSwitch(
+                    label = "Use System Brightness",
+                    description = "Let Android control the screen brightness. " +
+                            "Disable to pin the bridge screen to a specific level.",
+                    checked = useSystemBrightness,
+                    onCheckedChange = { useSystem ->
+                        viewModel.setScreenBrightness(if (useSystem) -1f else 0.5f)
                     },
-                    valueRange = -1f..1f,
-                    steps = 20,
-                    colors = SliderDefaults.colors(
-                        thumbColor = BridgePrimary,
-                        activeTrackColor = BridgePrimary,
-                        inactiveTrackColor = BridgeDim.copy(alpha = 0.3f),
-                    ),
                 )
-                Text(
-                    "Drag left for system default. Slide right to force a specific brightness.",
-                    color = BridgeDim, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
-                )
+
+                if (!useSystemBrightness) {
+                    Text(
+                        "Brightness: ${(config.display.screenBrightness * 100).toInt()}%",
+                        color = BridgeOnSurface, fontFamily = FontFamily.Monospace, fontSize = 13.sp,
+                    )
+                    Slider(
+                        value = config.display.screenBrightness,
+                        onValueChange = { viewModel.setScreenBrightness(it) },
+                        valueRange = 0f..1f,
+                        steps = 19,  // 5% increments: 0, 5, 10 … 95, 100
+                        colors = SliderDefaults.colors(
+                            thumbColor         = BridgePrimary,
+                            activeTrackColor   = BridgePrimary,
+                            inactiveTrackColor = BridgeDim.copy(alpha = 0.3f),
+                        ),
+                    )
+                    Text(
+                        "Pins the bridge screen brightness. Does not affect other apps.",
+                        color = BridgeDim, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                    )
+                }
             }
 
             HorizontalDivider(color = BridgeDim.copy(alpha = 0.3f))
@@ -354,12 +415,12 @@ private fun SettingsSwitch(
                 checked = checked,
                 onCheckedChange = onCheckedChange,
                 colors = SwitchDefaults.colors(
-                    checkedThumbColor       = accent,
-                    checkedTrackColor       = accent.copy(alpha = 0.3f),
-                    checkedBorderColor      = accent,
-                    uncheckedThumbColor     = BridgeDim,
-                    uncheckedTrackColor     = BridgeBackground,
-                    uncheckedBorderColor    = BridgeDim,
+                    checkedThumbColor    = accent,
+                    checkedTrackColor    = accent.copy(alpha = 0.3f),
+                    checkedBorderColor   = accent,
+                    uncheckedThumbColor  = BridgeDim,
+                    uncheckedTrackColor  = BridgeBackground,
+                    uncheckedBorderColor = BridgeDim,
                 ),
             )
         }

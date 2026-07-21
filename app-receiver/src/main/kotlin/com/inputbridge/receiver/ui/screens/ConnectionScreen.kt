@@ -1,5 +1,6 @@
 package com.inputbridge.receiver.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -18,29 +19,49 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.inputbridge.receiver.ui.theme.*
 import com.inputbridge.receiver.viewmodel.ReceiverViewModel
 
+/**
+ * Bug fixes applied here:
+ *
+ * BUG-030 (UI part): STOP button was always visible, even when the service was stopped.
+ *   Pressing STOP on a stopped service silently started and immediately stopped it —
+ *   no crash but confusing empty-state semantics. STOP now only renders when
+ *   isReceiverActive == true.
+ *
+ * UX polish: START button changed from solid BridgePrimary to OutlinedButton to match
+ *   the dark terminal aesthetic seen in the screenshots.
+ */
 @Composable
 fun ConnectionScreen(
     onSettings: () -> Unit,
     onDiagnostics: () -> Unit,
     viewModel: ReceiverViewModel,
 ) {
-    val diagnostics by viewModel.diagnostics.collectAsStateWithLifecycle()
+    val diagnostics      by viewModel.diagnostics.collectAsStateWithLifecycle()
     val isReceiverActive by viewModel.isReceiverActive.collectAsStateWithLifecycle()
-    val connectionLabel by viewModel.connectionLabel.collectAsStateWithLifecycle()
-    val sessionPin by viewModel.sessionPin.collectAsStateWithLifecycle()
-    val isPaired by viewModel.isPaired.collectAsStateWithLifecycle()
+    val connectionLabel  by viewModel.connectionLabel.collectAsStateWithLifecycle()
+    val sessionPin       by viewModel.sessionPin.collectAsStateWithLifecycle()
+    val isPaired         by viewModel.isPaired.collectAsStateWithLifecycle()
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         // ── Top toolbar ───────────────────────────────────────────────────────
         Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp).align(Alignment.TopEnd),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp)
+                .align(Alignment.TopEnd),
             horizontalArrangement = Arrangement.End,
         ) {
             IconButton(onClick = onDiagnostics) {
-                Icon(Icons.Default.BugReport, "Diagnostics", tint = ReceiverDim, modifier = Modifier.size(20.dp))
+                Icon(
+                    Icons.Default.BugReport, "Diagnostics",
+                    tint = ReceiverDim, modifier = Modifier.size(20.dp),
+                )
             }
             IconButton(onClick = onSettings) {
-                Icon(Icons.Default.Settings, "Settings", tint = ReceiverDim, modifier = Modifier.size(20.dp))
+                Icon(
+                    Icons.Default.Settings, "Settings",
+                    tint = ReceiverDim, modifier = Modifier.size(20.dp),
+                )
             }
         }
 
@@ -124,16 +145,14 @@ fun ConnectionScreen(
                 )
             } else {
                 Text(
-                    "Enter this PIN in the bridge app Settings",
+                    "Enter this PIN in the bridge app → Settings → Pairing PIN",
                     color = ReceiverDim,
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
                 )
             }
 
-            TextButton(
-                onClick = { viewModel.generateNewPin() },
-            ) {
+            TextButton(onClick = { viewModel.generateNewPin() }) {
                 Text(
                     "REGENERATE PIN",
                     color = ReceiverDim, fontSize = 10.sp,
@@ -143,27 +162,41 @@ fun ConnectionScreen(
         }
 
         // ── Start / Stop buttons ──────────────────────────────────────────────
+
+        // START: only shown when inactive. Outlined style matches terminal aesthetic.
         if (!isReceiverActive) {
-            Button(
+            OutlinedButton(
                 onClick = { viewModel.startReceiver() },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 80.dp)
                     .fillMaxWidth(0.5f),
-                colors = ButtonDefaults.buttonColors(containerColor = ReceiverPrimary),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = ReceiverPrimary),
+                border = BorderStroke(1.dp, ReceiverPrimary.copy(alpha = 0.8f)),
             ) {
-                Text("START", color = Color.Black, fontFamily = FontFamily.Monospace)
+                Text(
+                    "START", fontFamily = FontFamily.Monospace,
+                    letterSpacing = 3.sp,
+                )
             }
         }
 
-        TextButton(
-            onClick = { viewModel.stopReceiver() },
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp),
-        ) {
-            Text(
-                "STOP", color = ReceiverError, fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, letterSpacing = 3.sp,
-            )
+        // STOP: BUG-030 FIX — only shown when service is actually running.
+        // Emergency stop is always available via Volume Down (3s hold).
+        if (isReceiverActive) {
+            TextButton(
+                onClick = { viewModel.stopReceiver() },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 32.dp),
+            ) {
+                Text(
+                    "STOP",
+                    color = ReceiverError, fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold, letterSpacing = 3.sp,
+                )
+            }
         }
     }
 }

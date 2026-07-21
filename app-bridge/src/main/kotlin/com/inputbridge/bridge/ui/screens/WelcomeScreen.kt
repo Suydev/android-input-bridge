@@ -6,10 +6,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.inputbridge.bridge.ui.theme.*
 import com.inputbridge.bridge.viewmodel.BridgeViewModel
@@ -21,6 +24,12 @@ import com.inputbridge.core.config.TransportMode
  *
  * Phase 7: Only the two implemented transport modes (UDP + BT HID) are shown.
  * WIFI_DIRECT and TCP are stubs not yet wired; hiding them prevents confusion.
+ *
+ * BUG-019/BUG-023 FIX: "Network" status row was hardcoded to true. Now reads
+ *   viewModel.isNetworkAvailable which checks real Wi-Fi/Ethernet connectivity.
+ *
+ * The DisposableEffect lifecycle observer calls viewModel.refreshStatus() on every
+ * ON_RESUME so the status row updates when the user returns from system settings.
  */
 @Composable
 fun WelcomeScreen(
@@ -29,8 +38,18 @@ fun WelcomeScreen(
     onPermissions: () -> Unit,
     viewModel: BridgeViewModel,
 ) {
-    val diagnostics by viewModel.diagnostics.collectAsStateWithLifecycle()
-    val config      by viewModel.config.collectAsStateWithLifecycle()
+    val diagnostics        by viewModel.diagnostics.collectAsStateWithLifecycle()
+    val config             by viewModel.config.collectAsStateWithLifecycle()
+    val isNetworkAvailable by viewModel.isNetworkAvailable.collectAsStateWithLifecycle()
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) viewModel.refreshStatus()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     // Only show implemented transport modes
     val availableModes = listOf(TransportMode.UDP, TransportMode.BLUETOOTH_HID)
@@ -80,9 +99,9 @@ fun WelcomeScreen(
                     Column {
                         Text(
                             text = when (mode) {
-                                TransportMode.UDP            -> "UDP  —  Wi-Fi LAN"
-                                TransportMode.BLUETOOTH_HID  -> "BT HID  —  Bluetooth Keyboard+Mouse"
-                                else                          -> mode.name.replace("_", " ")
+                                TransportMode.UDP           -> "UDP  —  Wi-Fi LAN"
+                                TransportMode.BLUETOOTH_HID -> "BT HID  —  Bluetooth Keyboard+Mouse"
+                                else                        -> mode.name.replace("_", " ")
                             },
                             fontFamily = FontFamily.Monospace,
                             fontSize   = 13.sp,
@@ -91,8 +110,8 @@ fun WelcomeScreen(
                             Text(
                                 text = when (mode) {
                                     TransportMode.UDP           -> "Low latency · Requires receiver app on tablet"
-                                    TransportMode.BLUETOOTH_HID -> "Real cursor · Works with any BT device"
-                                    else                         -> ""
+                                    TransportMode.BLUETOOTH_HID -> "Real cursor · Works with any BT device · No receiver app needed"
+                                    else                        -> ""
                                 },
                                 color      = BridgeDim,
                                 fontSize   = 10.sp,
@@ -107,7 +126,8 @@ fun WelcomeScreen(
         // Permission / status summary
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             StatusRow("USB Device",           diagnostics.usbDeviceConnected)
-            StatusRow("Network",              true)
+            // BUG-019 FIX: was hardcoded true
+            StatusRow("Network",              isNetworkAvailable)
             StatusRow("Battery Optimization", diagnostics.batteryOptimizationIgnored)
         }
 
@@ -125,7 +145,9 @@ fun WelcomeScreen(
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
                 TextButton(onClick = onPermissions) {
-                    Text("Permissions", color = BridgeDim, fontFamily = FontFamily.Monospace)
+                    val tint = if (!diagnostics.batteryOptimizationIgnored)
+                        BridgeWarning else BridgeDim
+                    Text("Permissions", color = tint, fontFamily = FontFamily.Monospace)
                 }
                 TextButton(onClick = onSettings) {
                     Text("Settings", color = BridgeDim, fontFamily = FontFamily.Monospace)

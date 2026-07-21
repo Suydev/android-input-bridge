@@ -2,6 +2,9 @@ package com.inputbridge.receiver.viewmodel
 
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.os.PowerManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.inputbridge.core.config.AppConfig
@@ -30,11 +33,13 @@ class ReceiverViewModel(
         // before the service initialises the field itself.
         DiagnosticsManager.update {
             copy(
-                sessionPin = prefs.sessionPin,
-                isPaired   = prefs.isPaired,
+                sessionPin   = prefs.sessionPin,
+                isPaired     = prefs.isPaired,
                 pairedPeerIp = prefs.pairedBridgeIp,
             )
         }
+        // Initialise permission/network status on first load.
+        refreshStatus()
     }
 
     val diagnostics: StateFlow<DiagnosticsData> = DiagnosticsManager.state
@@ -66,6 +71,38 @@ class ReceiverViewModel(
     val isPaired: StateFlow<Boolean> = diagnostics
         .map { it.isPaired }
         .stateIn(viewModelScope, SharingStarted.Eagerly, prefs.isPaired)
+
+    // ── Network / permission status ────────────────────────────────────────────
+
+    /**
+     * BUG-019/BUG-023 FIX: was hardcoded true. Now reflects actual Wi-Fi/Ethernet state.
+     * Refreshed on every call to [refreshStatus] (called from screen onResume).
+     */
+    private val _isNetworkAvailable = MutableStateFlow(checkNetworkAvailable())
+    val isNetworkAvailable: StateFlow<Boolean> = _isNetworkAvailable.asStateFlow()
+
+    /**
+     * Refresh permission status and network availability.
+     * Call this from the WelcomeScreen DisposableEffect on Lifecycle.Event.ON_RESUME so
+     * the status row updates when the user returns from system settings.
+     */
+    fun refreshStatus() {
+        _isNetworkAvailable.value = checkNetworkAvailable()
+        // BUG-030 FIX: batteryOptimizationIgnored was never updated at runtime.
+        // Now pushed into DiagnosticsManager so the Diagnostics screen and status row
+        // both reflect the current state.
+        val pm = context.getSystemService(PowerManager::class.java)
+        val battOpt = pm?.isIgnoringBatteryOptimizations(context.packageName) == true
+        DiagnosticsManager.update { copy(batteryOptimizationIgnored = battOpt) }
+    }
+
+    private fun checkNetworkAvailable(): Boolean {
+        val cm = context.getSystemService(ConnectivityManager::class.java) ?: return false
+        val network = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(network) ?: return false
+        return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+    }
 
     // ── Full app config ───────────────────────────────────────────────────────
 

@@ -1,7 +1,6 @@
 package com.inputbridge.bridge.ui.screens
 
-import android.app.Activity
-import android.view.WindowManager
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -12,7 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -22,211 +21,177 @@ import com.inputbridge.bridge.ui.theme.*
 import com.inputbridge.bridge.viewmodel.BridgeViewModel
 
 /**
- * Active bridge screen — shown while the bridge is running.
+ * Active bridge screen — shown while the bridge is running (or about to start).
  *
- * Intentionally minimal: mostly black with status indicators.
- * Design goal: absolute minimum light emission.
+ * Black-screen mode: when config.display.blackScreenMode == true, the entire
+ * composable tree collapses to a pitch-black Box (no icons, no text, no buttons).
+ * Window brightness is also clamped to near-zero via DisposableEffect on the
+ * WindowManager LayoutParams.
  *
- * Phase 7 additions:
- * - Black-screen mode: when enabled, hides ALL chrome and dims the window to
- *   hardware-minimum brightness. The screen shows only the STOP touch target.
- * - Brightness control: applies [DisplayConfig.screenBrightness] to the window.
- * - Latency visibility: respects [DisplayConfig.showLatencyOverlay].
+ * UX fix: START button changed from solid bright-green (Button) to OutlinedButton.
+ * The solid bright-green button was visually jarring against the dark terminal
+ * background (visible in user screenshots). The outlined style is consistent with
+ * the app's monochrome terminal aesthetic while remaining clearly tappable.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BridgeScreen(
-    onSettings: () -> Unit,
     onDiagnostics: () -> Unit,
+    onSettings: () -> Unit,
     viewModel: BridgeViewModel,
 ) {
-    val diagnostics        by viewModel.diagnostics.collectAsStateWithLifecycle()
-    val isBridgeActive     by viewModel.isBridgeActive.collectAsStateWithLifecycle()
-    val connectionLabel    by viewModel.connectionLabel.collectAsStateWithLifecycle()
-    val config             by viewModel.config.collectAsStateWithLifecycle()
+    val diagnostics    by viewModel.diagnostics.collectAsStateWithLifecycle()
+    val config         by viewModel.config.collectAsStateWithLifecycle()
+    val connectionLabel by viewModel.connectionLabel.collectAsStateWithLifecycle()
+    val isBridgeActive by viewModel.isBridgeActive.collectAsStateWithLifecycle()
 
-    val blackScreenMode    = config.display.blackScreenMode
-    val showLatency        = config.display.showLatencyOverlay
-    val screenBrightness   = config.display.screenBrightness
-
-    // ── Window brightness effect ──────────────────────────────────────────────
-    val activity = LocalContext.current as? Activity
-    DisposableEffect(blackScreenMode, screenBrightness) {
-        activity?.window?.let { win ->
-            val lp = win.attributes
-            lp.screenBrightness = when {
-                blackScreenMode         -> 0.001f   // hardware minimum (0 may turn off backlight)
-                screenBrightness >= 0f  -> screenBrightness
-                else                    -> WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+    // Apply window brightness override. -1 = system default (no override).
+    val view = LocalView.current
+    DisposableEffect(config.display.screenBrightness, config.display.blackScreenMode) {
+        val window = (view.context as? android.app.Activity)?.window
+        if (window != null) {
+            val targetBrightness = when {
+                config.display.blackScreenMode -> 0.01f
+                config.display.screenBrightness < 0f -> android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                else -> config.display.screenBrightness
             }
-            win.attributes = lp
+            window.attributes = window.attributes.also { it.screenBrightness = targetBrightness }
         }
         onDispose {
-            // Restore to system default when leaving this screen
-            activity?.window?.let { win ->
-                val lp = win.attributes
-                lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
-                win.attributes = lp
-            }
+            val window2 = (view.context as? android.app.Activity)?.window
+            window2?.attributes = window2?.attributes?.also {
+                it.screenBrightness = android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+            } ?: window2?.attributes
         }
     }
 
-    // ── Black screen mode: pure black, minimal content ────────────────────────
-    if (blackScreenMode) {
-        Box(
-            modifier = Modifier.fillMaxSize().background(Color.Black),
-            contentAlignment = Alignment.Center,
-        ) {
-            // Single tap-anywhere-to-stop concept — show only a faint indicator
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                val dotColor = if (diagnostics.transportConnected) BridgePrimary else BridgeError
-                Box(
-                    Modifier.size(6.dp).background(
-                        dotColor, androidx.compose.foundation.shape.CircleShape
-                    )
-                )
-                Text(
-                    text = if (diagnostics.transportConnected)
-                        if (diagnostics.usbDeviceConnected) "●" else "○"
-                    else "×",
-                    color = BridgeDim.copy(alpha = 0.4f),
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace,
-                )
-            }
-
-            TextButton(
-                onClick = { viewModel.stopBridge() },
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp),
-            ) {
-                Text(
-                    "STOP", color = BridgeError.copy(alpha = 0.5f),
-                    fontSize = 10.sp, fontFamily = FontFamily.Monospace, letterSpacing = 3.sp,
-                )
-            }
-        }
+    // Black-screen mode: render nothing except a pitch-black screen.
+    if (config.display.blackScreenMode) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black))
         return
     }
 
-    // ── Normal mode ───────────────────────────────────────────────────────────
-
-    Box(
-        modifier = Modifier.fillMaxSize().background(Color.Black),
-    ) {
-        // Top bar — tiny icons only
+    Box(modifier = Modifier.fillMaxSize().background(BridgeBackground)) {
+        // ── Top toolbar ───────────────────────────────────────────────────────
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(12.dp)
-                .align(Alignment.TopCenter),
+                .align(Alignment.TopEnd),
             horizontalArrangement = Arrangement.End,
         ) {
             IconButton(onClick = onDiagnostics) {
-                Icon(Icons.Default.BugReport, contentDescription = "Diagnostics",
-                    tint = BridgeDim, modifier = Modifier.size(20.dp))
+                Icon(
+                    Icons.Default.BugReport, "Diagnostics",
+                    tint = BridgeDim, modifier = Modifier.size(20.dp),
+                )
             }
             IconButton(onClick = onSettings) {
-                Icon(Icons.Default.Settings, contentDescription = "Settings",
-                    tint = BridgeDim, modifier = Modifier.size(20.dp))
+                Icon(
+                    Icons.Default.Settings, "Settings",
+                    tint = BridgeDim, modifier = Modifier.size(20.dp),
+                )
             }
         }
 
-        // Centre status cluster
+        // ── Centre status cluster ─────────────────────────────────────────────
         Column(
             modifier = Modifier.align(Alignment.Center),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // Mode badge
+            // Transport mode label
             Text(
-                text = diagnostics.transportMode,
-                color = BridgeDim,
-                fontSize = 11.sp, fontFamily = FontFamily.Monospace, letterSpacing = 2.sp,
+                diagnostics.transportMode.ifEmpty { "UDP" },
+                color = BridgeDim, fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace, letterSpacing = 2.sp,
             )
 
-            // Connection status dot + label
+            // Connection dot + label
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 val dotColor = when {
                     diagnostics.transportConnected -> BridgePrimary
+                    diagnostics.isReconnecting     -> BridgeWarning
                     diagnostics.bridgeServiceRunning -> BridgeWarning
-                    else -> BridgeError
+                    else                           -> BridgeError
                 }
                 Box(
-                    Modifier.size(8.dp).background(
-                        dotColor, androidx.compose.foundation.shape.CircleShape
-                    )
+                    Modifier
+                        .size(8.dp)
+                        .background(dotColor, androidx.compose.foundation.shape.CircleShape)
                 )
                 Text(
-                    text = connectionLabel,
+                    connectionLabel,
                     color = BridgeOnSurface,
-                    fontSize = 14.sp, fontFamily = FontFamily.Monospace,
-                )
-            }
-
-            // Latency display — only when enabled and data is available
-            if (showLatency && diagnostics.transportConnected && diagnostics.latencyMs > 0) {
-                val avgSuffix = if (diagnostics.latencyAvgMs > 0 &&
-                    diagnostics.latencyAvgMs != diagnostics.latencyMs)
-                    " · avg ${diagnostics.latencyAvgMs}ms" else ""
-                Text(
-                    text = "${diagnostics.latencyMs}ms$avgSuffix",
-                    color = when {
-                        diagnostics.latencyMs < 10  -> BridgePrimary
-                        diagnostics.latencyMs < 30  -> BridgeOnSurface
-                        else                         -> BridgeWarning
-                    },
-                    fontSize = 12.sp, fontFamily = FontFamily.Monospace,
+                    fontSize = 14.sp,
+                    fontFamily = FontFamily.Monospace,
                 )
             }
 
             // USB status
             Text(
-                text = if (diagnostics.usbDeviceConnected)
-                    "⌨  ${diagnostics.usbDeviceName}" else "No USB device",
-                color = if (diagnostics.usbDeviceConnected) BridgePrimary else BridgeDim,
+                "USB: ${diagnostics.usbDeviceName.ifEmpty { "No USB device" }}",
+                color = if (diagnostics.usbDeviceConnected) BridgeOnSurface else BridgeDim,
                 fontSize = 12.sp, fontFamily = FontFamily.Monospace,
             )
 
-            // Secure window warning
-            if (diagnostics.isSecureWindow) {
+            // Latency overlay (optional)
+            if (config.display.showLatencyOverlay && diagnostics.transportConnected) {
                 Text(
-                    "⚠  Secure window — input blocked",
-                    color = BridgeWarning, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                    "↕ ${diagnostics.latencyMs}ms  avg ${diagnostics.latencyAvgMs}ms",
+                    color = BridgeDim, fontSize = 12.sp, fontFamily = FontFamily.Monospace,
+                )
+            }
+
+            // Last error (shown below status when present)
+            diagnostics.lastError?.let { err ->
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    err,
+                    color = BridgeError, fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(horizontal = 32.dp),
                 )
             }
         }
 
-        // Emergency stop — bottom centre, always reachable
-        TextButton(
-            onClick = { viewModel.stopBridge() },
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 32.dp),
-        ) {
-            Text(
-                text = "STOP",
-                color = BridgeError, fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, letterSpacing = 3.sp,
-            )
-        }
-
-        // Start button (only when service is not active)
+        // ── Start button (outlined, terminal-style) ───────────────────────────
+        // UX FIX: replaced solid bright-green Button with OutlinedButton.
+        // The solid bright-green was visually inconsistent with the dark terminal theme.
         if (!isBridgeActive) {
-            Button(
+            OutlinedButton(
                 onClick = { viewModel.startBridge() },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 80.dp)
                     .fillMaxWidth(0.5f),
-                colors = ButtonDefaults.buttonColors(containerColor = BridgePrimary),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = BridgePrimary),
+                border = BorderStroke(1.dp, BridgePrimary.copy(alpha = 0.8f)),
             ) {
-                Text("START", color = Color.Black, fontFamily = FontFamily.Monospace)
+                Text(
+                    "START",
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 3.sp,
+                )
+            }
+        }
+
+        // STOP (text button, always red, only shown when active)
+        if (isBridgeActive || diagnostics.bridgeServiceRunning) {
+            TextButton(
+                onClick = { viewModel.stopBridge() },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 32.dp),
+            ) {
+                Text(
+                    "STOP",
+                    color = BridgeError, fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold, letterSpacing = 3.sp,
+                )
             }
         }
     }

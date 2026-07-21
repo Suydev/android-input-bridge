@@ -26,6 +26,11 @@ import org.koin.androidx.viewmodel.ext.android.viewModel
  * - Volume-Down hold (3 seconds) triggers emergency stop of the receiver service.
  * - Portrait lock removed from manifest — the receiver tablet should support both
  *   orientations freely.
+ *
+ * Bug fixes:
+ * - BUG-020: Added ReceiverRoute.PERMISSIONS and corresponding composable to give
+ *   the receiver app a first-class permissions guidance screen (battery opt,
+ *   POST_NOTIFICATIONS, overlay).
  */
 class MainActivity : ComponentActivity() {
 
@@ -55,6 +60,7 @@ class MainActivity : ComponentActivity() {
                             onStart         = { navController.navigate(ReceiverRoute.CONNECTION) },
                             onAccessibility = { navController.navigate(ReceiverRoute.ACCESSIBILITY) },
                             onSettings      = { navController.navigate(ReceiverRoute.SETTINGS) },
+                            onPermissions   = { navController.navigate(ReceiverRoute.PERMISSIONS) },
                             viewModel       = viewModel,
                         )
                     }
@@ -67,6 +73,10 @@ class MainActivity : ComponentActivity() {
                     }
                     composable(ReceiverRoute.ACCESSIBILITY) {
                         AccessibilitySetupScreen(onBack = { navController.popBackStack() })
+                    }
+                    // BUG-020 FIX: receiver now has a dedicated permissions screen.
+                    composable(ReceiverRoute.PERMISSIONS) {
+                        ReceiverPermissionsScreen(onBack = { navController.popBackStack() })
                     }
                     composable(ReceiverRoute.SETTINGS) {
                         ReceiverSettingsScreen(
@@ -123,6 +133,7 @@ object ReceiverRoute {
     const val WELCOME       = "welcome"
     const val CONNECTION    = "connection"
     const val ACCESSIBILITY = "accessibility"
+    const val PERMISSIONS   = "permissions"   // BUG-020 FIX: new route
     const val SETTINGS      = "settings"
     const val DIAGNOSTICS   = "diagnostics"
 }

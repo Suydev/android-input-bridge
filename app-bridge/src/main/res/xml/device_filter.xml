@@ -1,5 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- USB device filter for OTG input devices -->
-    <usb-device vendor-id="1234" product-id="5678" />
+    <!--
+        USB HID device filter for the Portronics Key2 Combo receiver (and any standard HID dongle).
+
+        BUG-013 FIX: The previous version used placeholder vendor-id="1234" product-id="5678"
+        which NEVER matched any real device. The USB_DEVICE_ATTACHED intent was therefore never
+        delivered to MainActivity, so the service never knew a device was plugged in.
+
+        Fix: Accept any device with USB class 0x03 (HID). The BridgeService then validates the
+        interface class at runtime (USB_CLASS_HID = 0x03) before starting capture.
+
+        Class 3 = USB HID (keyboard, mouse, gamepad, etc.)
+        The Portronics Key2 Combo USB dongle registers as a standard HID boot-protocol device.
+    -->
+    <usb-device class="3" />
 </resources>

@@ -8,14 +8,17 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
 
-    <!-- Wi-Fi Direct -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
-        android:usesPermissionFlags="neverForLocation" />
-
     <!-- Foreground service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!--
+        BUG-014 FIX: Changed from FOREGROUND_SERVICE_DATA_SYNC to FOREGROUND_SERVICE_CONNECTED_DEVICE.
+
+        FOREGROUND_SERVICE_DATA_SYNC carries a 6-hour/day runtime cap on Android 14+.
+        The receiver service may run for many hours during a typing/browsing session, so using
+        CONNECTED_DEVICE (no runtime cap) is correct. The receiver is "managing" the bridge
+        keyboard device over the network — this qualifies as a connected-device use case.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- Auto-start on boot -->
@@ -24,17 +27,16 @@
     <!-- Clipboard for text injection -->
     <uses-permission android:name="android.permission.READ_CLIPBOARD" />
 
-    <!-- Battery -->
+    <!-- Battery optimization exemption (user-directed, shown on PermissionsScreen) -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
-    <!-- Notifications (API 33+) -->
+    <!-- Notifications: shown in PermissionsScreen (API 33+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!--
-        Phase 7: cursor dot overlay.
-        Required by CursorOverlayService to draw a floating crosshair on top of
-        all other apps. User grants this via Settings.ACTION_MANAGE_OVERLAY_PERMISSION.
-        Guarded in the Settings screen and in CursorOverlayService itself.
+        Cursor dot overlay. Required by CursorOverlayService.
+        User grants this via Settings.ACTION_MANAGE_OVERLAY_PERMISSION from ReceiverPermissionsScreen
+        or ReceiverSettingsScreen. Guarded by canDrawOverlays() in the service itself.
     -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
@@ -48,9 +50,8 @@
         android:theme="@style/Theme.InputBridgeReceiver">
 
         <!--
-            Phase 7: screenOrientation removed (was "portrait").
-            The receiver tablet should support both orientations freely.
-            android:configChanges handles rotation without restarting the activity.
+            screenOrientation removed (was "portrait") — the receiver tablet supports both orientations.
+            configChanges handles rotation without restarting the activity.
         -->
         <activity
             android:name=".ui.MainActivity"
@@ -63,18 +64,16 @@
             </intent-filter>
         </activity>
 
-        <!-- Foreground service keeping the receiver alive -->
+        <!-- BUG-014 FIX: foregroundServiceType changed from dataSync to connectedDevice -->
         <service
             android:name=".service.ReceiverService"
             android:exported="false"
-            android:foregroundServiceType="dataSync"
+            android:foregroundServiceType="connectedDevice"
             android:enabled="true" />
 
         <!--
-            Phase 7: cursor dot overlay service.
-            Not a foreground service — just a lightweight WindowManager overlay.
-            Only started when the user enables showCursorOverlay AND canDrawOverlays()
-            returns true. Uses TYPE_APPLICATION_OVERLAY (API 26+).
+            Cursor dot overlay service. Not a foreground service — lightweight WindowManager overlay.
+            Only started when showCursorOverlay pref is true AND canDrawOverlays() is true.
         -->
         <service
             android:name=".service.CursorOverlayService"

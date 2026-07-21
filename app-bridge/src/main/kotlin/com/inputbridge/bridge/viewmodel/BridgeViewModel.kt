@@ -2,6 +2,9 @@ package com.inputbridge.bridge.viewmodel
 
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.os.PowerManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.inputbridge.bridge.prefs.BridgePreferences
@@ -28,6 +31,11 @@ class BridgeViewModel(
     private val prefs: BridgePreferences,
 ) : ViewModel() {
 
+    init {
+        // Initialise permission/network status on first load.
+        refreshStatus()
+    }
+
     /** Full diagnostics snapshot — source of truth for all status UI. */
     val diagnostics: StateFlow<DiagnosticsData> = DiagnosticsManager.state
 
@@ -47,6 +55,35 @@ class BridgeViewModel(
             }
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, "Bridge stopped")
+
+    // ── Network / permission status ────────────────────────────────────────────
+
+    /**
+     * BUG-019/BUG-023 FIX: was hardcoded true. Now reflects actual Wi-Fi/Ethernet state.
+     * Refreshed on every call to [refreshStatus] (called from screen onResume).
+     */
+    private val _isNetworkAvailable = MutableStateFlow(checkNetworkAvailable())
+    val isNetworkAvailable: StateFlow<Boolean> = _isNetworkAvailable.asStateFlow()
+
+    /**
+     * Refresh permission status and network availability.
+     * Called from WelcomeScreen and PermissionsScreen DisposableEffect on ON_RESUME.
+     */
+    fun refreshStatus() {
+        _isNetworkAvailable.value = checkNetworkAvailable()
+        // BUG-030 FIX: batteryOptimizationIgnored was never updated at runtime.
+        val pm = context.getSystemService(PowerManager::class.java)
+        val battOpt = pm?.isIgnoringBatteryOptimizations(context.packageName) == true
+        DiagnosticsManager.update { copy(batteryOptimizationIgnored = battOpt) }
+    }
+
+    private fun checkNetworkAvailable(): Boolean {
+        val cm = context.getSystemService(ConnectivityManager::class.java) ?: return false
+        val network = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(network) ?: return false
+        return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+    }
 
     // ── Full app config (persisted to SharedPreferences) ──────────────────────
 
@@ -160,6 +197,10 @@ class BridgeViewModel(
     /**
      * Set screen brightness override (-1 = system default, 0.0–1.0 = explicit).
      * Only applied when black-screen mode is off.
+     *
+     * BUG-026/BUG-029 FIX: callers now supply clean values (0–1 for explicit,
+     * -1 for system default) rather than relying on slider snap logic.
+     * See SettingsScreen for the redesigned toggle+slider UI.
      */
     fun setScreenBrightness(brightness: Float) {
         val clamped = if (brightness < 0f) -1f else brightness.coerceIn(0f, 1f)
