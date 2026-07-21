@@ -161,6 +161,41 @@ fun ConnectionScreen(
             }
         }
 
+        // ── BT HID mode info card ─────────────────────────────────────────────
+        // Always shown so users who selected BT HID on the bridge understand
+        // this app is not needed in that mode.
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 140.dp)
+                .padding(horizontal = 24.dp),
+        ) {
+            androidx.compose.material3.Card(
+                colors = androidx.compose.material3.CardDefaults.cardColors(
+                    containerColor = ReceiverSurface.copy(alpha = 0.85f),
+                ),
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        "BLUETOOTH HID MODE",
+                        color = ReceiverWarning, fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace, letterSpacing = 2.sp,
+                    )
+                    Text(
+                        "If the bridge app is set to BT HID mode this receiver app is NOT needed. " +
+                        "The bridge phone connects directly as a Bluetooth keyboard+mouse — " +
+                        "pair it via Settings → Bluetooth on this device.",
+                        color = ReceiverDim, fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        lineHeight = 16.sp,
+                    )
+                }
+            }
+        }
+
         // ── Start / Stop buttons ──────────────────────────────────────────────
 
         // START: only shown when inactive. Outlined style matches terminal aesthetic.

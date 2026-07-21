@@ -15,6 +15,7 @@ import com.inputbridge.core.config.MouseConfig
 import com.inputbridge.core.config.SecurityConfig
 import com.inputbridge.core.config.TransportConfig
 import com.inputbridge.core.config.TransportMode
+import com.inputbridge.core.logging.BridgeLogger
 import com.inputbridge.diagnostics.DiagnosticsData
 import com.inputbridge.diagnostics.DiagnosticsManager
 import kotlinx.coroutines.flow.*
@@ -30,6 +31,10 @@ class BridgeViewModel(
     private val context: Context,
     private val prefs: BridgePreferences,
 ) : ViewModel() {
+
+    private companion object {
+        private const val TAG = "BridgeViewModel"
+    }
 
     init {
         // Initialise permission/network status on first load.
@@ -223,15 +228,26 @@ class BridgeViewModel(
 
     fun startBridge() {
         viewModelScope.launch {
-            context.startForegroundService(Intent(context, BridgeService::class.java))
+            runCatching {
+                context.startForegroundService(Intent(context, BridgeService::class.java))
+            }.onFailure { e ->
+                BridgeLogger.e(TAG, "Failed to start bridge service: ${e.message}")
+                DiagnosticsManager.update {
+                    copy(lastError = "Could not start service: ${e.message}")
+                }
+            }
         }
     }
 
     fun stopBridge() {
         viewModelScope.launch {
-            val intent = Intent(context, BridgeService::class.java)
-            intent.action = BridgeService.ACTION_STOP
-            context.startService(intent)
+            runCatching {
+                val intent = Intent(context, BridgeService::class.java)
+                intent.action = BridgeService.ACTION_STOP
+                context.startService(intent)
+            }.onFailure { e ->
+                BridgeLogger.e(TAG, "Failed to stop bridge service: ${e.message}")
+            }
         }
     }
 }

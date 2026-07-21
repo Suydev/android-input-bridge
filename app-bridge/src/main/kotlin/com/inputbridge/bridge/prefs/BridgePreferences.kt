@@ -102,9 +102,28 @@ class BridgePreferences(context: Context) {
     /**
      * Screen brightness override when not in black-screen mode.
      * -1f = follow system default. 0f–1f = explicit override.
+     *
+     * Migration: the old slider (before the toggle+slider redesign) stored values
+     * in the range -1f..1f where negative = system default but could accidentally
+     * leave values like 0.33f if the user had touched the slider. We detect this by
+     * checking a migration flag. On first run with the new code the flag is absent,
+     * so we reset any positive stored value back to -1f (system default).
      */
     var screenBrightness: Float
-        get() = prefs.getFloat(KEY_SCREEN_BRIGHTNESS, -1f)
+        get() {
+            val raw = prefs.getFloat(KEY_SCREEN_BRIGHTNESS, -1f)
+            // Run once: if the migration sentinel is missing the user has never
+            // explicitly set the value in the new toggle+slider UI.  Any positive
+            // raw value is a leftover from the old buggy slider — reset it.
+            if (!prefs.getBoolean(KEY_BRIGHTNESS_MIGRATED, false)) {
+                prefs.edit().putBoolean(KEY_BRIGHTNESS_MIGRATED, true).apply()
+                if (raw > 0f) {
+                    prefs.edit().putFloat(KEY_SCREEN_BRIGHTNESS, -1f).apply()
+                    return -1f
+                }
+            }
+            return raw
+        }
         set(value) = prefs.edit().putFloat(KEY_SCREEN_BRIGHTNESS, value).apply()
 
     companion object {
@@ -120,8 +139,9 @@ class BridgePreferences(context: Context) {
         private const val KEY_KEEP_SCREEN_ON     = "keep_screen_on"
         private const val KEY_SHOW_LATENCY       = "show_latency_overlay"
         private const val KEY_AUTO_START_ON_BOOT = "auto_start_on_boot"
-        private const val KEY_BRIDGE_SENSITIVITY = "bridge_sensitivity"
-        private const val KEY_SCREEN_BRIGHTNESS  = "screen_brightness"
+        private const val KEY_BRIDGE_SENSITIVITY  = "bridge_sensitivity"
+        private const val KEY_SCREEN_BRIGHTNESS   = "screen_brightness"
+        private const val KEY_BRIGHTNESS_MIGRATED = "brightness_v2_migrated"
         const val DEFAULT_PORT        = 54321
         const val DEFAULT_SENSITIVITY = 1.0f
     }

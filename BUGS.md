@@ -514,6 +514,136 @@ available at all times regardless of UI state.
 
 ---
 
+## BUG-032 — USB PendingIntent FLAG_IMMUTABLE blocks permission result delivery (Android 12+)
+
+**Description**: `BridgeService.requestUsbPermission()` created its PendingIntent with
+`PendingIntent.FLAG_IMMUTABLE`. On Android 12+ (API 31+), the Android USB system must write
+`EXTRA_PERMISSION_GRANTED` and `EXTRA_DEVICE` extras into the PendingIntent before delivering
+the broadcast. Immutable PendingIntents block those writes. As a result, the broadcast receiver
+always saw `granted = false` (the default) even when the user tapped "Allow" on the permission
+dialog. This manifested as: user grants USB permission → dialog dismisses → app still shows
+"USB device not found" or "USB permission denied" → repeated permission dialogs.
+
+**Root cause**: Android requires `FLAG_MUTABLE` for PendingIntents where the system needs to fill
+in extras. USB permission result delivery is one of the canonical use-cases listed in the docs.
+
+**Files involved**: `app-bridge/src/main/kotlin/com/inputbridge/bridge/service/BridgeService.kt`
+
+**Priority**: Critical (USB capture completely non-functional — all keyboard/mouse input dead)
+**Status**: ✅ FIXED (Session 012)
+**Fix**: Changed to `PendingIntent.FLAG_MUTABLE` on API 31+, `0` on older versions. Added
+a clear comment explaining why this flag is mandatory for USB permission intents.
+
+---
+
+## BUG-033 — startForegroundService() crashes on Android 12+ when called from background
+
+**Description**: Both `BridgeViewModel.startBridge()` and `ReceiverViewModel.startReceiver()`
+call `context.startForegroundService()` inside `viewModelScope.launch {}` with no exception
+handling. On Android 12+ (API 31+), calling `startForegroundService()` while the app is in the
+background (any transient background moment — screen-off, activity paused) throws
+`ForegroundServiceStartNotAllowedException`. With `SupervisorJob` the failed child coroutine
+does not propagate to cancel the ViewModel, but the unhandled exception goes to the global
+uncaught exception handler and crashes the app.
+
+**User symptom**: App crashes when pressing START button. Also affects STOP button which
+calls `startService()` with an ACTION_STOP intent — same exception risk.
+
+**Files involved**:
+- `app-bridge/.../viewmodel/BridgeViewModel.kt`
+- `app-receiver/.../viewmodel/ReceiverViewModel.kt`
+
+**Priority**: Critical (START/STOP buttons crash the app)
+**Status**: ✅ FIXED (Session 012)
+**Fix**: Wrapped all `startForegroundService()` and `startService()` calls in `runCatching {}`.
+Failures are logged via `BridgeLogger` and surfaced into `DiagnosticsManager.lastError` so the
+UI can show the user what went wrong rather than crashing silently.
+
+---
+
+## BUG-034 — Bridge sensitivity slider is a complete no-op (scaling never applied)
+
+**Description**: `BridgePreferences.bridgeSensitivity` is stored and shown on the Settings
+screen, and `BridgeViewModel.setBridgeSensitivity()` persists changes. However, `BridgeService.
+startCapture()` forwarded raw `InputEvent` objects directly from `UsbInputCapture.events` to the
+transport without ever reading `prefs.bridgeSensitivity` or scaling `MouseMove.dx/dy`. Moving the
+sensitivity slider had zero effect on actual mouse movement speed.
+
+**Files involved**: `app-bridge/.../service/BridgeService.kt`
+
+**Priority**: High (bridge-side sensitivity slider completely non-functional)
+**Status**: ✅ FIXED (Session 012)
+**Fix**: In `startCapture()`, before dispatching each event, check if `prefs.bridgeSensitivity ≠ 1.0f`
+and if the event is a `MouseMove`. If so, return `event.copy(dx = dx * s, dy = dy * s)`.
+Applied both to BT HID and UDP paths (the scaled event replaces the raw one for both).
+
+---
+
+## BUG-035 — POST_NOTIFICATIONS never requested at first launch
+
+**Description**: Both apps declare `POST_NOTIFICATIONS` in their manifests and have a
+PermissionsScreen that can request it. However, neither app proactively requests the permission
+at first launch. Users must discover and navigate to PermissionsScreen manually. On Android 13+
+(OnePlus Pad Go target), without `POST_NOTIFICATIONS`, the foreground service notification is
+silently suppressed. On some OEM ROMs (OnePlus OxygenOS), a foreground service without a
+visible notification is treated as a background service and may be killed.
+
+**User symptom**: Service appears to start (no crash) but no notification appears, service is
+killed after a few minutes, bridge appears to disconnect randomly.
+
+**Files involved**:
+- `app-bridge/.../ui/MainActivity.kt`
+- `app-receiver/.../ui/MainActivity.kt`
+
+**Priority**: High
+**Status**: ✅ FIXED (Session 012)
+**Fix**: Added `notificationPermLauncher` (ActivityResultContracts.RequestPermission) in both
+MainActivity classes. Called `requestNotificationPermissionIfNeeded()` from `onCreate()`. Only
+requests if API ≥ 33 and permission not already granted. System dialog shows only once (Android
+caches the result); subsequent launches skip the launcher call entirely.
+
+---
+
+## BUG-036 — Receiver app shows no information about BT HID mode
+
+**Description**: When the bridge is configured for BT HID mode, the receiver app is not needed.
+However, the receiver's ConnectionScreen shows "Waiting for bridge…" indefinitely with no
+explanation. Users setting up BT HID mode would:
+1. Install receiver on the tablet
+2. Open it, see "Waiting for bridge…"
+3. Enable the Accessibility service (not needed for BT HID)
+4. Start the receiver service (also not needed)
+5. Still never see a connection — no explanation why
+
+**Files involved**: `app-receiver/.../ui/screens/ConnectionScreen.kt`
+
+**Priority**: Medium (UX confusion, not a crash)
+**Status**: ✅ FIXED (Session 012)
+**Fix**: Added a permanent info card at the bottom of ConnectionScreen explaining: in BT HID mode
+the receiver app is NOT needed; the bridge phone pairs directly as a Bluetooth keyboard+mouse via
+Settings → Bluetooth on the tablet. Card is always visible so it doesn't require any state from
+the bridge.
+
+---
+
+## BUG-037 — Brightness pref shows stale value from old slider (starts at 33%)
+
+**Description**: The old brightness slider used `valueRange = -1f..1f`. If the user had
+touched it, a positive float (e.g. `0.33f`) could be stored in SharedPreferences. After the
+Phase 7 redesign (toggle + 0–1 slider), the new code correctly reads the stored `0.33f` and
+displays "Use System Brightness = OFF, 33%". The user perceives this as "slider starts at 33%".
+
+**Files involved**: `app-bridge/.../prefs/BridgePreferences.kt`
+
+**Priority**: Low (cosmetic — only affects upgrades from pre-Phase-7 installs)
+**Status**: ✅ FIXED (Session 012)
+**Fix**: Added a migration sentinel key (`brightness_v2_migrated`) to `BridgePreferences`. On
+first read after upgrade (sentinel absent), if the stored value is positive (meaning it was
+explicitly set with the old slider), it is reset to `-1f` (system default) and the sentinel is
+written. Fresh installs are unaffected (default is already `-1f`).
+
+---
+
 ## BUG-009 — BridgeService/ReceiverService duplicate pipeline on repeated starts
 
 **Description**: `onStartCommand()` launched `startPipeline()` / `startListening()`

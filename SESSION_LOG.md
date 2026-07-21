@@ -115,6 +115,63 @@
 
 ---
 
+## Session 012 — Deep Bug Hunt + Critical Fixes
+**Date:** 2026-07-21
+**Agent:** Claude (Replit)
+**Status:** ✅ Complete
+
+### Goals
+Deep audit of all app code to find crashes, UX failures, and coordination gaps.
+User reported: receiver crashes on button press, USB device not found after permission granted,
+brightness starts at 33%, no permission dialogs shown, no BT HID coordination.
+
+### Root Causes Found
+
+#### CRITICAL — USB permission always denied (BUG-032)
+`BridgeService.requestUsbPermission()` used `FLAG_IMMUTABLE` for the PendingIntent. On Android
+12+, the USB system cannot write `EXTRA_PERMISSION_GRANTED` into an immutable PendingIntent, so
+the result is always `false` regardless of what the user tapped. This made USB capture completely
+non-functional even when the user granted the permission. Fixed: `FLAG_MUTABLE` on API 31+.
+
+#### CRITICAL — START/STOP buttons crash app (BUG-033)
+Both ViewModels called `startForegroundService()` inside `viewModelScope.launch {}` with no
+try-catch. On Android 12+, calling this from a backgrounded state throws
+`ForegroundServiceStartNotAllowedException` which crashes the app. Fixed: wrapped in
+`runCatching {}` with error surfaced to `DiagnosticsManager.lastError`.
+
+#### HIGH — Bridge sensitivity slider is no-op (BUG-034)
+`BridgeService.startCapture()` forwarded raw events to the transport without reading
+`prefs.bridgeSensitivity`. Mouse movement was always at 1:1 scale. Fixed: scale `MouseMove.dx/dy`
+by `prefs.bridgeSensitivity` before event dispatch.
+
+#### HIGH — POST_NOTIFICATIONS never auto-requested (BUG-035)
+Neither app requested `POST_NOTIFICATIONS` at first launch. On Android 13+, without this the
+foreground service notification is suppressed and the service may be killed by OEM battery
+management. Fixed: `registerForActivityResult` + `requestNotificationPermissionIfNeeded()` in
+both `MainActivity.onCreate()`.
+
+#### MEDIUM — Receiver shows "Waiting for bridge…" forever in BT HID mode (BUG-036)
+No in-app explanation that the receiver app is not needed when the bridge uses BT HID.
+Fixed: permanent info card on `ConnectionScreen`.
+
+#### LOW — Brightness slider shows 33% after upgrade (BUG-037)
+Old slider could store a positive float. New code correctly read it but appeared broken.
+Fixed: one-time migration sentinel resets any positive pre-migration value to `-1f` (system
+default) on first run after upgrade.
+
+### Files Changed
+- `app-bridge/.../service/BridgeService.kt` — USB FLAG_MUTABLE, sensitivity scaling
+- `app-bridge/.../viewmodel/BridgeViewModel.kt` — startBridge/stopBridge crash protection, TAG, BridgeLogger import
+- `app-bridge/.../ui/MainActivity.kt` — POST_NOTIFICATIONS auto-request
+- `app-bridge/.../prefs/BridgePreferences.kt` — brightness migration sentinel
+- `app-receiver/.../viewmodel/ReceiverViewModel.kt` — startReceiver/stopReceiver crash protection
+- `app-receiver/.../ui/MainActivity.kt` — POST_NOTIFICATIONS auto-request
+- `app-receiver/.../ui/screens/ConnectionScreen.kt` — BT HID awareness card
+- `BUGS.md` — BUG-032 through BUG-037 added
+- `SESSION_LOG.md` — this entry
+
+---
+
 ## Session 011 — Bug Audit + Documentation Overhaul
 **Date:** 2026-07-21
 **Agent:** Claude (Replit)

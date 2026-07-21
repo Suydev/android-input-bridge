@@ -177,15 +177,30 @@ class ReceiverViewModel(
 
     fun startReceiver() {
         viewModelScope.launch {
-            context.startForegroundService(Intent(context, ReceiverService::class.java))
+            runCatching {
+                context.startForegroundService(Intent(context, ReceiverService::class.java))
+            }.onFailure { e ->
+                com.inputbridge.core.logging.BridgeLogger.e(TAG, "Failed to start receiver service: ${e.message}")
+                DiagnosticsManager.update {
+                    copy(lastError = "Could not start service: ${e.message}")
+                }
+            }
         }
     }
 
     fun stopReceiver() {
         viewModelScope.launch {
-            val intent = Intent(context, ReceiverService::class.java)
-            intent.action = ReceiverService.ACTION_STOP
-            context.startService(intent)
+            runCatching {
+                val intent = Intent(context, ReceiverService::class.java)
+                intent.action = ReceiverService.ACTION_STOP
+                context.startService(intent)
+            }.onFailure { e ->
+                com.inputbridge.core.logging.BridgeLogger.e(TAG, "Failed to stop receiver service: ${e.message}")
+            }
         }
+    }
+
+    private companion object {
+        private const val TAG = "ReceiverViewModel"
     }
 }

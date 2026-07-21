@@ -1,5 +1,8 @@
 package com.inputbridge.bridge.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.KeyEvent
@@ -8,6 +11,8 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -40,6 +45,16 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: BridgeViewModel by viewModel()
 
+    // ── POST_NOTIFICATIONS runtime permission (Android 13+) ───────────────────
+
+    /**
+     * Request POST_NOTIFICATIONS on first launch so the foreground service
+     * notification is guaranteed to appear. Without it on API 33+ the service
+     * notification is silently suppressed, making the service appear broken.
+     */
+    private val notificationPermLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* no-op */ }
+
     // ── Emergency stop via Volume Down hold ───────────────────────────────────
 
     /** Timestamp when Volume Down was first pressed (elapsedRealtime). 0 = not pressed. */
@@ -59,6 +74,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         applyKeepScreenOn()
+        requestNotificationPermissionIfNeeded()
 
         setContent {
             BridgeTheme {
@@ -148,6 +164,22 @@ class MainActivity : ComponentActivity() {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * On Android 13+ silently check POST_NOTIFICATIONS and ask for it if denied.
+     * The system dialog only shows once; on subsequent launches ContextCompat
+     * reports the cached result and we skip the launcher.
+     */
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(
+                    this, Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                notificationPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
 
     private fun applyKeepScreenOn() {
         val prefs = BridgePreferences(this)

@@ -563,11 +563,17 @@ class BridgeService : Service() {
     }
 
     private fun requestUsbPermission(device: UsbDevice) {
-        val pi = PendingIntent.getBroadcast(
-            this, 0,
-            Intent(ACTION_USB_PERMISSION),
-            PendingIntent.FLAG_IMMUTABLE,
-        )
+        // FLAG_MUTABLE is REQUIRED here. The Android USB system needs to write
+        // EXTRA_PERMISSION_GRANTED and EXTRA_DEVICE into this PendingIntent before
+        // delivering it. FLAG_IMMUTABLE would silently block those writes, causing
+        // the receiver to always see granted=false even when the user tapped Allow.
+        // See: https://developer.android.com/guide/topics/connectivity/usb/host#permission-d
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            PendingIntent.FLAG_MUTABLE
+        } else {
+            0
+        }
+        val pi = PendingIntent.getBroadcast(this, 0, Intent(ACTION_USB_PERMISSION), flags)
         usbManager.requestPermission(device, pi)
         BridgeLogger.i(TAG, "USB permission requested for ${device.deviceName}")
     }
@@ -594,8 +600,19 @@ class BridgeService : Service() {
         BridgeLogger.i(TAG, "USB capture active for ${device.deviceName}")
 
         captureJob = serviceScope.launch {
-            capture.events.collect { event ->
+            capture.events.collect { rawEvent ->
                 val t0 = System.nanoTime()
+
+                // Apply bridge-side sensitivity to mouse movement deltas.
+                // prefs.bridgeSensitivity is 0.1–5.0; default 1.0 (no change).
+                // This is a hot-path read of a SharedPreferences float — fast enough.
+                val event: com.inputbridge.core.model.InputEvent = run {
+                    val s = prefs.bridgeSensitivity
+                    if (s != 1.0f && rawEvent is com.inputbridge.core.model.InputEvent.MouseMove) {
+                        rawEvent.copy(dx = rawEvent.dx * s, dy = rawEvent.dy * s)
+                    } else rawEvent
+                }
+
                 // Guard: btTransport is only non-null when connect() succeeded.
                 // isConnected is checked in addition for defense-in-depth against
                 // a BT host that disconnects while capture is already running.

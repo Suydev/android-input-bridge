@@ -1,5 +1,8 @@
 package com.inputbridge.receiver.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.KeyEvent
@@ -7,6 +10,8 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -36,6 +41,16 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: ReceiverViewModel by viewModel()
 
+    // ── POST_NOTIFICATIONS runtime permission (Android 13+) ───────────────────
+
+    /**
+     * Proactively request POST_NOTIFICATIONS so the foreground service notification
+     * is visible on Android 13+ (OnePlus Pad Go target). Without this the
+     * persistent notification is silently suppressed.
+     */
+    private val notificationPermLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* no-op */ }
+
     // ── Emergency stop via Volume Down hold ───────────────────────────────────
 
     @Volatile private var volumeDownPressedAt = 0L
@@ -50,6 +65,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        requestNotificationPermissionIfNeeded()
 
         setContent {
             ReceiverTheme {
@@ -91,6 +107,19 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                 }
+            }
+        }
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(
+                    this, Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                notificationPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
     }
