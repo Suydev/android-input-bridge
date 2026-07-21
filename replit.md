@@ -39,9 +39,10 @@ InputBridge is an offline Android input bridge. A Portronics Key2 Combo USB keyb
 
 ## Current Phase
 
-**Phase 5 (Latency + Reconnect) — started**
+**Phase 7 (Polish) — complete** ✅
 
-Phases 1–4 complete. Phase 3 remainder (pairing) and Phase 5 (reconnect) implemented in session 006.
+All phases 1–7 complete. Phase 8 items (Wi-Fi Direct, DataStore migration, clipboard sync, macros)
+are deferred. Next step is hardware validation on real devices.
 
 ## How to Build
 

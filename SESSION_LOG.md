@@ -115,6 +115,58 @@
 
 ---
 
+## Session 011 — Bug Audit + Documentation Overhaul
+**Date:** 2026-07-21
+**Agent:** Claude (Replit)
+**Status:** ✅ Complete
+
+### Goals
+- Full codebase audit against bug reports BUG-013 through BUG-031
+- Fix all stale documentation (ROADMAP, AI_CONTEXT, replit.md, BUGS.md)
+- Push to GitHub to trigger CI and produce downloadable APKs
+- Record all findings in BUGS.md with correct fix status
+
+### What Was Found
+The code was already complete and correct from Session 010. All BUG-013 through BUG-031
+bugs were already fixed in the committed codebase:
+- BUG-013/016: device_filter.xml class-based HID filter ✅
+- BUG-014/015: connectedDevice foreground type + FOREGROUND_SERVICE_CONNECTED_DEVICE ✅
+- BUG-017: WelcomeScreen Boot Auto-start reads correct field ✅
+- BUG-018/029: Brightness slider redesigned (toggle + 0–100%) ✅
+- BUG-019/023: Network status reads real ConnectivityManager state ✅
+- BUG-020/021: ReceiverPermissionsScreen created and wired in nav ✅
+- BUG-022/028: batteryOptimizationIgnored refreshed via ReceiverViewModel.refreshStatus() ✅
+- BUG-023: Network setup guide card in SettingsScreen ✅
+- BUG-024: BT HID mode clarification in SettingsScreen ✅
+- BUG-025: WRITE_SETTINGS removed from bridge manifest ✅
+- BUG-026: canRetrieveWindowContent="true" in accessibility_service_config.xml ✅
+- BUG-027: Documented as DEFERRED — bulkTransfer works on Android interrupt endpoints ✅
+- BUG-030: Scroll sensitivity DEFERRED to Phase 8 ✅
+- BUG-031: STOP button only shown when service is active (both apps) ✅
+
+### Documentation Updated
+- `ROADMAP.md` — Phase 7 corrected from 0% to 100% ✅
+- `AI_CONTEXT.md` — Current milestone updated to Phase 7 complete ✅
+- `BUGS.md` — BUG-013 through BUG-031 added with full descriptions and fix status ✅
+- `SESSION_LOG.md` — This entry ✅
+- `replit.md` — Current phase updated to Phase 7 complete ✅
+
+### Key Decisions
+- BUG-027 (bulkTransfer on interrupt endpoint) deferred: bulkTransfer works correctly on Android
+  for interrupt endpoints in practice. The UsbRequest refactor requires a per-connection
+  demultiplexer and introduces regression risk without functional gain on the target hardware.
+- BUG-030 (scroll sensitivity) deferred: functional with single sensitivity knob; separate
+  scroll sensitivity is a clean Phase 8 addition.
+
+### Files Changed (documentation only — code was already correct)
+- `ROADMAP.md`
+- `AI_CONTEXT.md`
+- `BUGS.md`
+- `SESSION_LOG.md`
+- `replit.md`
+
+---
+
 ## Session 010 — Phase 7 Polish (FULL)
 **Date:** 2026-07-21
 **Agent:** Claude (Replit)

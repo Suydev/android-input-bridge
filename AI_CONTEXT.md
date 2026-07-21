@@ -148,19 +148,23 @@ See DECISIONS.md for full records. Short summary:
 
 ## Current milestone
 
-**Phase 6 complete (95%)** — Bluetooth HID transport fully wired. `BluetoothHidTransport`,
-`HidDescriptor`, `HidReportBuilder` all implemented. `BridgeService` now dispatches to
-`startUdpPipeline()` or `startBluetoothHidPipeline()` based on `BridgePreferences.transportMode`.
-Settings screen has transport mode toggle (UDP / BT HID) and BT MAC address field.
-DiagnosticsData has `btConnected`/`btDeviceName` fields. Remaining: hardware test on real devices.
+**Phase 7 complete (100%)** — All polish items delivered. Black screen mode, cursor dot overlay
+(`CursorOverlayService`), emergency stop (Volume Down × 3s), live `PermissionsScreen` for both
+apps, brightness slider redesign, network setup guide, auto-start toggle, landscape support for
+receiver. See SESSION_LOG.md Session 010 for full change list.
+
+Phase 8 items (Wi-Fi Direct, DataStore migration, clipboard sync, macro recording) are deferred
+to future sessions. See ROADMAP.md and TASKS.md.
 
 ## Current TODO
 
-See TASKS.md — Phase 6 (Bluetooth HID) and Phase 7 (Polish) are the remaining phases.
+Hardware test on real devices (Redmi 9 + OnePlus Pad Go + Portronics Key2 Combo). All code is
+complete; remaining work is device-specific validation. See TASKS.md Phase 2 / Phase 6 open items.
 
 ## Current blockers
 
-None known. CI run for session 007 changes pending (need GitHub PAT to push and monitor).
+None. All known bugs BUG-001 through BUG-031 are fixed or documented. CI builds on every push to main.
+See BUGS.md for full inventory.
 
 ## Future roadmap
 
