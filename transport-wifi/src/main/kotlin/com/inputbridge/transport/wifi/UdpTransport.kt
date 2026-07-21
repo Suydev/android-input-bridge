@@ -94,6 +94,10 @@ class UdpTransport(
     override suspend fun disconnect() {
         if (!isConnected) return
         isConnected = false
+        // BUG-045 fix: close the send channel before cancelling the send job.
+        // Without this the channel object leaks (its coroutine is cancelled but the
+        // channel itself — and any queued byte arrays — stays open indefinitely).
+        sendChannel.close()
         sendJob?.cancel()
         receiveJob?.cancel()
         socket?.close()

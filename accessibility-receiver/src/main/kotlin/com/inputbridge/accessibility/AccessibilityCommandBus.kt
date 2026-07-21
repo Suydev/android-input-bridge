@@ -117,9 +117,28 @@ object AccessibilityCommandBus {
 
     // ── Public API ────────────────────────────────────────────────────────────
 
-    /** Enqueue an input event for injection. Non-blocking; drops if buffer is full. */
+    /**
+     * Enqueue an input event for injection. Non-blocking; drops if buffer is full.
+     *
+     * BUG-042 fix — mouse-move hot path:
+     * [InputEvent.MouseMove] only needs to update two floats and a StateFlow —
+     * there is no need to dispatch through the coroutine queue. Doing it inline,
+     * on the calling IO thread, removes the coroutine-dispatch latency (~1–2 ms)
+     * that would otherwise accumulate at 125 Hz USB polling. MutableStateFlow.value
+     * is thread-safe, so the overlay collector on Main will pick up the new position
+     * on its next frame without any explicit Main-thread dispatch here.
+     *
+     * All other events continue to go through the coroutine queue so that ordering
+     * with respect to clicks, scrolls, and key events is preserved.
+     */
     fun post(event: InputEvent) {
-        commandFlow.tryEmit(event)
+        if (event is InputEvent.MouseMove) {
+            cursorX = (cursorX + event.dx * mouseSensitivity).coerceIn(0f, screenWidth - 1f)
+            cursorY = (cursorY + event.dy * mouseSensitivity).coerceIn(0f, screenHeight - 1f)
+            _cursorPosition.value = Pair(cursorX, cursorY)
+        } else {
+            commandFlow.tryEmit(event)
+        }
     }
 
     // ── Internal dispatch loop ────────────────────────────────────────────────
@@ -143,12 +162,9 @@ object AccessibilityCommandBus {
         when (event) {
 
             // ── Mouse movement ────────────────────────────────────────────────
-            is InputEvent.MouseMove -> {
-                cursorX = (cursorX + event.dx * mouseSensitivity).coerceIn(0f, screenWidth - 1f)
-                cursorY = (cursorY + event.dy * mouseSensitivity).coerceIn(0f, screenHeight - 1f)
-                // Publish new position to the cursor overlay (non-blocking).
-                _cursorPosition.value = Pair(cursorX, cursorY)
-            }
+            // Handled immediately in post() on the calling IO thread for minimum latency.
+            // If somehow a MouseMove reaches here (e.g. old code path), it is a no-op.
+            is InputEvent.MouseMove -> Unit
 
             // ── Mouse clicks ──────────────────────────────────────────────────
             is InputEvent.MouseButtonDown -> {

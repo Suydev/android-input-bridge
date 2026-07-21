@@ -658,3 +658,187 @@ duplicate flush loops and transport instances.
 **Fix**: `AtomicBoolean.compareAndSet(false, true)` in `onStartCommand` before
 launching the coroutine, so exactly one caller wins the CAS and starts the pipeline.
 Reset to false in `onDestroy` and on failed startup paths.
+
+---
+
+## BUG-038 — KeyMap missing ~20 key codes (numpad, F13–F24, Insert, Pause, Application)
+
+**Description**: `KeyMap.HID_TO_ANDROID` (input-capture module) was missing the following HID
+Keyboard/Keypad page usage IDs:
+- Numpad cluster: Num Lock, `/`, `*`, `-`, `+`, Enter, 1–9, 0, `.` (0x53–0x63)
+- Insert (0x49)
+- Print Screen / SysRq (0x46)
+- Scroll Lock (0x47)
+- Pause / Break (0x48)
+- Application / Menu key (0x65)
+- F13–F24 (0x68–0x73)
+
+Any USB keyboard key in these ranges was silently converted to `KEYCODE_UNKNOWN` and dropped.
+This meant the full numpad was non-functional over USB capture.
+
+**Note**: `HidReportBuilder.ANDROID_TO_HID` (transport-bluetooth-hid module) already contained
+the numpad and navigation mappings, so BT HID was not affected — only USB capture.
+
+**Files involved**: `input-capture/.../KeyMap.kt`
+
+**Priority**: High (entire numpad non-functional over USB)
+**Status**: ✅ FIXED (Session 013)
+**Fix**: Added all missing HID → Android mappings. Documented that Consumer Control media
+keys (volume, play/pause) require a separate usage page (0x0C) and are not included here.
+
+---
+
+## BUG-039 — UsbInputCapture interface detection only checks subclass, misses protocol=0 combo receivers
+
+**Description**: `UsbInputCapture` determined whether each HID interface was a keyboard or mouse
+solely by `interfaceSubclass`:
+
+```kotlin
+SUBCLASS_KEYBOARD → readKeyboard(...)
+SUBCLASS_MOUSE    → readMouse(...)
+else              → readGenericHid(...)  // was a no-op!
+```
+
+`readGenericHid` was a stub — it logged a warning and immediately returned, silently swallowing
+all input from the interface. Some combo USB receivers (including certain configurations of the
+Portronics Key2 Combo) enumerate with `subclass=0` (HID Boot Interface not declared) while still
+sending standard boot-protocol 8-byte keyboard or 4-byte mouse reports. When this happens both
+interfaces hit the `else` branch and all keyboard and mouse input is dropped with no visible error.
+
+**Files involved**: `input-capture/.../UsbInputCapture.kt`
+
+**Priority**: Critical (the entire bridge may produce zero output with the Portronics receiver)
+**Status**: ✅ FIXED (Session 013)
+**Fix**: Extended detection logic to also check `interfaceProtocol` (1=keyboard, 2=mouse) as a
+fallback when `interfaceSubclass` is not the boot subclass (1). Added a third heuristic:
+`maxPacketSize ≤ 6` indicates a mouse report (boot mouse is 3–5 bytes; keyboard is always 8).
+Final fallback treats unknown interfaces as keyboard rather than discarding them.
+Also removed the dead `readGenericHid` stub.
+Also added 5-byte extended mouse report support (HID tilt-wheel / panning).
+
+---
+
+## BUG-040 — BridgeService.onDestroy never sends DISCONNECT packet
+
+**Description**: When BridgeService is stopped (user taps STOP, system reclaims, battery kill),
+`onDestroy()` immediately cancels all jobs and closes the UDP socket. The receiver app never
+receives a DISCONNECT packet and continues showing "Bridge connected" for the next 15 seconds
+until the PING watchdog fires.
+
+This is particularly confusing in normal stop/start workflows: the user stops the bridge on the
+Redmi, then immediately goes to the tablet — which still shows "Connected" for a full 15 seconds.
+
+**Files involved**: `app-bridge/.../service/BridgeService.kt`
+
+**Priority**: Medium (UX degradation — user confusion, not a crash)
+**Status**: ✅ FIXED (Session 013)
+**Fix**: In `onDestroy()`, before calling `udpTransport.disconnect()`, call
+`udpTransport.send(packetFactory.makeDisconnect())` and delay 60 ms inside a `NonCancellable`
+coroutine context so the datagram is sent before the socket closes. On the receiver side,
+the existing DISCONNECT handler already handles this correctly (clears pairing, updates UI).
+
+---
+
+## BUG-041 — ReceiverService has no watchdog for bridge silence
+
+**Description**: `ReceiverService` had no mechanism to detect a silently-dead bridge. If the
+bridge crashed, lost Wi-Fi, or was killed by the OS without sending DISCONNECT, the receiver
+would stay in "Connected / Paired" state indefinitely with no notification to the user.
+
+The receiver would only recover if:
+1. The bridge explicitly sent DISCONNECT on stop (which BUG-040 shows it didn't), OR
+2. The user manually stopped and restarted the receiver service.
+
+**Files involved**: `app-receiver/.../service/ReceiverService.kt`
+
+**Priority**: High (silent indefinite failure state — user cannot know bridge is gone)
+**Status**: ✅ FIXED (Session 013)
+**Fix**: Added `lastPingReceivedMs` timestamp that is updated on every received PING.
+Added `watchdogJob` coroutine (runs every `BRIDGE_WATCHDOG_CHECK_MS` = 5 s).
+If `System.currentTimeMillis() - lastPingReceivedMs > BRIDGE_SILENCE_TIMEOUT_MS` (15 s) and
+at least one PING has been seen, the watchdog:
+1. Updates the foreground notification: "Bridge silent for Xs — check connection"
+2. Sets `DiagnosticsManager.lastError` and `transportConnected = false`
+3. Sets `bridgeSilenceNotified = true` to avoid repeated notifications
+When a PING is received again (bridge reconnected), `bridgeSilenceNotified` is reset and the
+notification is restored to normal.
+
+---
+
+## BUG-042 — AccessibilityCommandBus routes MouseMove through coroutine queue (added latency)
+
+**Description**: All `InputEvent` types including `MouseMove` were emitted into a
+`MutableSharedFlow` and processed by a coroutine on `Dispatchers.Main`. This added ~1–2 ms of
+coroutine dispatch overhead per mouse-move event. At 125 Hz USB polling (8 ms per event), this
+overhead is significant (12–25% of the inter-event budget) and contributes to cursor lag.
+
+**Files involved**: `accessibility-receiver/.../AccessibilityCommandBus.kt`
+
+**Priority**: Medium (latency/smoothness — not a correctness bug)
+**Status**: ✅ FIXED (Session 013)
+**Fix**: `post(event: InputEvent)` now handles `InputEvent.MouseMove` inline on the calling
+thread (IO coroutine from ReceiverService), updating `cursorX`, `cursorY`, and the
+`_cursorPosition` StateFlow directly. `MutableStateFlow.value` is thread-safe; the
+`CursorOverlayService` collects the StateFlow on Main and updates the overlay position on the
+next frame without requiring explicit Main-thread dispatch. All other event types continue
+through the coroutine queue to preserve ordering with clicks, scrolls, and keyboard events.
+
+---
+
+## BUG-043 — Cursor overlay shows green crosshair dot, not a Windows-style arrow cursor
+
+**Description**: `CursorOverlayService` showed a semi-transparent green dot with crosshair lines.
+The user explicitly requested a Windows-like arrow cursor pointer shape.
+
+Additionally, the view was centred on the cursor position using an offset of `-(width/2, height/2)`.
+An arrow cursor's hotspot should be at the TIP (top-left corner of the view), not the centre, so
+the centering offset was incorrect for an arrow shape.
+
+**Files involved**: `app-receiver/.../service/CursorOverlayService.kt`
+
+**Priority**: Medium (usability — user cannot accurately see click target)
+**Status**: ✅ FIXED (Session 013)
+**Fix**: Replaced `CursorDotView` with `CursorArrowView`. The new view draws the classic
+Windows arrow cursor shape using `android.graphics.Path`:
+- Tip at canvas (0,0) — that is the hotspot
+- White fill with thin black outline for visibility on any background
+- Drop shadow (semi-transparent dark fill, 1dp offset) for depth
+- View sized at 36dp × 36dp
+The overlay position is now `params.x = cursorX.toInt(), params.y = cursorY.toInt()` (no centring
+offset), so the arrow tip lands exactly at the logical cursor coordinates.
+
+---
+
+## BUG-044 — No global crash handler — crashes silent, no diagnostic data written
+
+**Description**: Neither `BridgeApplication` nor `ReceiverApplication` registered a global
+`Thread.UncaughtExceptionHandler`. When any thread crashed with an unhandled exception, the
+Android default handler showed a dialog but nothing was written to `DiagnosticsManager` or
+`BridgeLogger`. The user had no way to see what happened without logcat.
+
+**Files involved**: `app-bridge/.../BridgeApplication.kt`, `app-receiver/.../ReceiverApplication.kt`
+
+**Priority**: Medium (debuggability — without crash capture, silent failures are invisible)
+**Status**: ✅ FIXED (Session 013)
+**Fix**: Both Application classes now save the previous handler and register a new one before
+Koin initialisation (so DI crashes are captured too). The new handler:
+1. Calls `BridgeLogger.e("CRASH", ...)` with thread name and throwable
+2. Calls `DiagnosticsManager.update { copy(lastError = "CRASH [ClassName]: message") }`
+3. Re-invokes the previous handler so the system crash dialog still appears
+
+---
+
+## BUG-045 — UdpTransport.sendChannel never closed on disconnect()
+
+**Description**: `UdpTransport.disconnect()` cancelled the `sendJob` coroutine and closed the
+socket but never called `sendChannel.close()`. The `Channel<ByteArray>` object (capacity 128)
+remained open even after disconnect. On reconnect a fresh `UdpTransport` instance is created,
+so the old one's channel and any queued byte arrays were leaked until GC.
+
+**Files involved**: `transport-wifi/.../UdpTransport.kt`
+
+**Priority**: Low (memory leak on each stop/start cycle — no functional impact at typical usage)
+**Status**: ✅ FIXED (Session 013)
+**Fix**: Added `sendChannel.close()` as the first statement in `disconnect()`, before
+cancelling `sendJob`, so the channel's iterator terminates cleanly before the coroutine is
+cancelled.

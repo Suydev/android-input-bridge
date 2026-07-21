@@ -3,28 +3,35 @@ package com.inputbridge.input
 import android.view.KeyEvent
 
 /**
- * Maps USB HID scan codes and Android key codes to InputBridge key codes.
+ * Maps USB HID scan codes (Keyboard/Keypad Usage Page 0x07) to Android KeyEvent keycodes.
  *
  * Key code strategy:
  * - InputBridge uses Android's KeyEvent key codes as the canonical representation.
  * - USB HID scan codes are translated to Android key codes during capture.
  * - This avoids needing a second mapping on the receiver side.
  *
+ * Coverage: letters, numbers, symbols, F1–F24, full navigation cluster,
+ *           full numpad, modifier keys, Print Screen, Scroll Lock, Pause,
+ *           Insert, Application/Menu key.
+ *
+ * NOT covered here (different usage page):
+ * - Consumer Control (media keys: play/pause, volume, track) — Usage Page 0x0C.
+ *   These require a separate HID report interface and a different parser.
+ *
  * References:
- * - HID Usage Tables: https://usb.org/document-library/hid-usage-tables-15
- * - Android KeyEvent: https://developer.android.com/reference/android/view/KeyEvent
+ * - HID Usage Tables 1.5: https://usb.org/document-library/hid-usage-tables-15
+ * - Android KeyEvent:     https://developer.android.com/reference/android/view/KeyEvent
  */
 object KeyMap {
 
     /**
-     * Map a USB HID keyboard scan code (Usage ID from page 0x07) to
+     * Map a USB HID Keyboard/Keypad page scan code (Usage Page 0x07) to
      * an Android KeyEvent key code.
      *
      * Returns [KeyEvent.KEYCODE_UNKNOWN] for unmapped codes.
      */
-    fun hidToAndroid(hidUsageId: Int): Int = HID_TO_ANDROID.getOrDefault(
-        hidUsageId, KeyEvent.KEYCODE_UNKNOWN
-    )
+    fun hidToAndroid(hidUsageId: Int): Int =
+        HID_TO_ANDROID.getOrDefault(hidUsageId, KeyEvent.KEYCODE_UNKNOWN)
 
     /**
      * Determine if a key code represents a modifier key.
@@ -34,6 +41,7 @@ object KeyMap {
     // ── HID Usage ID → Android KeyCode map ───────────────────────────────────
     // Keyboard/Keypad page (Usage Page 0x07)
     private val HID_TO_ANDROID: Map<Int, Int> = mapOf(
+        // ── Letters A–Z ──────────────────────────────────────────────────────
         0x04 to KeyEvent.KEYCODE_A,
         0x05 to KeyEvent.KEYCODE_B,
         0x06 to KeyEvent.KEYCODE_C,
@@ -60,7 +68,7 @@ object KeyMap {
         0x1B to KeyEvent.KEYCODE_X,
         0x1C to KeyEvent.KEYCODE_Y,
         0x1D to KeyEvent.KEYCODE_Z,
-        // Numbers
+        // ── Number row 1–0 ───────────────────────────────────────────────────
         0x1E to KeyEvent.KEYCODE_1,
         0x1F to KeyEvent.KEYCODE_2,
         0x20 to KeyEvent.KEYCODE_3,
@@ -71,17 +79,19 @@ object KeyMap {
         0x25 to KeyEvent.KEYCODE_8,
         0x26 to KeyEvent.KEYCODE_9,
         0x27 to KeyEvent.KEYCODE_0,
-        // Control
+        // ── Control / whitespace ─────────────────────────────────────────────
         0x28 to KeyEvent.KEYCODE_ENTER,
         0x29 to KeyEvent.KEYCODE_ESCAPE,
-        0x2A to KeyEvent.KEYCODE_DEL, // Backspace
+        0x2A to KeyEvent.KEYCODE_DEL,          // Backspace
         0x2B to KeyEvent.KEYCODE_TAB,
         0x2C to KeyEvent.KEYCODE_SPACE,
+        // ── Punctuation / symbols ─────────────────────────────────────────────
         0x2D to KeyEvent.KEYCODE_MINUS,
         0x2E to KeyEvent.KEYCODE_EQUALS,
         0x2F to KeyEvent.KEYCODE_LEFT_BRACKET,
         0x30 to KeyEvent.KEYCODE_RIGHT_BRACKET,
         0x31 to KeyEvent.KEYCODE_BACKSLASH,
+        // 0x32 = Non-US # / ~ (omitted — keyboard-layout specific)
         0x33 to KeyEvent.KEYCODE_SEMICOLON,
         0x34 to KeyEvent.KEYCODE_APOSTROPHE,
         0x35 to KeyEvent.KEYCODE_GRAVE,
@@ -89,7 +99,7 @@ object KeyMap {
         0x37 to KeyEvent.KEYCODE_PERIOD,
         0x38 to KeyEvent.KEYCODE_SLASH,
         0x39 to KeyEvent.KEYCODE_CAPS_LOCK,
-        // Function keys
+        // ── Function keys F1–F12 ──────────────────────────────────────────────
         0x3A to KeyEvent.KEYCODE_F1,
         0x3B to KeyEvent.KEYCODE_F2,
         0x3C to KeyEvent.KEYCODE_F3,
@@ -102,17 +112,58 @@ object KeyMap {
         0x43 to KeyEvent.KEYCODE_F10,
         0x44 to KeyEvent.KEYCODE_F11,
         0x45 to KeyEvent.KEYCODE_F12,
-        // Navigation
+        // ── System / special keys ─────────────────────────────────────────────
+        0x46 to KeyEvent.KEYCODE_SYSRQ,        // Print Screen
+        0x47 to KeyEvent.KEYCODE_SCROLL_LOCK,
+        0x48 to KeyEvent.KEYCODE_BREAK,        // Pause / Break
+        0x49 to KeyEvent.KEYCODE_INSERT,
+        // ── Navigation cluster ────────────────────────────────────────────────
         0x4A to KeyEvent.KEYCODE_MOVE_HOME,
         0x4B to KeyEvent.KEYCODE_PAGE_UP,
-        0x4C to KeyEvent.KEYCODE_FORWARD_DEL, // Delete
+        0x4C to KeyEvent.KEYCODE_FORWARD_DEL,  // Delete (forward)
         0x4D to KeyEvent.KEYCODE_MOVE_END,
         0x4E to KeyEvent.KEYCODE_PAGE_DOWN,
         0x4F to KeyEvent.KEYCODE_DPAD_RIGHT,
         0x50 to KeyEvent.KEYCODE_DPAD_LEFT,
         0x51 to KeyEvent.KEYCODE_DPAD_DOWN,
         0x52 to KeyEvent.KEYCODE_DPAD_UP,
-        // Modifiers
+        // ── Full Numpad ───────────────────────────────────────────────────────
+        0x53 to KeyEvent.KEYCODE_NUM_LOCK,
+        0x54 to KeyEvent.KEYCODE_NUMPAD_DIVIDE,
+        0x55 to KeyEvent.KEYCODE_NUMPAD_MULTIPLY,
+        0x56 to KeyEvent.KEYCODE_NUMPAD_SUBTRACT,
+        0x57 to KeyEvent.KEYCODE_NUMPAD_ADD,
+        0x58 to KeyEvent.KEYCODE_NUMPAD_ENTER,
+        0x59 to KeyEvent.KEYCODE_NUMPAD_1,
+        0x5A to KeyEvent.KEYCODE_NUMPAD_2,
+        0x5B to KeyEvent.KEYCODE_NUMPAD_3,
+        0x5C to KeyEvent.KEYCODE_NUMPAD_4,
+        0x5D to KeyEvent.KEYCODE_NUMPAD_5,
+        0x5E to KeyEvent.KEYCODE_NUMPAD_6,
+        0x5F to KeyEvent.KEYCODE_NUMPAD_7,
+        0x60 to KeyEvent.KEYCODE_NUMPAD_8,
+        0x61 to KeyEvent.KEYCODE_NUMPAD_9,
+        0x62 to KeyEvent.KEYCODE_NUMPAD_0,
+        0x63 to KeyEvent.KEYCODE_NUMPAD_DOT,
+        // 0x64 = Non-US \ | (omitted — keyboard-layout specific)
+        // ── Application / Menu key ────────────────────────────────────────────
+        0x65 to KeyEvent.KEYCODE_MENU,
+        // 0x66 = Power (omitted — requires system privilege)
+        // 0x67 = Numpad = (omitted — niche, no direct Android equivalent)
+        // ── Extended function keys F13–F24 ────────────────────────────────────
+        0x68 to KeyEvent.KEYCODE_F13,
+        0x69 to KeyEvent.KEYCODE_F14,
+        0x6A to KeyEvent.KEYCODE_F15,
+        0x6B to KeyEvent.KEYCODE_F16,
+        0x6C to KeyEvent.KEYCODE_F17,
+        0x6D to KeyEvent.KEYCODE_F18,
+        0x6E to KeyEvent.KEYCODE_F19,
+        0x6F to KeyEvent.KEYCODE_F20,
+        0x70 to KeyEvent.KEYCODE_F21,
+        0x71 to KeyEvent.KEYCODE_F22,
+        0x72 to KeyEvent.KEYCODE_F23,
+        0x73 to KeyEvent.KEYCODE_F24,
+        // ── Modifier keys (Usage IDs 0xE0–0xE7) ──────────────────────────────
         0xE0 to KeyEvent.KEYCODE_CTRL_LEFT,
         0xE1 to KeyEvent.KEYCODE_SHIFT_LEFT,
         0xE2 to KeyEvent.KEYCODE_ALT_LEFT,
@@ -124,10 +175,11 @@ object KeyMap {
     )
 
     private val MODIFIER_KEY_CODES = setOf(
-        KeyEvent.KEYCODE_SHIFT_LEFT, KeyEvent.KEYCODE_SHIFT_RIGHT,
-        KeyEvent.KEYCODE_CTRL_LEFT, KeyEvent.KEYCODE_CTRL_RIGHT,
-        KeyEvent.KEYCODE_ALT_LEFT, KeyEvent.KEYCODE_ALT_RIGHT,
-        KeyEvent.KEYCODE_META_LEFT, KeyEvent.KEYCODE_META_RIGHT,
-        KeyEvent.KEYCODE_CAPS_LOCK, KeyEvent.KEYCODE_NUM_LOCK,
+        KeyEvent.KEYCODE_SHIFT_LEFT,  KeyEvent.KEYCODE_SHIFT_RIGHT,
+        KeyEvent.KEYCODE_CTRL_LEFT,   KeyEvent.KEYCODE_CTRL_RIGHT,
+        KeyEvent.KEYCODE_ALT_LEFT,    KeyEvent.KEYCODE_ALT_RIGHT,
+        KeyEvent.KEYCODE_META_LEFT,   KeyEvent.KEYCODE_META_RIGHT,
+        KeyEvent.KEYCODE_CAPS_LOCK,   KeyEvent.KEYCODE_NUM_LOCK,
+        KeyEvent.KEYCODE_SCROLL_LOCK,
     )
 }

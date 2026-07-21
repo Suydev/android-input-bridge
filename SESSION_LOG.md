@@ -340,3 +340,51 @@ bugs were already fixed in the committed codebase:
 - WelcomeScreen hides TCP/WIFI_DIRECT: showing broken modes confuses users; they'll be
   re-exposed in Phase 8 once implemented
 - Portrait lock kept on bridge: intentional — the bridge phone is held or placed face-down
+
+---
+
+## Session 013 — Audit & Fix: 8 critical bugs found and resolved
+
+**Date**: 2026-07-21
+**Focus**: Deep-audit of the full codebase; fix all discovered bugs; Windows cursor; keyboard completion; mouse latency; crash capture; CI push.
+
+### Bugs Fixed This Session
+
+| Bug | Severity | Summary |
+|-----|----------|---------|
+| BUG-038 | High | `KeyMap` missing numpad 0–9+ops, F13–F24, Insert, Pause, Print Screen, Scroll Lock, Application key |
+| BUG-039 | Critical | `UsbInputCapture` subclass=0 combo receivers silently dropped — all input lost |
+| BUG-040 | Medium | `BridgeService.onDestroy` never sent DISCONNECT — receiver stuck "connected" for 15 s |
+| BUG-041 | High | `ReceiverService` had no bridge-silence watchdog — silent failure forever |
+| BUG-042 | Medium | `AccessibilityCommandBus.post(MouseMove)` routed through coroutine queue — 1–2 ms added latency |
+| BUG-043 | Medium | Cursor overlay drew a green crosshair dot — replaced with Windows-style arrow cursor |
+| BUG-044 | Medium | No global crash handler in either Application class — crashes left no diagnostic data |
+| BUG-045 | Low | `UdpTransport.sendChannel` (Channel) was never closed on `disconnect()` — resource leak |
+
+### Changes by Module
+
+#### `input-capture` — KeyMap.kt, UsbInputCapture.kt
+- **KeyMap.kt**: Complete rewrite — added ~20 missing HID usage codes: full numpad (0x53–0x63), Insert (0x49), Print Screen (0x46), Scroll Lock (0x47), Pause (0x48), Application key (0x65), F13–F24 (0x68–0x73). Documented why Consumer Control media keys (Usage Page 0x0C) are not included.
+- **UsbInputCapture.kt**: Replaced subclass-only detection with a 4-level priority check: subclass+protocol → protocol alone → maxPacketSize heuristic → keyboard fallback. Removed the dead `readGenericHid` stub. Added 5-byte extended mouse report support (HID tilt wheel). Added `PROTOCOL_KEYBOARD=1` and `PROTOCOL_MOUSE=2` constants.
+
+#### `accessibility-receiver` — AccessibilityCommandBus.kt
+- **MouseMove hot path**: `post(InputEvent.MouseMove)` now updates `cursorX/Y` and `_cursorPosition` StateFlow directly on the calling IO thread — no coroutine dispatch overhead. `handleEvent` `MouseMove` branch is now a no-op. `MutableStateFlow.value` is thread-safe; overlay collects on Main.
+
+#### `app-receiver` — CursorOverlayService.kt, ReceiverService.kt, ReceiverApplication.kt
+- **CursorOverlayService.kt**: Replaced `CursorDotView` with `CursorArrowView`. New view draws classic Windows arrow shape using `Path` (tip at 0,0 hotspot, white fill, black outline, drop shadow). Fixed overlay positioning: `params.x = cursorX.toInt(), params.y = cursorY.toInt()` — no centering offset since hotspot is the tip.
+- **ReceiverService.kt**: Added `lastPingReceivedMs` timestamp updated on every PING. Added `watchdogJob` coroutine (5 s poll, 15 s silence threshold). On silence timeout: notification updated, `DiagnosticsManager.lastError` set, `bridgeSilenceNotified` latch prevents repeat spam. Watchdog resets when bridge reconnects (next PING). Watchdog cancelled in `onDestroy`.
+- **ReceiverApplication.kt**: Added global crash handler before Koin init. Captures to `BridgeLogger.e` and `DiagnosticsManager.lastError`; re-invokes previous handler for system crash dialog.
+
+#### `app-bridge` — BridgeService.kt, BridgeApplication.kt
+- **BridgeService.kt**: In `onDestroy()`, inside the `NonCancellable` block: send `packetFactory.makeDisconnect()` via UDP and `delay(60)` before calling `udpTransport.disconnect()`. Ensures receiver gets the DISCONNECT even on a clean stop.
+- **BridgeApplication.kt**: Added global crash handler (same pattern as receiver).
+
+#### `transport-wifi` — UdpTransport.kt
+- **disconnect()**: Added `sendChannel.close()` as first statement, before `sendJob?.cancel()`. Channel iterator terminates cleanly; no dangling channel on reconnect.
+
+### Key Decisions
+- **MouseMove hotpath**: Ordering concern (click after move) is safe because `cursorX/Y` are updated before `post(MouseButtonDown)` is queued — the click coroutine reads the up-to-date position.
+- **Watchdog threshold = 15 s**: The bridge sends PINGs every 1 s; 15 s allows for 14 missed PINGs — enough headroom for OS-level reconnect delays without false positives.
+- **Arrow hotspot at (0,0)**: This is the WindowManager overlay's top-left corner. Setting `params.x = cursorX.toInt()` (not `cursorX - viewPx/2`) places the tip exactly at the logical cursor position. The old centering offset was wrong for an arrow shape.
+- **Crash handler before Koin**: Registered in `Application.onCreate()` before `startKoin{}` so DI failures (common during development) are also captured.
+- **Consumer Control media keys excluded**: Usage Page 0x0C requires a separate HID report interface with a different report format. This is outside scope for the current USB keyboard capture layer.

@@ -23,6 +23,8 @@ private const val TAG = "ReceiverService"
 private const val NOTIFICATION_ID = 2001
 private const val CHANNEL_ID = "receiver_service"
 private const val COUNTER_FLUSH_INTERVAL_MS = 1_000L
+private const val BRIDGE_WATCHDOG_CHECK_MS  = 5_000L  // how often the watchdog polls
+private const val BRIDGE_SILENCE_TIMEOUT_MS = 15_000L // silence > this → notify user
 
 /**
  * Foreground service that owns the UDP receive loop and accessibility dispatch pipeline.
@@ -60,6 +62,7 @@ class ReceiverService : Service() {
     private var udpTransport: UdpTransport? = null
     private var receiveJob: Job? = null
     private var counterFlushJob: Job? = null
+    private var watchdogJob: Job? = null
 
     private val packetFactory = EventPacketFactory()
 
@@ -74,6 +77,19 @@ class ReceiverService : Service() {
     @Volatile private var pairedBridgeIp: String = ""
 
     // ── Packet loss detection ─────────────────────────────────────────────────
+
+    /**
+     * Monotonic time of the last received PING from the bridge (System.currentTimeMillis()).
+     * 0 = no PING received yet this session.
+     * Used by the bridge-silence watchdog (BUG-041 fix).
+     */
+    @Volatile private var lastPingReceivedMs = 0L
+
+    /**
+     * Whether the watchdog has already fired a "bridge silent" notification.
+     * Avoids spamming the notification every 5s once the bridge goes silent.
+     */
+    @Volatile private var bridgeSilenceNotified = false
 
     /** Last input-event sequence number seen. -1 = no packets yet. */
     private var lastInputSeqNo = -1
@@ -140,6 +156,7 @@ class ReceiverService : Service() {
         // 1. Cancel tracked jobs
         receiveJob?.cancel()
         counterFlushJob?.cancel()
+        watchdogJob?.cancel()
 
         // 2. Release UDP socket in NonCancellable context
         runBlocking {
@@ -228,6 +245,33 @@ class ReceiverService : Service() {
             }
         }
 
+        // BUG-041 fix: bridge-silence watchdog.
+        // If the bridge sends a PING every 1 s, we should see one within ~3 s under normal
+        // conditions. We wait BRIDGE_SILENCE_TIMEOUT_MS (15 s) before alerting the user,
+        // which gives plenty of headroom for temporary Wi-Fi congestion or reconnect pauses.
+        // The watchdog only activates once at least one PING has been received, so it does
+        // not fire during initial pairing or while waiting for the first connection.
+        watchdogJob = serviceScope.launch {
+            while (isActive) {
+                delay(BRIDGE_WATCHDOG_CHECK_MS)
+                val firstPing = lastPingReceivedMs
+                if (firstPing == 0L) continue  // haven't seen a PING yet — bridge may still be connecting
+                val silenceMs = System.currentTimeMillis() - firstPing
+                if (silenceMs >= BRIDGE_SILENCE_TIMEOUT_MS && !bridgeSilenceNotified) {
+                    bridgeSilenceNotified = true
+                    val silenceSec = silenceMs / 1000
+                    BridgeLogger.w(TAG, "Bridge silence detected: no PING for ${silenceSec}s")
+                    updateNotification("Bridge silent for ${silenceSec}s — check connection")
+                    DiagnosticsManager.update {
+                        copy(
+                            lastError = "No PING from bridge for ${silenceSec}s — bridge may have stopped",
+                            transportConnected = false,
+                        )
+                    }
+                }
+            }
+        }
+
         // Hot receive loop
         receiveJob = serviceScope.launch {
             transport.incomingPackets.collect { packet ->
@@ -276,6 +320,15 @@ class ReceiverService : Service() {
                         val pong = packetFactory.makePong(packet.sequenceNo)
                         transport.send(pong)
                         BridgeLogger.d(TAG, "PING → PONG (seq=${packet.sequenceNo})")
+                        // BUG-041 fix: record the time of the last PING so the watchdog
+                        // knows the bridge is alive. Also clear any previously-shown
+                        // silence notification so it re-fires if the bridge goes silent again.
+                        lastPingReceivedMs = System.currentTimeMillis()
+                        if (bridgeSilenceNotified) {
+                            bridgeSilenceNotified = false
+                            updateNotification("Paired with bridge ($pairedBridgeIp)")
+                            DiagnosticsManager.update { copy(lastError = null) }
+                        }
                     }
 
                     PacketType.KEEP_ALIVE -> {

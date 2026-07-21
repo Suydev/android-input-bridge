@@ -175,6 +175,13 @@ class BridgeService : Service() {
         runBlocking {
             withContext(NonCancellable + Dispatchers.IO) {
                 runCatching { usbCapture?.stop() }
+                // BUG-040 fix: tell the receiver we are intentionally shutting down
+                // BEFORE closing the socket. Without this, the receiver only discovers
+                // the bridge has gone after its 15-second PING watchdog fires.
+                runCatching {
+                    udpTransport?.send(packetFactory.makeDisconnect())
+                    delay(60L) // give the datagram time to be flushed before socket closes
+                }
                 runCatching { udpTransport?.disconnect() }
                 runCatching { btTransport?.disconnect() }
             }

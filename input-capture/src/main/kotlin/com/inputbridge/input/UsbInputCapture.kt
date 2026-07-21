@@ -19,15 +19,27 @@ private const val TAG = "UsbInputCapture"
  * connected to the Redmi 9 via OTG.
  *
  * The receiver appears as a standard USB HID device with up to two interfaces:
- * one for the keyboard and one for the mouse. Both are polled from a single
- * background coroutine per interface.
+ * one for the keyboard and one for the mouse.  Both are polled from a background
+ * coroutine per interface.
+ *
+ * Interface detection strategy (in priority order):
+ * 1. interfaceSubclass == 1 (BOOT) + interfaceProtocol == 1  → keyboard
+ * 2. interfaceSubclass == 1 (BOOT) + interfaceProtocol == 2  → mouse
+ * 3. interfaceProtocol == 1 (regardless of subclass)          → keyboard
+ * 4. interfaceProtocol == 2 (regardless of subclass)          → mouse
+ * 5. maxPacketSize ≤ 8 with ≤5 bytes actually transferred     → mouse (small = mouse report)
+ * 6. maxPacketSize >= 8                                        → keyboard (fallback)
+ *
+ * This handles combo receivers that advertise subclass=0 / protocol=0 on one or
+ * both interfaces, as long as they still send standard boot protocol reports.
+ *
+ * Mouse report formats handled:
+ *   4-byte: [buttons, dx, dy, wheel]
+ *   5-byte: [buttons, dx, dy, wheel, ac_pan]   (high-resolution wheel extension)
+ *   8-byte: [buttons, dx, dy, wheel, 0, 0, 0, 0] (some receivers pad to keyboard size)
  *
  * Hot path: USB interrupt transfer → parse HID report → emit InputEvent.
  * Nothing on this path touches disk, network, or the main thread.
- *
- * HID report format (standard boot protocol):
- *   Keyboard (8 bytes): [modifiers, reserved, key1, key2, key3, key4, key5, key6]
- *   Mouse (4 bytes):    [buttons, dx, dy, wheel]
  */
 class UsbInputCapture(
     private val context: Context,
@@ -63,16 +75,25 @@ class UsbInputCapture(
             val iface = device.getInterface(i)
             if (iface.interfaceClass != UsbConstants.USB_CLASS_HID) continue
             if (!conn.claimInterface(iface, true)) {
-                BridgeLogger.w(TAG, "Could not claim HID interface $i")
+                BridgeLogger.w(TAG, "Could not claim HID interface $i — skipping")
                 continue
             }
-            val endpoint = findInterruptInEndpoint(iface) ?: continue
-            BridgeLogger.i(TAG, "Starting capture on HID interface $i (${iface.interfaceSubclass})")
+            val endpoint = findInterruptInEndpoint(iface) ?: run {
+                BridgeLogger.w(TAG, "No interrupt-in endpoint on HID interface $i")
+                continue
+            }
 
-            val job = when (iface.interfaceSubclass) {
-                SUBCLASS_KEYBOARD -> scope.launch { readKeyboard(conn, iface, endpoint) }
-                SUBCLASS_MOUSE    -> scope.launch { readMouse(conn, iface, endpoint) }
-                else              -> scope.launch { readGenericHid(conn, iface, endpoint) }
+            val ifaceType = detectInterfaceType(iface, endpoint)
+            BridgeLogger.i(
+                TAG,
+                "HID interface $i: subclass=${iface.interfaceSubclass} " +
+                    "protocol=${iface.interfaceProtocol} maxPacket=${endpoint.maxPacketSize} " +
+                    "→ $ifaceType"
+            )
+
+            val job = when (ifaceType) {
+                HidInterfaceType.KEYBOARD -> scope.launch { readKeyboard(conn, iface, endpoint) }
+                HidInterfaceType.MOUSE    -> scope.launch { readMouse(conn, iface, endpoint) }
             }
             captureJobs += job
             started = true
@@ -101,6 +122,42 @@ class UsbInputCapture(
         BridgeLogger.i(TAG, "USB input capture stopped")
     }
 
+    // ── Interface type detection ──────────────────────────────────────────────
+
+    private enum class HidInterfaceType { KEYBOARD, MOUSE }
+
+    /**
+     * Determine whether a HID interface is a keyboard or mouse.
+     *
+     * Priority:
+     *  1. Standard boot protocol subclass (1) + protocol (1=keyboard, 2=mouse)
+     *  2. Protocol alone (some devices skip the boot subclass)
+     *  3. Heuristic: small max-packet-size → mouse (boot mouse report ≤ 8 bytes,
+     *     but keyboard report is exactly 8 bytes — distinguish by protocol)
+     *  4. Fallback: assume keyboard (safer default — at least keys will work)
+     */
+    private fun detectInterfaceType(iface: UsbInterface, endpoint: UsbEndpoint): HidInterfaceType {
+        val sub  = iface.interfaceSubclass
+        val prot = iface.interfaceProtocol
+
+        // Standard HID boot protocol class
+        if (sub == SUBCLASS_BOOT) {
+            if (prot == PROTOCOL_KEYBOARD) return HidInterfaceType.KEYBOARD
+            if (prot == PROTOCOL_MOUSE)    return HidInterfaceType.MOUSE
+        }
+        // Protocol hint even with non-standard subclass
+        if (prot == PROTOCOL_KEYBOARD) return HidInterfaceType.KEYBOARD
+        if (prot == PROTOCOL_MOUSE)    return HidInterfaceType.MOUSE
+
+        // Heuristic: mouse boot report is 3–5 bytes; keyboard is 8 bytes.
+        // Use maxPacketSize ≤ 6 as a mouse indicator only when maxPacket is small
+        // (avoids misidentifying an 8-byte keyboard interface as keyboard by default).
+        if (endpoint.maxPacketSize in 3..6) return HidInterfaceType.MOUSE
+
+        // Default: treat as keyboard (best fallback — at least key events flow)
+        return HidInterfaceType.KEYBOARD
+    }
+
     // ── Keyboard reader ───────────────────────────────────────────────────────
 
     private suspend fun readKeyboard(
@@ -114,7 +171,7 @@ class UsbInputCapture(
 
         while (this@UsbInputCapture.isActive && coroutineContext.isActive) {
             val transferred = conn.bulkTransfer(endpoint, buf, buf.size, TRANSFER_TIMEOUT_MS)
-            if (transferred < 8) continue
+            if (transferred < 2) continue  // need at least modifier byte + reserved
 
             val modByte = buf[0]
             val modifiers = parseModifiers(modByte)
@@ -123,7 +180,9 @@ class UsbInputCapture(
                 prevModifiers = modifiers
             }
 
-            val currentKeys = IntArray(6) { buf[2 + it].toInt() and 0xFF }
+            // Keys are in bytes 2–7 (byte 1 is reserved = 0x00 in boot protocol)
+            val keyCount = (transferred - 2).coerceIn(0, 6)
+            val currentKeys = IntArray(keyCount) { buf[2 + it].toInt() and 0xFF }
 
             // Key-up events for keys no longer pressed
             for (prev in prevKeys) {
@@ -139,61 +198,63 @@ class UsbInputCapture(
                     _events.emit(InputEvent.KeyDown(androidCode, curr, modifiers))
                 }
             }
-            prevKeys = currentKeys
+            // Pad prevKeys to 6 slots so the "not in" check works correctly next iteration
+            prevKeys = IntArray(6).also { dst -> currentKeys.copyInto(dst) }
         }
     }
 
     // ── Mouse reader ──────────────────────────────────────────────────────────
 
+    /**
+     * Parse mouse HID boot protocol reports.
+     *
+     * Supported report layouts:
+     *  3-byte: [buttons, dx, dy]                   — minimal boot mouse
+     *  4-byte: [buttons, dx, dy, wheel]             — standard boot mouse
+     *  5-byte: [buttons, dx, dy, wheel, ac_pan]     — extended (tilt wheel / panning)
+     *  8-byte: [buttons, dx, dy, wheel, 0, 0, 0, 0] — padded to match keyboard size
+     *
+     * All delta bytes are signed (two's complement); cast through toByte() to preserve sign.
+     */
     private suspend fun readMouse(
         conn: UsbDeviceConnection,
         iface: UsbInterface,
         endpoint: UsbEndpoint,
     ) = withContext(Dispatchers.IO) {
-        val buf = ByteArray(endpoint.maxPacketSize.coerceAtLeast(4))
+        val buf = ByteArray(endpoint.maxPacketSize.coerceAtLeast(8))
         var prevButtons = 0
 
         while (this@UsbInputCapture.isActive && coroutineContext.isActive) {
             val transferred = conn.bulkTransfer(endpoint, buf, buf.size, TRANSFER_TIMEOUT_MS)
             if (transferred < 3) continue
 
-            val buttons = buf[0].toInt() and 0x07
-            val dx = buf[1].toInt().toByte().toFloat()  // signed
-            val dy = buf[2].toInt().toByte().toFloat()  // signed
-            val wheel = if (transferred >= 4) buf[3].toInt().toByte().toFloat() else 0f
+            val buttons = buf[0].toInt() and 0x07   // bits 0–2: left, right, middle
+            val dx      = buf[1].toByte().toFloat()  // signed relative X
+            val dy      = buf[2].toByte().toFloat()  // signed relative Y
+            // Wheel (byte 3) present in 4-byte and 5-byte reports
+            val wheel   = if (transferred >= 4) buf[3].toByte().toFloat() else 0f
 
-            // Mouse movement
+            // Mouse movement — emit if either axis has a delta
             if (dx != 0f || dy != 0f) {
                 _events.emit(InputEvent.MouseMove(dx, dy))
             }
 
-            // Scroll
+            // Scroll wheel — invert so physical wheel-down scrolls content up
+            // (positive wheel from USB = scroll up; InputBridge Scroll.dy > 0 = content moves up)
             if (wheel != 0f) {
-                _events.emit(InputEvent.Scroll(0f, -wheel)) // invert: wheel down = scroll up content
+                _events.emit(InputEvent.Scroll(0f, -wheel))
             }
 
-            // Button changes
+            // Button state changes (bits 0=left, 1=right, 2=middle)
             for (bit in 0..2) {
-                val mask = 1 shl bit
+                val mask    = 1 shl bit
                 val wasDown = (prevButtons and mask) != 0
-                val isDown  = (buttons   and mask) != 0
+                val isDown  = (buttons    and mask) != 0
                 val button  = MouseButton.fromId(bit.toByte())
                 if (!wasDown && isDown) _events.emit(InputEvent.MouseButtonDown(button))
-                if (wasDown && !isDown) _events.emit(InputEvent.MouseButtonUp(button))
+                if (wasDown  && !isDown) _events.emit(InputEvent.MouseButtonUp(button))
             }
             prevButtons = buttons
-        }
-    }
-
-    private suspend fun readGenericHid(
-        conn: UsbDeviceConnection,
-        iface: UsbInterface,
-        endpoint: UsbEndpoint,
-    ) = withContext(Dispatchers.IO) {
-        val buf = ByteArray(endpoint.maxPacketSize.coerceAtLeast(8))
-        while (this@UsbInputCapture.isActive && coroutineContext.isActive) {
-            conn.bulkTransfer(endpoint, buf, buf.size, TRANSFER_TIMEOUT_MS)
-            // Generic HID — no-op for now; extend in future phases
         }
     }
 
@@ -213,20 +274,23 @@ class UsbInputCapture(
     private fun parseModifiers(byte: Byte): ModifierState {
         val b = byte.toInt() and 0xFF
         return ModifierState(
-            shift    = (b and 0x22) != 0, // left or right shift
-            ctrl     = (b and 0x11) != 0,
-            alt      = (b and 0x44) != 0,
-            meta     = (b and 0x88) != 0,
-            capsLock = false, // tracked via key events
+            shift    = (b and 0x22) != 0,  // bit 1 = Left Shift, bit 5 = Right Shift
+            ctrl     = (b and 0x11) != 0,  // bit 0 = Left Ctrl,  bit 4 = Right Ctrl
+            alt      = (b and 0x44) != 0,  // bit 2 = Left Alt,   bit 6 = Right Alt
+            meta     = (b and 0x88) != 0,  // bit 3 = Left GUI,   bit 7 = Right GUI
+            capsLock = false,               // tracked via KeyDown CAPS_LOCK events
         )
     }
 
     companion object {
-        private const val TRANSFER_TIMEOUT_MS = 50      // short timeout keeps the loop responsive
-        private const val SUBCLASS_KEYBOARD = 1
-        private const val SUBCLASS_MOUSE    = 2
+        private const val TRANSFER_TIMEOUT_MS = 50  // short timeout keeps the loop responsive
 
-        /** Check if all known HID devices on this Android USB Manager are accessible. */
+        // HID Boot Interface Subclass and Protocol constants
+        private const val SUBCLASS_BOOT      = 1
+        private const val PROTOCOL_KEYBOARD  = 1
+        private const val PROTOCOL_MOUSE     = 2
+
+        /** Check if any known HID devices are accessible on this USB Manager. */
         fun findHidDevices(context: Context): List<UsbDevice> {
             val mgr = context.getSystemService(Context.USB_SERVICE) as UsbManager
             return mgr.deviceList.values.filter { device ->
