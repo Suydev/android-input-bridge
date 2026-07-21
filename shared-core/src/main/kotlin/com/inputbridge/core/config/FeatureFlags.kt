@@ -19,8 +19,11 @@ object FeatureFlags {
     /**
      * Enable Wi-Fi Direct transport.
      * Falls back to UDP if Wi-Fi Direct group formation fails.
+     *
+     * BUG-051 fix: set to false — WifiDirectTransport is an unimplemented stub.
+     * Re-enable when the transport is fully implemented and tested.
      */
-    const val WIFI_DIRECT_ENABLED = true
+    const val WIFI_DIRECT_ENABLED = false
 
     /**
      * Enable per-event latency tracing.

@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 010 — Phase 7 Polish (complete)
+> **Last updated:** Session 014 — Deep audit + BUG-046→053 fixes (2026-07-21)
 
 ---
 
@@ -105,7 +105,24 @@ app-receiver/             — Tablet receiver app (transport → inject)
 
 ## CI / Build
 
-- GitHub Actions: `.github/workflows/build.yml`
-- Debug APK artifacts on every push to `main`
-- Last green build: Session 009 + this session (010)
+- GitHub Actions: `.github/workflows/ci.yml`
+- Debug APK artifacts + unit tests on every push to `main`, `develop`, `feature/**`, `phase/**`
+- Release APKs built on `main` push (requires `SIGNING_KEYSTORE_BASE64` secret)
+- Last green build: Session 014 (BUG-046→053 fixes)
 - APK outputs: `app-bridge/build/outputs/apk/debug/` + `app-receiver/build/outputs/apk/debug/`
+
+---
+
+## Bug Audit Status
+
+All bugs BUG-001 through BUG-053 are tracked in `BUGS.md`.
+- BUG-001–BUG-045: all FIXED in Sessions 001–013
+- BUG-046–BUG-053: found in Session 014 deep audit
+  - BUG-046 FIXED — dead `else` in sealed `when` (AccessibilityCommandBus)
+  - BUG-047 FIXED — empty IP in notification after silence recovery (ReceiverService)
+  - BUG-048 FIXED — USB interfaces not released before close (UsbInputCapture)
+  - BUG-049 FIXED — stale capture latency not reset on reconnect (BridgeService)
+  - BUG-050 FIXED — HidReportBuilder missing MENU + F13–F24 (BT HID silent drop)
+  - BUG-051 FIXED — WIFI_DIRECT_ENABLED=true with stub transport (FeatureFlags)
+  - BUG-052 WONTFIX — numLock always false (architectural; protocol change needed to fix)
+  - BUG-053 FIXED — DiagnosticsManager.update race condition (synchronized)

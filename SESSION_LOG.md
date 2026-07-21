@@ -2,6 +2,54 @@
 
 ---
 
+## Session 014 — Deep Audit + Bug Fixes (BUG-046 → BUG-053)
+**Date:** 2026-07-21
+**Agent:** Claude (Replit)
+**Status:** ✅ Complete
+
+### Goals
+- Full deep audit of all source files — every module, every service, both apps
+- Find all bugs not yet in BUGS.md; document them before touching any code
+- Fix all confirmed bugs; verify each change is minimal and correct
+- Check GitHub Actions CI status; push fixes; confirm green build
+
+### Audit Scope
+Read and cross-checked:
+`UsbInputCapture`, `KeyMap`, `UdpTransport`, `AccessibilityCommandBus`,
+`InputBridgeAccessibilityService`, `CursorOverlayService`, `ReceiverService`,
+`BridgeService`, `BridgeApplication`, `ReceiverApplication`, `PacketSerializer`,
+`EventPacketFactory`, `Packet`, `PacketType`, `PacketToEventConverter`,
+`InputEvent` / `ModifierState`, `AppConfig`, `FeatureFlags`, `DiagnosticsManager`,
+`DiagnosticsData`, `BluetoothHidTransport`, `HidReportBuilder`, `HidDescriptor`,
+`BridgePreferences`, `ReceiverPreferences`, `BridgeViewModel`, `ReceiverViewModel`,
+both `MainActivity` files, `BridgeScreen`, `ConnectionScreen`, `ci.yml`
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|----|----------|-------------|---------|
+| BUG-046 | Low | Dead `else ->` in `AccessibilityCommandBus.handleEvent` — suppresses sealed-class exhaustiveness | FIXED |
+| BUG-047 | Low | `ReceiverService` notification shows `"Paired with bridge ()"` when `pairedBridgeIp` is empty after silence recovery | FIXED |
+| BUG-048 | Medium | `UsbInputCapture.stop()` closes USB connection without releasing claimed interfaces first | FIXED |
+| BUG-049 | Low | `triggerReconnect()` resets ping timestamps but not `lastCaptureToSendUs` — stale latency shown after reconnect | FIXED |
+| BUG-050 | High | `HidReportBuilder.ANDROID_TO_HID` missing `KEYCODE_MENU` + `KEYCODE_F13`–`F24` — BT HID drops these keys silently | FIXED |
+| BUG-051 | Low | `FeatureFlags.WIFI_DIRECT_ENABLED = true` but Wi-Fi Direct is a stub | FIXED |
+| BUG-052 | Very Low | `ModifierState.numLock` always false — dead wire field (no Output report processing) | WONTFIX |
+| BUG-053 | Medium | `DiagnosticsManager.update {}` read-modify-write race under concurrent IO callers | FIXED |
+
+### What Was Changed
+- `BUGS.md` — appended BUG-046 through BUG-053 with full descriptions
+- `AccessibilityCommandBus.kt` — removed dead `else ->` branch
+- `ReceiverService.kt` — guard empty `pairedBridgeIp` in silence-recovery notification
+- `UsbInputCapture.kt` — track `claimedInterfaces`; release all in `stop()` before `close()`
+- `BridgeService.kt` — reset `lastCaptureToSendUs` to 0 in `triggerReconnect()`
+- `HidReportBuilder.kt` — added 13 missing `ANDROID_TO_HID` entries (MENU + F13–F24)
+- `FeatureFlags.kt` — `WIFI_DIRECT_ENABLED = false`
+- `DiagnosticsManager.kt` — `synchronized(updateLock)` wrapping `update {}` body
+- `SESSION_LOG.md`, `PROJECT_STATE.md`, `TASKS.md`, `AI_CONTEXT.md` — updated
+- `.agents/memory/bugs-046-053-audit.md` — full audit detail captured
+
+---
+
 ## Session 001 — Phase 1 Scaffold
 **Date:** 2025-07-19
 **Agent:** Claude (Replit)

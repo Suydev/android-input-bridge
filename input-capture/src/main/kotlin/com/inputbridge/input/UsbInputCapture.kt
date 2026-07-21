@@ -57,6 +57,8 @@ class UsbInputCapture(
 
     private var connection: UsbDeviceConnection? = null
     private val captureJobs = mutableListOf<Job>()
+    // BUG-048 fix: track every successfully claimed interface so stop() can release them.
+    private val claimedInterfaces = mutableListOf<UsbInterface>()
 
     override suspend fun start(): Boolean {
         if (isActive) return true
@@ -78,6 +80,11 @@ class UsbInputCapture(
                 BridgeLogger.w(TAG, "Could not claim HID interface $i — skipping")
                 continue
             }
+            // BUG-048 fix: record every claimed interface immediately after claim succeeds.
+            // We record even before the endpoint check because the interface is already claimed
+            // at this point; if the endpoint is absent we continue but the claim still exists
+            // and must be released in stop().
+            claimedInterfaces += iface
             val endpoint = findInterruptInEndpoint(iface) ?: run {
                 BridgeLogger.w(TAG, "No interrupt-in endpoint on HID interface $i")
                 continue
@@ -116,6 +123,13 @@ class UsbInputCapture(
         isActive = false
         captureJobs.forEach { it.cancel() }
         captureJobs.clear()
+        // BUG-048 fix: release all claimed interfaces before closing the connection.
+        // On some Android devices/kernel versions, closing without prior releaseInterface()
+        // leaves the interface locked until an OS-level timeout, blocking re-open on replug.
+        connection?.let { conn ->
+            claimedInterfaces.forEach { iface -> conn.releaseInterface(iface) }
+        }
+        claimedInterfaces.clear()
         connection?.close()
         connection = null
         _status.value = CaptureStatus.Stopped

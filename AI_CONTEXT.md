@@ -43,6 +43,30 @@ OnePlus Pad Go:                                              UdpTransport → Pa
                                                        AccessibilityCommandBus → tap/swipe/text
 ```
 
+## Bug audit state (as of Session 014)
+
+All bugs through BUG-053 are documented in `BUGS.md`. BUG-046 through BUG-053 were found
+in a full deep audit on 2026-07-21. Key non-obvious constraints to preserve:
+
+- **`HidReportBuilder.ANDROID_TO_HID` must be kept in sync with `KeyMap.HID_TO_ANDROID`.**
+  Both are manually maintained inverse maps. BUG-050 happened because BUG-038 updated `KeyMap`
+  but not `HidReportBuilder`. Any new key added for USB→accessibility must also be added for BT HID.
+
+- **`AccessibilityCommandBus.handleEvent` must NOT use `else ->` in its `when (event)` block.**
+  The sealed class exhaustiveness check is the safety net for new `InputEvent` subtypes.
+
+- **`DiagnosticsManager.update {}` is now `synchronized(updateLock)`.** Do not inline
+  `_state.value = _state.value.someTransform()` outside of `update`; it would re-introduce
+  the race.
+
+- **`FeatureFlags.WIFI_DIRECT_ENABLED` must stay `false`** until `WifiDirectTransport` is
+  fully implemented.
+
+- **`pairedBridgeIp` can be empty in open-mode sessions** — never format it directly into
+  a user-visible string without an `isNotEmpty()` guard.
+
+---
+
 ## Repository layout
 
 ```

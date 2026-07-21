@@ -1,3 +1,4 @@
 - [InputBridge project setup](inputbridge-setup.md) — Android multi-module project; docs are the source of truth; read all .md files before coding
 - [UDP bidirectional in receiver mode](udp-receiver-send.md) — receiver mode UdpTransport must track lastSenderAddress for PONG replies; empty targetIp in receiver mode breaks send
 - [Accessibility keyboard injection](accessibility-keyboard.md) — KeyEvent.unicodeChar + buildMetaState() resolves chars; ACTION_SET_TEXT is selection-aware; use coerceIn(0, text.length) on textSelectionStart
+- [Session 014 audit — BUG-046 to BUG-053](bugs-046-053-audit.md) — key constraints: ANDROID_TO_HID must mirror KeyMap; sealed when needs no else; USB releaseInterface before close; DiagnosticsManager.update is synchronized

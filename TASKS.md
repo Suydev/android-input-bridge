@@ -170,6 +170,20 @@ Complete checklist of all project tasks. Never delete completed tasks. Always ap
 
 ---
 
+## Session 014 — Deep Audit Bug Fixes ✅
+
+- [x] BUG-046: Remove dead `else ->` from `AccessibilityCommandBus.handleEvent` — sealed class exhaustiveness now enforced by compiler
+- [x] BUG-047: Guard empty `pairedBridgeIp` in `ReceiverService` PING silence-recovery notification
+- [x] BUG-048: Track claimed USB interfaces in `UsbInputCapture`; release all before `close()` in `stop()`
+- [x] BUG-049: Reset `lastCaptureToSendUs` to 0 in `BridgeService.triggerReconnect()` alongside ping timestamp resets
+- [x] BUG-050: Add `KEYCODE_MENU` (HID 0x65) and `KEYCODE_F13`–`F24` (HID 0x68–0x73) to `HidReportBuilder.ANDROID_TO_HID`
+- [x] BUG-051: Set `FeatureFlags.WIFI_DIRECT_ENABLED = false` (Wi-Fi Direct is a stub)
+- [x] BUG-052: Documented WONTFIX — `ModifierState.numLock` always false due to USB Output report gap
+- [x] BUG-053: Fix `DiagnosticsManager.update {}` read-modify-write race — wrap in `synchronized(updateLock)`
+- [x] Documentation: BUGS.md, SESSION_LOG.md, PROJECT_STATE.md, TASKS.md, AI_CONTEXT.md, agent memory updated
+
+---
+
 ## Phase 7 — Polish ✅ (Session 010)
 
 - [x] Black screen mode: BridgeScreen goes pitch-black, window brightness set to 0.001f

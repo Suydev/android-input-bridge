@@ -217,7 +217,11 @@ object AccessibilityCommandBus {
             // Modifier state change: modifiers are embedded in subsequent KeyDown events.
             is InputEvent.ModifierStateChanged -> Unit
 
-            else -> BridgeLogger.d(TAG, "Unhandled event type: $event")
+            // BUG-046 fix: removed dead `else` branch.
+            // The `when` above is exhaustive over the sealed InputEvent hierarchy (all 9 subtypes
+            // are listed). Keeping `else` here would suppress Kotlin's compile-time exhaustiveness
+            // check, silently dropping any new InputEvent subtype added in future. No `else` means
+            // the compiler will issue an error if a new subtype is added without updating this handler.
         }
     }
 

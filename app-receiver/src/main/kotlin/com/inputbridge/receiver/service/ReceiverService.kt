@@ -326,7 +326,14 @@ class ReceiverService : Service() {
                         lastPingReceivedMs = System.currentTimeMillis()
                         if (bridgeSilenceNotified) {
                             bridgeSilenceNotified = false
-                            updateNotification("Paired with bridge ($pairedBridgeIp)")
+                            // BUG-047 fix: pairedBridgeIp can be empty in open-mode sessions
+                            // (no PIN set, so PAIR_REQUEST/PAIR_RESPONSE exchange never happened).
+                            // Guard to avoid the notification reading "Paired with bridge ()".
+                            val recoveredMsg = if (pairedBridgeIp.isNotEmpty())
+                                "Paired with bridge ($pairedBridgeIp)"
+                            else
+                                "Bridge reconnected — PIN: $sessionPin"
+                            updateNotification(recoveredMsg)
                             DiagnosticsManager.update { copy(lastError = null) }
                         }
                     }

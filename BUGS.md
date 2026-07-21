@@ -842,3 +842,217 @@ so the old one's channel and any queued byte arrays were leaked until GC.
 **Fix**: Added `sendChannel.close()` as the first statement in `disconnect()`, before
 cancelling `sendJob`, so the channel's iterator terminates cleanly before the coroutine is
 cancelled.
+
+---
+
+## BUG-046 — Dead `else` branch in `AccessibilityCommandBus.handleEvent`
+
+**Description**: `AccessibilityCommandBus.handleEvent()` uses a `when (event)` block over the
+sealed `InputEvent` hierarchy but includes a trailing `else ->` branch. All 9 direct subtypes of
+`InputEvent` (KeyDown, KeyUp, MouseMove, MouseButtonDown, MouseButtonUp, Scroll, TextInput,
+ModifierStateChanged, NavigationAction) are explicitly handled above it. The `else` branch is
+unreachable dead code and causes the Kotlin compiler to suppress the exhaustiveness check —
+meaning future additions to the sealed class will silently compile without a handler, potentially
+dropping new event types at runtime.
+
+**Steps to reproduce**: Add a new subclass to `InputEvent`. The compiler will not warn you that
+`handleEvent()` is unhandled because `else ->` consumes it silently.
+
+**Expected behavior**: Compiler enforces exhaustiveness; adding a new `InputEvent` subtype causes
+a compile error until `handleEvent` handles it.
+**Actual behavior**: `else ->` suppresses the check. The dead branch also logs a false-positive
+"Unhandled event type" warning if somehow reached.
+
+**Files involved**: `accessibility-receiver/src/main/kotlin/com/inputbridge/accessibility/AccessibilityCommandBus.kt`
+
+**Priority**: Low (no runtime breakage; correctness/maintainability issue)
+**Status**: ✅ FIXED (Session 014)
+**Fix**: Removed the `else ->` branch entirely. Kotlin now enforces exhaustiveness at compile
+time for the sealed `InputEvent` hierarchy.
+
+---
+
+## BUG-047 — `ReceiverService` notification shows empty IP after bridge-silence recovery
+
+**Description**: When the bridge-silence watchdog fires (`bridgeSilenceNotified = true`) and the
+bridge subsequently recovers (a PING arrives), the PING handler resets the flag and calls
+`updateNotification("Paired with bridge ($pairedBridgeIp)")`. If `pairedBridgeIp` is empty —
+which happens when the session is in open mode (no PIN configured, never formally paired) — the
+notification reads `"Paired with bridge ()"`.
+
+**Steps to reproduce**: Run receiver with no pairing PIN set. Let the bridge go silent for 15 s,
+then reconnect. The persistent notification shows `"Paired with bridge ()"`.
+
+**Expected behavior**: Notification shows a meaningful string regardless of pairing state.
+**Actual behavior**: Notification shows the malformed string `"Paired with bridge ()"`.
+
+**Files involved**: `app-receiver/src/main/kotlin/com/inputbridge/receiver/service/ReceiverService.kt`
+
+**Priority**: Low (UX only; no functional impact)
+**Status**: ✅ FIXED (Session 014)
+**Fix**: Guard the notification text: if `pairedBridgeIp.isNotEmpty()` use the existing
+`"Paired with bridge ($pairedBridgeIp)"` string; otherwise fall back to
+`"Bridge reconnected — PIN: $sessionPin"`.
+
+---
+
+## BUG-048 — `UsbInputCapture.stop()` does not release claimed USB interfaces before closing
+
+**Description**: `UsbInputCapture.start()` calls `conn.claimInterface(iface, true)` for each
+HID interface found on the device. `UsbInputCapture.stop()` cancels the capture coroutines and
+calls `connection?.close()`, but never calls `conn.releaseInterface(iface)` for any interface it
+claimed. On some Android devices and kernel versions, an interface that was not explicitly
+released before `close()` remains in a claimed state until an OS-level timeout elapses. This
+prevents the interface from being re-opened after a device replug during the same service
+lifetime.
+
+**Steps to reproduce**: On affected hardware, unplug the USB receiver while the bridge is
+running. `UsbInputCapture.stop()` is called. Replug the receiver within a few seconds.
+`UsbInputCapture.start()` → `conn.claimInterface()` may fail silently, leaving the keyboard/
+mouse inoperative until the service is restarted.
+
+**Expected behavior**: `stop()` releases all claimed interfaces then closes the connection.
+**Actual behavior**: `stop()` closes the connection without releasing interfaces first.
+
+**Files involved**: `input-capture/src/main/kotlin/com/inputbridge/input/UsbInputCapture.kt`
+
+**Priority**: Medium (affects replug reliability on some devices)
+**Status**: ✅ FIXED (Session 014)
+**Fix**: Added `private val claimedInterfaces = mutableListOf<UsbInterface>()`. Each successful
+`claimInterface()` call now appends to this list. `stop()` iterates the list calling
+`connection?.releaseInterface(iface)` on each entry before calling `connection?.close()`.
+
+---
+
+## BUG-049 — `BridgeService.triggerReconnect()` does not reset `lastCaptureToSendUs`
+
+**Description**: `triggerReconnect()` resets the ping/pong timestamps (`lastPingSentAtMs = 0L`,
+`lastPongReceivedMs = 0L`) but does NOT reset the `lastCaptureToSendUs` `AtomicLong`. After a
+reconnect, the stale microsecond value from the previous session is flushed into `DiagnosticsData`
+every second by `counterFlushJob` until a new input event arrives. The Diagnostics screen will
+show a latency figure from the prior session, which can mislead debugging.
+
+**Steps to reproduce**: Bridge session with active keyboard use (e.g. 500 µs capture→send).
+Trigger a reconnect (e.g. disconnect Wi-Fi briefly). Before typing again, open the Diagnostics
+screen — the capture latency row still shows the old value.
+
+**Expected behavior**: `captureToSendUs` resets to 0 on reconnect.
+**Actual behavior**: Stale value from prior session persists until next key/mouse event.
+
+**Files involved**: `app-bridge/src/main/kotlin/com/inputbridge/bridge/service/BridgeService.kt`
+
+**Priority**: Low (cosmetic / diagnostics accuracy; no functional impact)
+**Status**: ✅ FIXED (Session 014)
+**Fix**: Added `lastCaptureToSendUs.set(0L)` alongside the other timestamp resets in
+`triggerReconnect()`.
+
+---
+
+## BUG-050 — `HidReportBuilder.ANDROID_TO_HID` missing `KEYCODE_MENU` and `KEYCODE_F13`–`F24`
+
+**Description**: BUG-038 added `KEYCODE_MENU` (Application/Menu key) and `KEYCODE_F13`–`F24`
+to `KeyMap.HID_TO_ANDROID` so that the USB capture path can decode these keys. However, the
+inverse map `HidReportBuilder.ANDROID_TO_HID` — used by the Bluetooth HID transport to
+re-encode Android key codes into HID usage IDs — was NOT updated. In BT HID mode, pressing
+any of these keys causes `onKeyDown()` / `onKeyUp()` to look up a missing key in
+`ANDROID_TO_HID`, receive `null`, and silently discard the key. The UDP/accessibility path
+(app-receiver) works correctly; only BT HID mode is broken for these keys.
+
+**Missing HID mappings:**
+- `KEYCODE_MENU`  → HID 0x65 (Application)
+- `KEYCODE_F13`   → HID 0x68
+- `KEYCODE_F14`   → HID 0x69
+- `KEYCODE_F15`   → HID 0x6A
+- `KEYCODE_F16`   → HID 0x6B
+- `KEYCODE_F17`   → HID 0x6C
+- `KEYCODE_F18`   → HID 0x6D
+- `KEYCODE_F19`   → HID 0x6E
+- `KEYCODE_F20`   → HID 0x6F
+- `KEYCODE_F21`   → HID 0x70
+- `KEYCODE_F22`   → HID 0x71
+- `KEYCODE_F23`   → HID 0x72
+- `KEYCODE_F24`   → HID 0x73
+
+Note: `KEYCODE_SYSRQ`, `KEYCODE_SCROLL_LOCK`, `KEYCODE_BREAK`, and `KEYCODE_INSERT` were already
+present in `ANDROID_TO_HID` and are not affected.
+
+**Steps to reproduce**: Bridge in BT HID mode. Press Menu/Application key or any F13–F24 key
+on the Portronics keyboard. No key event arrives on the host.
+
+**Expected behavior**: Menu key and F13–F24 work in BT HID mode identically to UDP mode.
+**Actual behavior**: Keys silently dropped in BT HID mode.
+
+**Files involved**: `transport-bluetooth-hid/src/main/kotlin/com/inputbridge/transport/bt/HidReportBuilder.kt`
+
+**Priority**: High (complete silent key loss in BT HID mode for a set of valid keys)
+**Status**: ✅ FIXED (Session 014)
+**Fix**: Added all 13 missing entries to `ANDROID_TO_HID`. HID usage IDs sourced from HID
+Usage Tables 1.5 (Keyboard/Keypad page 0x07).
+
+---
+
+## BUG-051 — `FeatureFlags.WIFI_DIRECT_ENABLED = true` but Wi-Fi Direct is a stub
+
+**Description**: `FeatureFlags.WIFI_DIRECT_ENABLED` is `true` by default. The WelcomeScreen
+correctly hides the Wi-Fi Direct transport option from the UI, but the flag itself is visible
+to any code path that reads it. If any future code reads this flag to conditionally activate
+the Wi-Fi Direct transport — which is currently a stub (`WifiDirectTransport`) — it will attempt
+to initialize the stub and either fail silently or throw. Shipping with the flag `true` is
+misleading and risks accidental activation.
+
+**Files involved**: `shared-core/src/main/kotlin/com/inputbridge/core/config/FeatureFlags.kt`
+
+**Priority**: Low (no current runtime impact; correctness and safety)
+**Status**: ✅ FIXED (Session 014)
+**Fix**: Changed `WIFI_DIRECT_ENABLED` to `false`. The stub remains in the codebase for future
+use; the flag will be re-enabled when the transport is implemented.
+
+---
+
+## BUG-052 — `ModifierState.numLock` is always `false` (dead wire)
+
+**Description**: `ModifierState` includes a `numLock: Boolean` field that is serialized into
+bit 0x20 of the modifier byte for the wire protocol. However, `UsbInputCapture.parseModifiers()`
+never sets `numLock = true`. NumLock LED state comes from USB Output reports (host → device),
+which the bridge never processes — the USB HID boot protocol input report (host → device) only
+carries modifier key state for Ctrl/Shift/Alt/GUI, not lock-key state. As a result, `numLock`
+is always `false` in every `InputEvent`, `ModifierState`, and wire packet; the bit in the
+protocol byte is always 0. This is not a correctness issue (numpad number input works
+correctly via the regular keycode path), but it is a misleading dead field.
+
+**Files involved**: `shared-core/src/main/kotlin/com/inputbridge/core/model/InputEvent.kt`
+
+**Priority**: Very Low (dead code; no functional impact)
+**Status**: ⚠ WONTFIX — Removing `numLock` would change the wire protocol (bit 0x20) and
+require a protocol version bump. The field is correctly handled if a future implementation reads
+USB Output reports. Leave in place; document here for clarity.
+
+---
+
+## BUG-053 — `DiagnosticsManager.update {}` has a read-modify-write race condition
+
+**Description**: `DiagnosticsManager.update { ... }` is implemented as:
+```kotlin
+_state.value = _state.value.block()
+```
+`MutableStateFlow.value` is individually atomic for get and set, but this is a non-atomic
+**read-modify-write** sequence: two concurrent callers can both read the same stale value,
+apply their independent changes, and then one caller's `set()` overwrites the other's update.
+On the hot path this is a real race: `counterFlushJob` (IO thread, every 1 s), `captureJob`
+(IO thread, every USB event), and `watchdogJob` (IO thread, every 3–5 s) all call `update`
+concurrently. Packets-sent and latency counters can be silently dropped.
+
+**Steps to reproduce**: Sustained bridging session with high keyboard input rate. Compare
+`DiagnosticsData.packetsSent` accumulated in `packetsSent` `AtomicLong` with the value shown
+in the Diagnostics screen — they will diverge under concurrent flush calls.
+
+**Expected behavior**: All callers see their update committed; no update is lost.
+**Actual behavior**: Under concurrent callers, one update can silently overwrite another.
+
+**Files involved**: `diagnostics/src/main/kotlin/com/inputbridge/diagnostics/DiagnosticsManager.kt`
+
+**Priority**: Medium (diagnostic accuracy; no crash, no functional input loss)
+**Status**: ✅ FIXED (Session 014)
+**Fix**: Added `private val updateLock = Any()` and wrapped the read-modify-write in
+`synchronized(updateLock) { ... }`. This serializes all callers without blocking the
+`MutableStateFlow` collector on Main.

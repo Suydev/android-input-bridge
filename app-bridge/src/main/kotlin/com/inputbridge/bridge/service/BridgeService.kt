@@ -479,6 +479,7 @@ class BridgeService : Service() {
         udpTransport = null
         lastPingSentAtMs = 0L
         lastPongReceivedMs = 0L
+        lastCaptureToSendUs.set(0L)  // BUG-049 fix: reset stale latency so Diagnostics shows 0 not prior-session value
 
         DiagnosticsManager.update { copy(transportConnected = false, isReconnecting = true) }
         updateNotification("Reconnecting…")

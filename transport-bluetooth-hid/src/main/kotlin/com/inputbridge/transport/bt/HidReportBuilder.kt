@@ -246,6 +246,23 @@ class HidReportBuilder {
             KeyEvent.KEYCODE_NUMPAD_9      to 0x61,
             KeyEvent.KEYCODE_NUMPAD_0      to 0x62,
             KeyEvent.KEYCODE_NUMPAD_DOT    to 0x63,
+            // BUG-050 fix: the entries below were missing, silently dropping these keys in
+            // BT HID mode.  They were added to KeyMap.HID_TO_ANDROID in BUG-038 for the USB
+            // capture path but the inverse table here was never updated.
+            // HID usage IDs from HID Usage Tables 1.5, Keyboard/Keypad page (0x07).
+            KeyEvent.KEYCODE_MENU          to 0x65,  // Application / Menu key
+            KeyEvent.KEYCODE_F13           to 0x68,
+            KeyEvent.KEYCODE_F14           to 0x69,
+            KeyEvent.KEYCODE_F15           to 0x6A,
+            KeyEvent.KEYCODE_F16           to 0x6B,
+            KeyEvent.KEYCODE_F17           to 0x6C,
+            KeyEvent.KEYCODE_F18           to 0x6D,
+            KeyEvent.KEYCODE_F19           to 0x6E,
+            KeyEvent.KEYCODE_F20           to 0x6F,
+            KeyEvent.KEYCODE_F21           to 0x70,
+            KeyEvent.KEYCODE_F22           to 0x71,
+            KeyEvent.KEYCODE_F23           to 0x72,
+            KeyEvent.KEYCODE_F24           to 0x73,
         )
     }
 }

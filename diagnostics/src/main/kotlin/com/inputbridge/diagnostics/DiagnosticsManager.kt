@@ -22,8 +22,17 @@ object DiagnosticsManager {
     private val packetsReceived = AtomicLong(0)
     private val sendFailures = AtomicLong(0)
 
+    // BUG-053 fix: `_state.value = _state.value.block()` is a non-atomic read-modify-write.
+    // Under concurrent callers on different IO threads (counterFlushJob, captureJob, watchdogJob),
+    // two goroutines can both read the same stale value, apply independent transforms, and one
+    // overwrites the other. The lock serialises callers without blocking the StateFlow collector
+    // on Main (which reads via collect(), not via this lock path).
+    private val updateLock = Any()
+
     fun update(block: DiagnosticsData.() -> DiagnosticsData) {
-        _state.value = _state.value.block()
+        synchronized(updateLock) {
+            _state.value = _state.value.block()
+        }
     }
 
     // ── Counters (called on hot path — use atomics, not flow updates) ─────────
