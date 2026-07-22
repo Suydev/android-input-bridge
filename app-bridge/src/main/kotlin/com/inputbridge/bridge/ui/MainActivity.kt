@@ -24,6 +24,7 @@ import com.inputbridge.bridge.viewmodel.BridgeViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.koin.android.ext.android.inject
 import org.koin.androidx.viewmodel.ext.android.viewModel
 
 /**
@@ -44,6 +45,13 @@ import org.koin.androidx.viewmodel.ext.android.viewModel
 class MainActivity : ComponentActivity() {
 
     private val viewModel: BridgeViewModel by viewModel()
+
+    // BUG-057 fix: inject the Koin-managed BridgePreferences singleton rather than
+    // creating a fresh instance with `BridgePreferences(this)` (Activity context) in
+    // applyKeepScreenOn(). Using a fresh instance bypasses DI and uses an Activity context
+    // where the Application context is correct; the Koin singleton was already created with
+    // androidContext() (Application context) in BridgeModule.
+    private val prefs: BridgePreferences by inject()
 
     // ── POST_NOTIFICATIONS runtime permission (Android 13+) ───────────────────
 
@@ -182,7 +190,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun applyKeepScreenOn() {
-        val prefs = BridgePreferences(this)
+        // prefs is the Koin-injected singleton — see field declaration above (BUG-057 fix).
         if (prefs.keepScreenOn) {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         } else {

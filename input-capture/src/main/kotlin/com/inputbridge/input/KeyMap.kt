@@ -151,18 +151,12 @@ object KeyMap {
         // 0x66 = Power (omitted — requires system privilege)
         // 0x67 = Numpad = (omitted — niche, no direct Android equivalent)
         // ── Extended function keys F13–F24 ────────────────────────────────────
-        0x68 to KeyEvent.KEYCODE_F13,
-        0x69 to KeyEvent.KEYCODE_F14,
-        0x6A to KeyEvent.KEYCODE_F15,
-        0x6B to KeyEvent.KEYCODE_F16,
-        0x6C to KeyEvent.KEYCODE_F17,
-        0x6D to KeyEvent.KEYCODE_F18,
-        0x6E to KeyEvent.KEYCODE_F19,
-        0x6F to KeyEvent.KEYCODE_F20,
-        0x70 to KeyEvent.KEYCODE_F21,
-        0x71 to KeyEvent.KEYCODE_F22,
-        0x72 to KeyEvent.KEYCODE_F23,
-        0x73 to KeyEvent.KEYCODE_F24,
+        // BUG-054 fix: KEYCODE_F13 through KEYCODE_F24 do NOT exist in android.view.KeyEvent
+        // at ANY API level (Android only defines F1–F12 up to at least API 35). These HID
+        // scan codes (0x68–0x73) therefore have no Android KeyCode equivalent and are omitted
+        // here. hidToAndroid() returns KEYCODE_UNKNOWN for them via getOrDefault(), causing
+        // them to be silently dropped on the USB capture path — which is the correct behavior.
+        // 0x68–0x73 intentionally unmapped → falls through to KEYCODE_UNKNOWN
         // ── Modifier keys (Usage IDs 0xE0–0xE7) ──────────────────────────────
         0xE0 to KeyEvent.KEYCODE_CTRL_LEFT,
         0xE1 to KeyEvent.KEYCODE_SHIFT_LEFT,

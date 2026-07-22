@@ -65,6 +65,16 @@ in a full deep audit on 2026-07-21. Key non-obvious constraints to preserve:
 - **`pairedBridgeIp` can be empty in open-mode sessions** — never format it directly into
   a user-visible string without an `isNotEmpty()` guard.
 
+- **`KEYCODE_F13`–`KEYCODE_F24` do NOT exist in `android.view.KeyEvent`** (Android only
+  defines F1–F12). Any attempt to use them as named constants will produce "Unresolved
+  reference" compile errors. HID scan codes 0x68–0x73 must map to `KEYCODE_UNKNOWN` or be
+  omitted — they are silently dropped at runtime, which is correct.
+
+- **`continue` / `break` in inline lambdas (`?: run {}`, `forEach {}`)** require an opt-in
+  compiler flag in Kotlin 2.0 (`-Xbreak-continue-in-inline-lambdas`). This project does NOT
+  opt in. Always use an explicit `if (x == null) { continue }` null check instead of the
+  `?: run { continue }` pattern. Same applies to any inline lambda that uses `continue`.
+
 ---
 
 ## Repository layout

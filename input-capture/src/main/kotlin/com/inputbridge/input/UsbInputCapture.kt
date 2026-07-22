@@ -85,7 +85,13 @@ class UsbInputCapture(
             // at this point; if the endpoint is absent we continue but the claim still exists
             // and must be released in stop().
             claimedInterfaces += iface
-            val endpoint = findInterruptInEndpoint(iface) ?: run {
+            // BUG-055 fix: `continue` inside `?: run {}` triggers the experimental Kotlin 2.0
+            // feature "break/continue in inline lambdas" which is not opted into in this project.
+            // Compiler error: "The feature 'break continue in inline lambdas' is experimental and
+            // should be enabled explicitly." Use an explicit null check instead — Kotlin smart-
+            // casts `endpoint` to non-null for all subsequent uses within this loop iteration.
+            val endpoint = findInterruptInEndpoint(iface)
+            if (endpoint == null) {
                 BridgeLogger.w(TAG, "No interrupt-in endpoint on HID interface $i")
                 continue
             }

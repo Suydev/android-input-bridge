@@ -1056,3 +1056,85 @@ in the Diagnostics screen — they will diverge under concurrent flush calls.
 **Fix**: Added `private val updateLock = Any()` and wrapped the read-modify-write in
 `synchronized(updateLock) { ... }`. This serializes all callers without blocking the
 `MutableStateFlow` collector on Main.
+
+---
+
+## BUG-054 — `KEYCODE_F13`–`KEYCODE_F24` do not exist in `android.view.KeyEvent` (CI failure)
+
+**Description**: `KeyMap.HID_TO_ANDROID` (added in BUG-038 Session 013) references
+`KeyEvent.KEYCODE_F13` through `KeyEvent.KEYCODE_F24`. These constants do **not** exist in
+`android.view.KeyEvent` at any Android API level — Android's `KeyEvent` only defines F1–F12
+(codes 131–142). All 12 references therefore produce compile-time "Unresolved reference" errors
+on every CI build since the BUG-038 commit, blocking the "Build Debug APKs" job.
+
+The same mistake was replicated by the initial BUG-050 fix attempt, which added matching
+`KEYCODE_F13–F24` entries to `HidReportBuilder.ANDROID_TO_HID`.
+
+**Steps to reproduce**: `./gradlew :input-capture:compileDebugKotlin`. Produces 12 identical
+`e: Unresolved reference 'KEYCODE_F1X'` errors.
+
+**Expected behavior**: Build succeeds; HID scan codes 0x68–0x73 are silently unmapped.
+**Actual behavior**: 12 compile errors; CI "Build Debug APKs" job fails.
+
+**Files involved**:
+- `input-capture/src/main/kotlin/com/inputbridge/input/KeyMap.kt` (lines 154–165 in the broken state)
+- `transport-bluetooth-hid/src/main/kotlin/com/inputbridge/transport/bt/HidReportBuilder.kt` (BUG-050 attempt)
+
+**Priority**: Critical (blocks CI)
+**Status**: ✅ FIXED (Session 015)
+**Fix**: Removed all 12 `KEYCODE_F1X` entries from `KeyMap.kt`; replaced with explanatory
+comments. Updated `HidReportBuilder.kt` BUG-050 fix to only add `KEYCODE_MENU` (which does
+exist). HID 0x68–0x73 now fall through to `KEYCODE_UNKNOWN` via `getOrDefault`, causing them
+to be silently dropped — correct behaviour for unmapped keys.
+
+---
+
+## BUG-055 — `continue` inside `?: run {}` inline lambda (Kotlin 2.0 experimental feature, CI failure)
+
+**Description**: `UsbInputCapture.start()` uses the pattern:
+```kotlin
+val endpoint = findInterruptInEndpoint(iface) ?: run {
+    BridgeLogger.w(TAG, "No interrupt-in endpoint on HID interface $i")
+    continue
+}
+```
+In Kotlin 2.0 (`kotlin = "2.0.0"` in `libs.versions.toml`), using `break` or `continue` inside
+an inline lambda is classified as the experimental feature **"break continue in inline lambdas"**.
+Using it without the opt-in compiler flag (`-Xbreak-continue-in-inline-lambdas`) is a compile error:
+`"The feature 'break continue in inline lambdas' is experimental and should be enabled
+explicitly"`. This blocks CI on the same build since the BUG-038 commit.
+
+**Steps to reproduce**: `./gradlew :input-capture:compileDebugKotlin`.
+
+**Expected behavior**: Build succeeds.
+**Actual behavior**: `e: The feature "break continue in inline lambdas" is experimental`.
+
+**Files involved**: `input-capture/src/main/kotlin/com/inputbridge/input/UsbInputCapture.kt`
+
+**Priority**: Critical (blocks CI)
+**Status**: ✅ FIXED (Session 015)
+**Fix**: Replaced `?: run { BridgeLogger.w(...); continue }` with an explicit `if (endpoint == null)`
+null-check. `continue` is now in a plain `if` block, not inside a lambda. Kotlin smart-casts
+`endpoint` to non-null for all subsequent uses within the same loop iteration.
+
+---
+
+## BUG-057 — `MainActivity.applyKeepScreenOn()` bypasses Koin DI (Activity context leak)
+
+**Description**: `MainActivity.applyKeepScreenOn()` constructs a fresh `BridgePreferences(this)`
+instance using the Activity as the Context, instead of using the Koin-managed singleton. Two
+problems:
+1. **Context**: `BridgePreferences` is a `SharedPreferences` wrapper. Constructing it with the
+   Activity context (`this`) works for reads (SharedPreferences are process-singletons by file
+   name), but it is incorrect DI practice and differs from the Application context used by the
+   Koin singleton.
+2. **DI bypass**: The Koin `bridgeModule` already registers `single { BridgePreferences(androidContext()) }`.
+   Creating a second instance outside Koin means any future constructor dependencies injected into
+   `BridgePreferences` will be missing in this path.
+
+**Files involved**: `app-bridge/src/main/kotlin/com/inputbridge/bridge/ui/MainActivity.kt`
+
+**Priority**: Low (functional today; architectural correctness; future-proofing)
+**Status**: ✅ FIXED (Session 015)
+**Fix**: Added `private val prefs: BridgePreferences by inject()` to `MainActivity` (using
+`org.koin.android.ext.android.inject`). `applyKeepScreenOn()` now reads from the singleton.

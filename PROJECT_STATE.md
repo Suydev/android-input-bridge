@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 014 — Deep audit + BUG-046→053 fixes (2026-07-21)
+> **Last updated:** Session 015 — CI repair + BUG-054→057 fixes (2026-07-22)
 
 ---
 
@@ -126,3 +126,8 @@ All bugs BUG-001 through BUG-053 are tracked in `BUGS.md`.
   - BUG-051 FIXED — WIFI_DIRECT_ENABLED=true with stub transport (FeatureFlags)
   - BUG-052 WONTFIX — numLock always false (architectural; protocol change needed to fix)
   - BUG-053 FIXED — DiagnosticsManager.update race condition (synchronized)
+- BUG-054–BUG-057: found in Session 015 audit pass + CI diagnosis
+  - BUG-054 FIXED — KEYCODE_F13-F24 unresolved (don't exist in Android KeyEvent; CI failure since Session 013)
+  - BUG-055 FIXED — continue in run{} inline lambda — Kotlin 2.0 experimental feature, CI failure
+  - BUG-056 FALSE POSITIVE — ViewModel Context: Koin uses androidContext() (Application), safe
+  - BUG-057 FIXED — MainActivity.applyKeepScreenOn() bypassed Koin DI for BridgePreferences

@@ -2,6 +2,42 @@
 
 ---
 
+## Session 015 — CI Repair + Second Audit Pass (BUG-054 → BUG-057)
+**Date:** 2026-07-22
+**Agent:** Claude (Replit)
+**Status:** ✅ Complete
+
+### Goals
+- Diagnose and fix the two CI failures on `357648be` ("Build Debug APKs" job failing)
+- Run a second deep audit pass on UI/ViewModel/test/build layers
+- Fix all newly found bugs
+- Push all Session 014 + Session 015 fixes to GitHub; confirm green CI
+
+### CI Failure Root Causes
+The last two CI runs on `357648be` failed at "Build Debug APKs" with:
+1. 12 × `Unresolved reference 'KEYCODE_F1X'` in `KeyMap.kt` — `KEYCODE_F13–F24` do not
+   exist in `android.view.KeyEvent` (Android only defines F1–F12). BUG-038 introduced this.
+2. `UsbInputCapture.kt:90: The feature "break continue in inline lambdas" is experimental` —
+   Kotlin 2.0 requires opt-in for `continue` inside `?: run {}` inline lambda.
+
+### Audit Pass 2 Findings (new bugs)
+| ID | Severity | Description | Verdict |
+|----|----------|-------------|---------|
+| BUG-054 | Critical | `KEYCODE_F13–F24` unresolved in `KeyMap.kt` — constants don't exist in Android | FIXED |
+| BUG-055 | Critical | `continue` inside `?: run {}` inline lambda — Kotlin 2.0 experimental, not opted in | FIXED |
+| BUG-056 | — | ViewModel `private val context: Context` — investigated; NOT a bug (Koin `androidContext()` = Application context, safe to hold in ViewModel) | FALSE POSITIVE |
+| BUG-057 | Low | `MainActivity.applyKeepScreenOn()` constructs `BridgePreferences(this)` bypassing Koin DI | FIXED |
+
+### What Was Changed
+- `KeyMap.kt` — removed KEYCODE_F13–F24 entries (don't exist in Android KeyEvent); added explanatory comments
+- `UsbInputCapture.kt` — replaced `?: run { continue }` with explicit `if (endpoint == null) { continue }` null check
+- `HidReportBuilder.kt` — corrected BUG-050 fix: removed non-existent KEYCODE_F13–F24; kept KEYCODE_MENU (0x65)
+- `MainActivity.kt` (bridge) — added `private val prefs: BridgePreferences by inject()`; `applyKeepScreenOn()` uses singleton
+- `BUGS.md` — appended BUG-054, BUG-055, BUG-057
+- `SESSION_LOG.md`, `TASKS.md`, `PROJECT_STATE.md`, `AI_CONTEXT.md` — updated
+
+---
+
 ## Session 014 — Deep Audit + Bug Fixes (BUG-046 → BUG-053)
 **Date:** 2026-07-21
 **Agent:** Claude (Replit)

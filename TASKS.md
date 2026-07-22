@@ -184,6 +184,22 @@ Complete checklist of all project tasks. Never delete completed tasks. Always ap
 
 ---
 
+## Session 015 — CI Repair + Second Audit Pass ✅
+
+### Diagnosis
+- CI "Build Debug APKs" job has been failing since the BUG-038 commit (Session 013)
+- Root cause 1: `KEYCODE_F13`–`KEYCODE_F24` do not exist in `android.view.KeyEvent` — 12 compile errors
+- Root cause 2: `continue` in `?: run {}` inline lambda is Kotlin 2.0 experimental feature without opt-in
+
+### Fixes
+- [x] BUG-054: Remove `KEYCODE_F13`–`KEYCODE_F24` from `KeyMap.HID_TO_ANDROID` (unresolved references → CI failure)
+- [x] BUG-054 (also): Correct `HidReportBuilder.kt` BUG-050 fix — keep only `KEYCODE_MENU`, remove F13–F24
+- [x] BUG-055: Fix `?: run { continue }` → `if (endpoint == null) { continue }` in `UsbInputCapture.kt`
+- [x] BUG-057: `MainActivity.applyKeepScreenOn()` — inject `BridgePreferences` from Koin instead of `BridgePreferences(this)`
+- [x] Push all Session 014 + Session 015 fixes; CI should pass
+
+---
+
 ## Phase 7 — Polish ✅ (Session 010)
 
 - [x] Black screen mode: BridgeScreen goes pitch-black, window brightness set to 0.001f
