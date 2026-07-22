@@ -1119,6 +1119,42 @@ null-check. `continue` is now in a plain `if` block, not inside a lambda. Kotlin
 
 ---
 
+## BUG-058 — App crashes after notification permission dialog on first launch (Android 13+)
+
+**Description**: On first launch (before `POST_NOTIFICATIONS` permission is granted), both the
+bridge and receiver apps display the system notification permission dialog and then crash. The
+crash occurs on Android 13+ (API 33) devices. In practice it is only reproducible on the
+receiver app on the OnePlus Pad Go (API 33+); the bridge phone (Redmi 9, API 29) never reaches
+the API-33 check.
+
+**Root cause**: In both `MainActivity` classes, `requestNotificationPermissionIfNeeded()` is
+called **before** `setContent {}`. `notificationPermLauncher.launch(POST_NOTIFICATIONS)` is
+therefore called while the activity is in the CREATED state — before the Compose composition
+and its `LifecycleOwner` are set up. On Android 13+ OEM implementations (OnePlus OxygenOS on
+the Pad Go), the `ActivityResultRegistry` requires the Compose `LifecycleOwner` to be in at
+least the STARTED state before a permission result can be dispatched safely. The result arrives
+while the Compose tree is uninitialised, which triggers an `IllegalStateException` inside the
+`ActivityResultRegistry` dispatcher.
+
+**Steps to reproduce**: Fresh install of the receiver APK on an Android 13+ device (OnePlus Pad
+Go). Launch the app for the first time before `POST_NOTIFICATIONS` has been granted. Observe the
+notification permission dialog, then an immediate crash.
+
+**Expected behavior**: Permission dialog appears; after the user responds, the app resumes
+normally on the WelcomeScreen.
+
+**Actual behavior**: App crashes immediately after the permission dialog is dismissed.
+
+**Files involved**:
+- `app-receiver/src/main/kotlin/com/inputbridge/receiver/ui/MainActivity.kt`
+- `app-bridge/src/main/kotlin/com/inputbridge/bridge/ui/MainActivity.kt`
+
+**Priority**: Critical — app is unusable on first launch on Android 13+ (receiver) and Android
+13+ (bridge, if ever moved to a newer phone).
+**Status**: OPEN
+
+---
+
 ## BUG-057 — `MainActivity.applyKeepScreenOn()` bypasses Koin DI (Activity context leak)
 
 **Description**: `MainActivity.applyKeepScreenOn()` constructs a fresh `BridgePreferences(this)`
