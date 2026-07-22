@@ -1151,7 +1151,10 @@ normally on the WelcomeScreen.
 
 **Priority**: Critical — app is unusable on first launch on Android 13+ (receiver) and Android
 13+ (bridge, if ever moved to a newer phone).
-**Status**: OPEN
+**Status**: ✅ FIXED (Session 016)
+**Fix**: Moved `requestNotificationPermissionIfNeeded()` to after `setContent {}` in both
+`MainActivity` classes. The Compose `LifecycleOwner` and `ActivityResultRegistry` are now
+fully initialised before the permission dialog is shown or its result dispatched.
 
 ---
 

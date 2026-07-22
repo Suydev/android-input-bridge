@@ -2,6 +2,40 @@
 
 ---
 
+## Session 016 — First-launch crash fix (BUG-058)
+**Date:** 2026-07-22
+**Agent:** Claude (Replit)
+**Status:** ✅ Complete
+
+### Goals
+- Fix BUG-058: app crashes on first launch on Android 13+ after notification permission dialog
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|----|----------|-------------|---------|
+| BUG-058 | Critical | App crashes after notification permission dialog on first launch (Android 13+) | ✅ FIXED |
+
+### What Was Changed
+
+#### `app-receiver/src/main/kotlin/com/inputbridge/receiver/ui/MainActivity.kt`
+- Moved `requestNotificationPermissionIfNeeded()` call from before `setContent {}` to after it.
+  The Compose `LifecycleOwner` and `ActivityResultRegistry` are now fully initialised before
+  the system permission dialog is shown or its result dispatched back to the activity.
+
+#### `app-bridge/src/main/kotlin/com/inputbridge/bridge/ui/MainActivity.kt`
+- Same fix: moved `requestNotificationPermissionIfNeeded()` to after `setContent {}`.
+  Defensive fix for bridge app (runs on API 29 today, but correct ordering for any API 33+ device).
+
+### Key Decisions
+- **After, not before `setContent {}`**: Android's `ActivityResultRegistry` internally ties its
+  dispatch to the Compose `LifecycleOwner` established by `setContent {}`. On stock Android the
+  CREATED-state launch works by accident; on OEM builds (OxygenOS, MIUI) the strict dispatcher
+  throws `IllegalStateException` if the LifecycleOwner hasn't been attached yet.
+- **No callback change**: the `notificationPermLauncher` callback remains a no-op. Granting the
+  permission only enables future foreground service notifications — no immediate UI update needed.
+
+---
+
 ## Session 015 — CI Repair + Second Audit Pass (BUG-054 → BUG-057)
 **Date:** 2026-07-22
 **Agent:** Claude (Replit)

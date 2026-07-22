@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 015 — CI repair + BUG-054→057 fixes (2026-07-22)
+> **Last updated:** Session 016 — first-launch crash fix BUG-058 (2026-07-22)
 
 ---
 
@@ -108,7 +108,7 @@ app-receiver/             — Tablet receiver app (transport → inject)
 - GitHub Actions: `.github/workflows/ci.yml`
 - Debug APK artifacts + unit tests on every push to `main`, `develop`, `feature/**`, `phase/**`
 - Release APKs built on `main` push (requires `SIGNING_KEYSTORE_BASE64` secret)
-- Last green build: Session 014 (BUG-046→053 fixes)
+- Last green build: Session 015 (BUG-054→057 fixes); Session 016 pushed (BUG-058)
 - APK outputs: `app-bridge/build/outputs/apk/debug/` + `app-receiver/build/outputs/apk/debug/`
 
 ---
@@ -131,3 +131,5 @@ All bugs BUG-001 through BUG-053 are tracked in `BUGS.md`.
   - BUG-055 FIXED — continue in run{} inline lambda — Kotlin 2.0 experimental feature, CI failure
   - BUG-056 FALSE POSITIVE — ViewModel Context: Koin uses androidContext() (Application), safe
   - BUG-057 FIXED — MainActivity.applyKeepScreenOn() bypassed Koin DI for BridgePreferences
+- BUG-058: found in Session 016 (user-reported first-launch crash on Android 13+)
+  - BUG-058 FIXED — requestNotificationPermissionIfNeeded() called before setContent{} — moved after

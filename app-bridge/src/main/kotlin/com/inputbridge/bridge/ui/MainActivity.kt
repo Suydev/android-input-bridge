@@ -82,7 +82,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         applyKeepScreenOn()
-        requestNotificationPermissionIfNeeded()
 
         setContent {
             BridgeTheme {
@@ -127,6 +126,14 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
+        // BUG-058 FIX: request notification permission AFTER setContent{} so the Compose
+        // LifecycleOwner and ActivityResultRegistry are fully initialised before the permission
+        // dialog appears. Calling launch() before setContent{} (while the activity is still in
+        // CREATED state) causes an IllegalStateException on Android 13+ OEM builds when the
+        // system dispatches the permission result back to a Compose LifecycleOwner that does
+        // not yet exist.
+        requestNotificationPermissionIfNeeded()
     }
 
     override fun onResume() {

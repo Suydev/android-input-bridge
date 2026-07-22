@@ -65,7 +65,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        requestNotificationPermissionIfNeeded()
 
         setContent {
             ReceiverTheme {
@@ -109,6 +108,14 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
+        // BUG-058 FIX: request notification permission AFTER setContent{} so the Compose
+        // LifecycleOwner and ActivityResultRegistry are fully initialised before the permission
+        // dialog appears. Calling launch() before setContent{} (i.e. while the activity is
+        // still in CREATED state) causes an IllegalStateException on Android 13+ OEM builds
+        // (OnePlus OxygenOS) when the system tries to dispatch the permission result back
+        // to a Compose LifecycleOwner that does not yet exist.
+        requestNotificationPermissionIfNeeded()
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

@@ -184,6 +184,12 @@ Complete checklist of all project tasks. Never delete completed tasks. Always ap
 
 ---
 
+## Session 016 — First-launch crash fix ✅
+
+- [x] BUG-058: Move `requestNotificationPermissionIfNeeded()` after `setContent {}` in both `MainActivity` classes — fixes IllegalStateException crash on Android 13+ OEM builds (OxygenOS / MIUI)
+
+---
+
 ## Session 015 — CI Repair + Second Audit Pass ✅
 
 ### Diagnosis

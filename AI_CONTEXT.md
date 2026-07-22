@@ -165,6 +165,24 @@ See DECISIONS.md for full records. Short summary:
 - **Accessibility is Path B, not Path A.** Bluetooth HID is the correct path for real cursor support.
 - **DiagnosticsManager is a singleton** accessed by all modules — simplest approach for Phase 1.
 
+## Notification permission ordering invariant (BUG-058)
+
+`requestNotificationPermissionIfNeeded()` (and any other `ActivityResultLauncher.launch()` call)
+MUST be called **after** `setContent {}`, never before it. Calling `launch()` before `setContent {}`
+means the Compose `LifecycleOwner` and `ActivityResultRegistry` are not yet attached. On stock
+Android this fails silently; on OEM builds (OxygenOS, MIUI) the registry throws
+`IllegalStateException` when it tries to dispatch the result back to a non-existent LifecycleOwner.
+
+Correct pattern in any `ComponentActivity.onCreate()`:
+```kotlin
+override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(savedInstanceState)
+    enableEdgeToEdge()
+    setContent { /* Compose tree */ }          // ← establishes LifecycleOwner
+    requestNotificationPermissionIfNeeded()    // ← safe: LifecycleOwner exists
+}
+```
+
 ## Do NOT change
 
 - `PacketType` enum values (ID bytes) — changing breaks pairing compatibility
