@@ -353,8 +353,31 @@ class ReceiverService : Service() {
                         updateNotification("Bridge disconnected — PIN: $sessionPin")
                     }
 
+                    // BUG-060 FIX: control packets the receiver never acts on.
+                    // Previously these fell into else → and incorrectly updated lastInputSeqNo,
+                    // corrupting packet-loss gap statistics (§4.2 invariant — no else →).
+                    PacketType.PONG,
+                    PacketType.PAIR_RESPONSE,
+                    PacketType.MODE_SWITCH,
+                    PacketType.RECONNECT,
+                    PacketType.ACK,
+                    PacketType.ERROR -> {
+                        BridgeLogger.d(TAG, "Ignoring receiver-unexpected control packet: ${packet.type}")
+                    }
+
                     // ── Input event packets ───────────────────────────────────
-                    else -> {
+                    // BUG-060 FIX: enumerate all 9 input-event types explicitly so the
+                    // compiler enforces exhaustiveness and sequence-gap counting only applies
+                    // to actual input events (not stray control packets).
+                    PacketType.KEY_DOWN,
+                    PacketType.KEY_UP,
+                    PacketType.MOUSE_MOVE,
+                    PacketType.MOUSE_DOWN,
+                    PacketType.MOUSE_UP,
+                    PacketType.SCROLL,
+                    PacketType.TEXT_INPUT,
+                    PacketType.MODIFIER_STATE,
+                    PacketType.SPECIAL_ACTION -> {
                         // Packet loss detection via sequence-number gaps
                         val seq = packet.sequenceNo
                         if (lastInputSeqNo >= 0 && seq > lastInputSeqNo + 1) {

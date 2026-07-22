@@ -2,37 +2,56 @@
 
 ---
 
-## Session 016 — First-launch crash fix (BUG-058)
+## Session 016 — First-launch crash + deep `else →` audit (BUG-058 → BUG-062)
 **Date:** 2026-07-22
 **Agent:** Claude (Replit)
 **Status:** ✅ Complete
 
 ### Goals
-- Fix BUG-058: app crashes on first launch on Android 13+ after notification permission dialog
+- Fix BUG-058: first-launch crash on Android 13+ after notification permission dialog
+- Deep audit: find and eliminate all `else →` violations in sealed/enum `when` blocks (§4.2)
 
 ### Bugs Found and Fixed
 | ID | Severity | Description | Verdict |
 |----|----------|-------------|---------|
 | BUG-058 | Critical | App crashes after notification permission dialog on first launch (Android 13+) | ✅ FIXED |
+| BUG-059 | High | `else →` in `BridgeService.startPipeline()` silently routes WIFI_DIRECT/TCP to UDP | ✅ FIXED |
+| BUG-060 | High | `else →` in `ReceiverService` packet handler corrupts packet-loss statistics | ✅ FIXED |
+| BUG-061 | Medium | `else → Unit` in `BridgeService.startIncomingLoop()` swallows all future receiver→bridge packets | ✅ FIXED |
+| BUG-062 | Low | `else →` in `WelcomeScreen` for `TransportMode` display strings | ✅ FIXED |
 
 ### What Was Changed
 
-#### `app-receiver/src/main/kotlin/com/inputbridge/receiver/ui/MainActivity.kt`
-- Moved `requestNotificationPermissionIfNeeded()` call from before `setContent {}` to after it.
-  The Compose `LifecycleOwner` and `ActivityResultRegistry` are now fully initialised before
-  the system permission dialog is shown or its result dispatched back to the activity.
+#### `app-receiver/src/main/kotlin/com/inputbridge/receiver/ui/MainActivity.kt` (BUG-058)
+- Moved `requestNotificationPermissionIfNeeded()` from before `setContent {}` to after it.
 
-#### `app-bridge/src/main/kotlin/com/inputbridge/bridge/ui/MainActivity.kt`
-- Same fix: moved `requestNotificationPermissionIfNeeded()` to after `setContent {}`.
-  Defensive fix for bridge app (runs on API 29 today, but correct ordering for any API 33+ device).
+#### `app-bridge/src/main/kotlin/com/inputbridge/bridge/ui/MainActivity.kt` (BUG-058)
+- Same: moved `requestNotificationPermissionIfNeeded()` to after `setContent {}`.
+
+#### `app-bridge/src/main/kotlin/com/inputbridge/bridge/service/BridgeService.kt` (BUG-059, BUG-061)
+- `startPipeline()`: replaced `else → startUdpPipeline()` with explicit arms for all 4
+  `TransportMode` values. `WIFI_DIRECT`/`TCP` log a warning and explicitly fall back to UDP.
+- `startIncomingLoop()`: replaced `else → Unit` with exhaustive arms for all 20 `PacketType`
+  values grouped by category (expected, unexpected-control, input-event-only).
+
+#### `app-receiver/src/main/kotlin/com/inputbridge/receiver/service/ReceiverService.kt` (BUG-060)
+- Replaced `else → { ... }` with explicit arms for all 6 receiver-unexpected control types
+  (`PONG`, `PAIR_RESPONSE`, `MODE_SWITCH`, `RECONNECT`, `ACK`, `ERROR` — now logged and
+  discarded) and all 9 input-event types. Sequence-gap detection now only fires for input-event
+  packets; control packets no longer corrupt `lastInputSeqNo`.
+
+#### `app-bridge/src/main/kotlin/com/inputbridge/bridge/ui/screens/WelcomeScreen.kt` (BUG-062)
+- Replaced `else →` in both `when (mode)` expressions with explicit `WIFI_DIRECT` and `TCP` arms.
 
 ### Key Decisions
-- **After, not before `setContent {}`**: Android's `ActivityResultRegistry` internally ties its
-  dispatch to the Compose `LifecycleOwner` established by `setContent {}`. On stock Android the
-  CREATED-state launch works by accident; on OEM builds (OxygenOS, MIUI) the strict dispatcher
-  throws `IllegalStateException` if the LifecycleOwner hasn't been attached yet.
-- **No callback change**: the `notificationPermLauncher` callback remains a no-op. Granting the
-  permission only enables future foreground service notifications — no immediate UI update needed.
+- **BUG-060 is the toughest**: the `else →` in ReceiverService mixed two concerns (control
+  dispatch and input routing), causing control packets to silently corrupt the sequence-gap
+  counter. Fixing it required enumerating all 20 `PacketType` values across two blocks.
+- **WIFI_DIRECT/TCP fallback**: these stubs fall back to UDP with an explicit warning log and
+  a `DiagnosticsManager.lastError` entry rather than silently — observable in the Diagnostics
+  screen if stale prefs hold an old transport mode.
+- **BUG-058 ordering**: `ActivityResultLauncher.launch()` must always follow `setContent {}` on
+  OEM builds (OxygenOS, MIUI enforce strict LifecycleOwner ordering).
 
 ---
 

@@ -165,7 +165,9 @@ See DECISIONS.md for full records. Short summary:
 - **Accessibility is Path B, not Path A.** Bluetooth HID is the correct path for real cursor support.
 - **DiagnosticsManager is a singleton** accessed by all modules — simplest approach for Phase 1.
 
-## Notification permission ordering invariant (BUG-058)
+## Session 016 invariants
+
+### Notification permission ordering (BUG-058)
 
 `requestNotificationPermissionIfNeeded()` (and any other `ActivityResultLauncher.launch()` call)
 MUST be called **after** `setContent {}`, never before it. Calling `launch()` before `setContent {}`
@@ -182,6 +184,21 @@ override fun onCreate(savedInstanceState: Bundle?) {
     requestNotificationPermissionIfNeeded()    // ← safe: LifecycleOwner exists
 }
 ```
+
+### PacketType exhaustiveness in service hot loops (BUG-059–062)
+
+`ReceiverService`'s receive loop and `BridgeService`'s incoming-packet loop both use exhaustive
+`when (packet.type)` over all `PacketType` values — **never add `else →`**. If a new `PacketType`
+is added to the enum, the compiler will fail both `when` blocks, forcing the developer to
+explicitly choose how each service handles it.
+
+Likewise, `BridgeService.startPipeline()` and `WelcomeScreen` use exhaustive `when` over
+`TransportMode` — adding a new mode must be handled in both.
+
+**Critical correctness rule for ReceiverService (BUG-060):** sequence-gap detection
+(`lastInputSeqNo` tracking) must ONLY run inside input-event packet arms, not control-packet
+arms. Control packets do not carry input sequence numbers; running the gap detector on them
+produces false "dropped packet" log entries and corrupts the Diagnostics counter.
 
 ## Do NOT change
 

@@ -97,11 +97,14 @@ fun WelcomeScreen(
                     ),
                 ) {
                     Column {
+                        // BUG-062 FIX: exhaustive when — no else. Compiler now enforces that
+                        // every new TransportMode gets a display string (§4.2 invariant).
                         Text(
                             text = when (mode) {
                                 TransportMode.UDP           -> "UDP  —  Wi-Fi LAN"
                                 TransportMode.BLUETOOTH_HID -> "BT HID  —  Bluetooth Keyboard+Mouse"
-                                else                        -> mode.name.replace("_", " ")
+                                TransportMode.WIFI_DIRECT   -> "Wi-Fi Direct (coming soon)"
+                                TransportMode.TCP           -> "TCP (coming soon)"
                             },
                             fontFamily = FontFamily.Monospace,
                             fontSize   = 13.sp,
@@ -111,7 +114,8 @@ fun WelcomeScreen(
                                 text = when (mode) {
                                     TransportMode.UDP           -> "Low latency · Requires receiver app on tablet"
                                     TransportMode.BLUETOOTH_HID -> "Real cursor · Works with any BT device · No receiver app needed"
-                                    else                        -> ""
+                                    TransportMode.WIFI_DIRECT,
+                                    TransportMode.TCP           -> "Not yet implemented"
                                 },
                                 color      = BridgeDim,
                                 fontSize   = 10.sp,

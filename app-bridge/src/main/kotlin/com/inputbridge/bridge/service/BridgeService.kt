@@ -215,11 +215,25 @@ class BridgeService : Service() {
 
     /**
      * Dispatch to the correct pipeline based on the user's saved transport mode.
+     *
+     * BUG-059 FIX: explicit arms for all TransportMode values — no else. Compiler
+     * now enforces exhaustiveness so adding a new TransportMode without a handler
+     * becomes a compile error rather than a silent UDP fallback (§4.2 invariant).
      */
     private suspend fun startPipeline() {
         when (prefs.transportMode) {
             TransportMode.BLUETOOTH_HID -> startBluetoothHidPipeline()
-            else                        -> startUdpPipeline()
+            TransportMode.UDP           -> startUdpPipeline()
+            // WIFI_DIRECT and TCP are Phase-8 stubs (FeatureFlags.WIFI_DIRECT_ENABLED = false).
+            // Fall back to UDP explicitly with a visible warning rather than silently.
+            TransportMode.WIFI_DIRECT,
+            TransportMode.TCP           -> {
+                BridgeLogger.w(TAG, "${prefs.transportMode} not yet implemented — falling back to UDP")
+                DiagnosticsManager.update {
+                    copy(lastError = "${prefs.transportMode} not yet implemented; using UDP")
+                }
+                startUdpPipeline()
+            }
         }
     }
 
@@ -362,6 +376,8 @@ class BridgeService : Service() {
     private fun startIncomingLoop(transport: UdpTransport) {
         pongResponseJob = serviceScope.launch {
             transport.incomingPackets.collect { packet ->
+                // BUG-061 FIX: exhaustive when — no else. Compiler now enforces that every
+                // new PacketType must be explicitly handled here (§4.2 invariant).
                 when (packet.type) {
                     PacketType.PAIR_RESPONSE -> {
                         val accepted = PacketSerializer.parsePairResponseAccepted(packet.payload)
@@ -381,7 +397,28 @@ class BridgeService : Service() {
                             }
                         }
                     }
-                    else -> Unit  // future receiver→bridge control packets
+                    // Control packets the bridge does not expect to receive from the receiver.
+                    PacketType.PING,
+                    PacketType.KEEP_ALIVE,
+                    PacketType.PAIR_REQUEST,
+                    PacketType.PAIR_CONFIRM,
+                    PacketType.MODE_SWITCH,
+                    PacketType.DISCONNECT,
+                    PacketType.RECONNECT,
+                    PacketType.ACK,
+                    PacketType.ERROR -> {
+                        BridgeLogger.d(TAG, "Unexpected packet from receiver: ${packet.type}")
+                    }
+                    // Input event packets are bridge→receiver only; cannot arrive here.
+                    PacketType.KEY_DOWN,
+                    PacketType.KEY_UP,
+                    PacketType.MOUSE_MOVE,
+                    PacketType.MOUSE_DOWN,
+                    PacketType.MOUSE_UP,
+                    PacketType.SCROLL,
+                    PacketType.TEXT_INPUT,
+                    PacketType.MODIFIER_STATE,
+                    PacketType.SPECIAL_ACTION -> Unit
                 }
             }
         }

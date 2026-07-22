@@ -184,9 +184,13 @@ Complete checklist of all project tasks. Never delete completed tasks. Always ap
 
 ---
 
-## Session 016 — First-launch crash fix ✅
+## Session 016 — First-launch crash + deep else→ audit ✅
 
 - [x] BUG-058: Move `requestNotificationPermissionIfNeeded()` after `setContent {}` in both `MainActivity` classes — fixes IllegalStateException crash on Android 13+ OEM builds (OxygenOS / MIUI)
+- [x] BUG-059: Replace `else → startUdpPipeline()` in `BridgeService.startPipeline()` with exhaustive `when` over all 4 `TransportMode` values — WIFI_DIRECT/TCP now log a warning before UDP fallback
+- [x] BUG-060: Replace `else → { … }` in `ReceiverService` hot receive loop with explicit arms for all 20 `PacketType` values — control packets no longer corrupt `lastInputSeqNo` packet-loss counter
+- [x] BUG-061: Replace `else → Unit` in `BridgeService.startIncomingLoop()` with exhaustive arms for all 20 `PacketType` values grouped by category
+- [x] BUG-062: Replace `else →` in `WelcomeScreen` `TransportMode` display `when` blocks with explicit `WIFI_DIRECT` and `TCP` arms
 
 ---
 

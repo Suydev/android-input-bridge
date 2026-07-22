@@ -1158,6 +1158,110 @@ fully initialised before the permission dialog is shown or its result dispatched
 
 ---
 
+## BUG-059 — `else ->` in `BridgeService.startPipeline()` silently routes unrecognized `TransportMode` to UDP
+
+**Description**: `startPipeline()` uses `when (prefs.transportMode)` with only one explicit arm
+(`BLUETOOTH_HID`) and an `else -> startUdpPipeline()` fallback. `TransportMode` has four values:
+`UDP`, `WIFI_DIRECT`, `TCP`, `BLUETOOTH_HID`. `WIFI_DIRECT` and `TCP` are stubs (not yet
+implemented). When saved preferences contain either of those modes (e.g. from a previous APK
+version that offered them), the service silently starts a UDP pipeline instead of logging an
+error. Worse, the compiler cannot enforce exhaustiveness — adding a future `TransportMode` entry
+will silently default to UDP rather than producing a compile-time error.
+
+**Steps to reproduce**: Set `prefs.transportMode = TransportMode.WIFI_DIRECT` via SharedPreferences
+editor, start the bridge service. Observe it silently starts a UDP pipeline with no error message.
+
+**Expected behavior**: Compile-time exhaustive match over all `TransportMode` values; unimplemented
+modes log a warning and fall back to UDP explicitly (not silently via `else`).
+**Actual behavior**: Any non-`BLUETOOTH_HID` mode silently falls through to UDP. Compiler cannot
+warn when a new `TransportMode` is added.
+
+**Files involved**: `app-bridge/src/main/kotlin/com/inputbridge/bridge/service/BridgeService.kt` (~line 220)
+
+**Priority**: High (silent data corruption / correctness; compiler safety violation; §4.2 invariant)
+**Status**: ✅ FIXED (Session 016)
+**Fix**: Replaced `else -> startUdpPipeline()` with explicit arms for all four `TransportMode`
+values. `WIFI_DIRECT` and `TCP` log a warning and explicitly fall back to UDP; `UDP` calls
+`startUdpPipeline()` directly; `BLUETOOTH_HID` calls `startBluetoothHidPipeline()`.
+
+---
+
+## BUG-060 — `else ->` in `ReceiverService` packet handler corrupts packet-loss statistics
+
+**Description**: The `when (packet.type)` block in `ReceiverService`'s hot receive loop handles
+five control packets explicitly (`PAIR_REQUEST`, `PAIR_CONFIRM`, `PING`, `KEEP_ALIVE`,
+`DISCONNECT`) and falls everything else into `else -> { ... }`. That `else` branch:
+1. Reads and increments `lastInputSeqNo` for sequence-gap detection.
+2. Calls `PacketToEventConverter.toInputEvent(packet)` — returns `null` for non-input packets.
+3. Returns early via `?: return@collect` if the event is null.
+
+**Impact**: Control packets that legitimately arrive at the receiver (`PONG`, `PAIR_RESPONSE`,
+`MODE_SWITCH`, `RECONNECT`, `ACK`, `ERROR`) update `lastInputSeqNo` even though they are not
+input events. This corrupts the sequence-gap counter: the gap detector sees a "jump" in the
+sequence number (because control packets are counted) and reports false packet-loss events.
+Additionally, the compiler cannot enforce exhaustiveness: adding a new `PacketType` silently
+routes it through the input-event path instead of requiring an explicit handler.
+
+**Steps to reproduce**: A `PONG` packet received by the receiver (e.g. from a bridge running
+an older firmware that replies to an accidental PING from the receiver side) silently increments
+`lastInputSeqNo`, potentially logging a false "Seq gap" drop. Any future `RECONNECT` or
+`MODE_SWITCH` packet similarly corrupts the counter.
+
+**Expected behavior**: All 9 input event packet types are listed explicitly; all 5 known
+receiver-unexpected control types are explicitly silenced with a debug log; no `else ->`.
+**Actual behavior**: Any packet not in the 5 explicit control arms hits the input-event path,
+corrupting `lastInputSeqNo`.
+
+**Files involved**: `app-receiver/src/main/kotlin/com/inputbridge/receiver/service/ReceiverService.kt` (~line 357)
+
+**Priority**: High (silent stat corruption; compiler-safety invariant §4.2 violated)
+**Status**: ✅ FIXED (Session 016)
+**Fix**: Replaced `else ->` with explicit arms for all 9 input event packet types and all 5
+receiver-unexpected control types (`PONG`, `MODE_SWITCH`, `RECONNECT`, `ACK`, `ERROR`).
+Sequence-gap detection now only runs for confirmed input-event packets.
+
+---
+
+## BUG-061 — `else -> Unit` in `BridgeService.startIncomingLoop()` swallows all future receiver→bridge packets
+
+**Description**: The `when (packet.type)` block in `BridgeService.startIncomingLoop()` handles
+only `PAIR_RESPONSE` and `PONG`; all other packet types fall into `else -> Unit`. This means:
+(a) any packet type the bridge is not expecting is silently dropped with no log, and (b) the
+compiler cannot warn when a new `PacketType` is added that needs a bridge-side handler (e.g. a
+future `RECONNECT` or `ACK` the receiver might send back). Violates invariant §4.2.
+
+**Steps to reproduce**: Add a new `PacketType` entry to the enum. No compile error is produced
+in `startIncomingLoop`. The new packet is silently dropped.
+
+**Expected behavior**: Exhaustive `when` over all `PacketType` values. Packets not expected from
+the receiver are explicitly listed and logged at debug level.
+**Actual behavior**: `else -> Unit` silently drops all non-PAIR_RESPONSE/PONG packets.
+
+**Files involved**: `app-bridge/src/main/kotlin/com/inputbridge/bridge/service/BridgeService.kt` (~line 384)
+
+**Priority**: Medium (compiler-safety invariant §4.2; silent future packet drops; no current crash)
+**Status**: ✅ FIXED (Session 016)
+**Fix**: Replaced `else -> Unit` with explicit arms for all remaining `PacketType` values grouped
+by category (receiver-unexpected control, input-event types that are bridge-to-receiver only).
+
+---
+
+## BUG-062 — `else ->` in `WelcomeScreen` for `TransportMode` (compile-time safety violation)
+
+**Description**: `WelcomeScreen.kt` uses `when (mode)` over `TransportMode` values twice (label
+text and description text) with `else ->` fallback strings. `TransportMode` has four values
+(`UDP`, `WIFI_DIRECT`, `TCP`, `BLUETOOTH_HID`). `WIFI_DIRECT` and `TCP` are filtered from the
+displayed list by `availableModes`, but the compiler does not know that — the `else ->` prevents
+it from warning when a new `TransportMode` is added without a display string.
+
+**Files involved**: `app-bridge/src/main/kotlin/com/inputbridge/bridge/ui/screens/WelcomeScreen.kt` (~lines 101–119)
+
+**Priority**: Low (UI-only; no runtime crash; compiler-safety violation §4.2)
+**Status**: ✅ FIXED (Session 016)
+**Fix**: Added explicit `WIFI_DIRECT` and `TCP` arms to both `when` expressions; removed `else ->`.
+
+---
+
 ## BUG-057 — `MainActivity.applyKeepScreenOn()` bypasses Koin DI (Activity context leak)
 
 **Description**: `MainActivity.applyKeepScreenOn()` constructs a fresh `BridgePreferences(this)`
