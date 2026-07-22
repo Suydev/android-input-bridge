@@ -34,6 +34,7 @@ Every agent MUST read these files in this order before writing a single line of 
 5. TASKS.md               ← pending work, completed phases
 6. SESSION_LOG.md         ← last 3 session entries (tail -100 if large)
 7. .agents/memory/MEMORY.md  ← agent memory index
+8.read the .agents/skills/SKILL.md  the execution and working strategy . edit it as you see any improvement in it needed or changes 
 ```
 
 **Do not skip steps.** Skipping `BUGS.md` causes you to re-introduce fixed bugs.
