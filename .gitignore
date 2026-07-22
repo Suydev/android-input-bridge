@@ -1,13 +1,12 @@
 *.iml
 .gradle
-/local.properties
 /.idea
 .DS_Store
 /build
 /captures
 .externalNativeBuild
 .cxx
-local.properties
+
 
 # APK files (built by CI — don't commit)
 *.apk
