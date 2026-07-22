@@ -3,3 +3,4 @@
 - [Accessibility keyboard injection](accessibility-keyboard.md) — KeyEvent.unicodeChar + buildMetaState() resolves chars; ACTION_SET_TEXT is selection-aware; use coerceIn(0, text.length) on textSelectionStart
 - [Session 014 audit — BUG-046 to BUG-053](bugs-046-053-audit.md) — key constraints: ANDROID_TO_HID must mirror KeyMap; sealed when needs no else; USB releaseInterface before close; DiagnosticsManager.update is synchronized
 - [Notification permission ordering](notif-perm-ordering.md) — ActivityResultLauncher.launch() must come after setContent{}; OEM builds crash if called before Compose LifecycleOwner exists
+- [PacketType exhaustiveness in hot loops](packet-type-exhaustiveness.md) — ReceiverService and BridgeService when(packet.type) must be exhaustive; lastInputSeqNo must only update for input-event arms
