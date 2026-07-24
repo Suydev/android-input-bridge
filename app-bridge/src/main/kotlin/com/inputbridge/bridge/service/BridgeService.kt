@@ -139,7 +139,19 @@ class BridgeService : Service() {
         usbManager = getSystemService(USB_SERVICE) as UsbManager
         prefs = BridgePreferences(this)
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification("Starting…"))
+        // BUG-063 FIX: Android 14 (API 34) throws MissingForegroundServiceTypeException when
+        // the manifest declares android:foregroundServiceType but startForeground() omits the
+        // type. Pass FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE on API 29+ (when the 3-arg
+        // overload was introduced); fall back to the 2-arg form only on API < 29.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                buildNotification("Starting…"),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, buildNotification("Starting…"))
+        }
         acquireWakeLock()
         registerUsbReceiver()
         DiagnosticsManager.update { copy(bridgeServiceRunning = true) }

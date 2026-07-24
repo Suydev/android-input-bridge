@@ -2,6 +2,7 @@ package com.inputbridge.receiver.service
 
 import android.app.*
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.*
 import androidx.core.app.NotificationCompat
 import com.inputbridge.accessibility.AccessibilityCommandBus
@@ -103,7 +104,19 @@ class ReceiverService : Service() {
         super.onCreate()
         prefs = ReceiverPreferences(this)
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification("Starting…"))
+        // BUG-063 FIX: Android 14 (API 34) throws MissingForegroundServiceTypeException when
+        // the manifest declares android:foregroundServiceType but startForeground() omits the
+        // type. Pass FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE on API 29+ (when the 3-arg
+        // overload was introduced); fall back to the 2-arg form only on API < 29.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                buildNotification("Starting…"),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, buildNotification("Starting…"))
+        }
         acquireWakeLock()
         DiagnosticsManager.update { copy(receiverServiceRunning = true) }
         BridgeLogger.i(TAG, "ReceiverService created")

@@ -184,6 +184,11 @@ Complete checklist of all project tasks. Never delete completed tasks. Always ap
 
 ---
 
+## Session 017 — Foreground service type crash + logos ✅
+
+- [x] BUG-063: Add `ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE` to `startForeground()` in both `BridgeService` and `ReceiverService` — fixes `MissingForegroundServiceTypeException` crash on Android 14+
+- [x] New launcher icons for both apps — bridge: keyboard key + Wi-Fi; receiver: tablet + cursor
+
 ## Session 016 — First-launch crash + deep else→ audit ✅
 
 - [x] BUG-058: Move `requestNotificationPermissionIfNeeded()` after `setContent {}` in both `MainActivity` classes — fixes IllegalStateException crash on Android 13+ OEM builds (OxygenOS / MIUI)

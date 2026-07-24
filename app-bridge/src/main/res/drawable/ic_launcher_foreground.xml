@@ -1,110 +1,49 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    InputBridge — Bridge app launcher icon foreground.
+
+    Design concept: a keyboard key (the bridge phone is the keyboard sender) with a
+    right-pointing arrow inside (representing "send / forward input") and a Wi-Fi
+    signal below (representing wireless transport to the receiver tablet).
+
+    Colors: teal #00D4AA — matches BridgePrimary used throughout the bridge UI.
+    Safe zone: 66dp centred on the 108dp canvas (18–90). All content fits within 25–83.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
+    <!-- ── Keyboard key body (wide rounded rect) ──────────────────────────── -->
     <path
-        android:fillColor="#3DDC84"
-        android:pathData="M0,0h108v108h-108z" />
+        android:fillColor="#00D4AA"
+        android:pathData="M33,28 L75,28 Q83,28 83,36 L83,56 Q83,64 75,64 L33,64 Q25,64 25,56 L25,36 Q25,28 33,28 Z"/>
+
+    <!-- ── Right-pointing arrow punched into the key (dark, cutout effect) ── -->
     <path
-        android:fillColor="#00000000"
-        android:pathData="M9,0L9,108"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
+        android:fillColor="#101820"
+        android:pathData="M34,49 L34,41 L55,41 L55,34 L74,46 L55,58 L55,51 L34,51 Z"/>
+
+    <!-- ── Wi-Fi dot (centre of signal) ──────────────────────────────────── -->
     <path
-        android:fillColor="#00000000"
-        android:pathData="M19,0L19,108"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M29,0L29,108"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M39,0L39,108"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
+        android:fillColor="#00D4AA"
+        android:pathData="M51.5,80 A2.5,2.5 0 0,0 56.5,80 A2.5,2.5 0 0,0 51.5,80"/>
+
+    <!-- ── Wi-Fi arc 1 (inner) ────────────────────────────────────────────── -->
     <path
         android:fillColor="#00000000"
-        android:pathData="M49,0L49,108"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
+        android:strokeColor="#00D4AA"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M47,77 Q54,70 61,77"/>
+
+    <!-- ── Wi-Fi arc 2 (outer) ────────────────────────────────────────────── -->
     <path
         android:fillColor="#00000000"
-        android:pathData="M59,0L59,108"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M69,0L69,108"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M79,0L79,108"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M89,0L89,108"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M99,0L99,108"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M0,9L108,9"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M0,19L108,19"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M0,29L108,29"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M0,39L108,39"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M0,49L108,49"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M0,59L108,59"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M0,69L108,69"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M0,79L108,79"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M0,89L108,89"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M0,99L108,99"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
+        android:strokeColor="#00D4AA"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M42,73 Q54,63 66,73"/>
+
 </vector>

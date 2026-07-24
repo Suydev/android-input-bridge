@@ -2,6 +2,59 @@
 
 ---
 
+## Session 017 — Foreground service type crash + app logos (BUG-063)
+**Date:** 2026-07-24
+**Agent:** Claude (Replit)
+**Status:** ✅ Complete
+
+### Goals
+- Fix crash after notification permission dialog dismissal + every subsequent cold open
+- Add app logos to both apps
+
+### Root Cause
+`MissingForegroundServiceTypeException` on Android 14+ (API 34). Both manifests declare
+`android:foregroundServiceType="connectedDevice"` but both services called the 2-argument
+`startForeground(id, notification)` overload. Android 14 requires the type parameter to match
+the manifest declaration. Every `onCreate` → `startForeground` call without the type throws
+immediately, causing every launch to crash.
+
+The notification permission dialog crash was a red herring: the dialog dismissal resumed the
+activity, which triggered a `startForegroundService` call, which then crashed inside the service.
+
+### Bugs Fixed
+| ID | Severity | Description |
+|----|----------|-------------|
+| BUG-063 | Critical | `startForeground()` missing type parameter — `MissingForegroundServiceTypeException` on Android 14+ |
+
+### What Was Changed
+
+#### `app-bridge/src/main/kotlin/.../BridgeService.kt` (BUG-063)
+- Replaced 2-arg `startForeground(id, notification)` with API-guarded 3-arg call passing
+  `ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE` on API 29+ (Build.VERSION_CODES.Q).
+
+#### `app-receiver/src/main/kotlin/.../ReceiverService.kt` (BUG-063)
+- Same fix; also added `import android.content.pm.ServiceInfo` (was not covered by existing
+  `import android.content.Intent` specific import).
+
+#### `app-bridge/src/main/res/drawable/ic_launcher_*.xml`
+- New logo: dark navy background (#101820), teal keyboard key with right-pointing arrow and
+  Wi-Fi signal below — concept: bridge phone sends keyboard input wirelessly.
+
+#### `app-receiver/src/main/res/drawable/ic_launcher_*.xml`
+- New logo: deep navy background (#0A1628), blue tablet in portrait with dark screen and
+  white cursor arrow — concept: receiver tablet accepts pointer/key events.
+
+### Key Decisions
+- **Why `Build.VERSION_CODES.Q` guard**: The 3-arg `startForeground` overload and
+  `ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE` were both added in API 29 (Q).
+  The guard is belt-and-suspenders for any future minSdk < 29 scenario; on current devices
+  (API 29 bridge, API 33+ receiver) the 3-arg path always executes.
+- **Logo colours match existing UI themes** — bridge teal (#00D4AA ≈ BridgePrimary),
+  receiver blue (#4FC3F7 ≈ ReceiverPrimary). Both use the app's background as the icon
+  background for a cohesive look.
+
+---
+
 ## Session 016 — First-launch crash + deep `else →` audit (BUG-058 → BUG-062)
 **Date:** 2026-07-22
 **Agent:** Claude (Replit)

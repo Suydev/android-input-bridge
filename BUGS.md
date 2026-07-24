@@ -1158,6 +1158,39 @@ fully initialised before the permission dialog is shown or its result dispatched
 
 ---
 
+## BUG-063 — `startForeground()` missing foreground service type — crashes on Android 14+
+
+**Description**: Both `BridgeService` and `ReceiverService` declare
+`android:foregroundServiceType="connectedDevice"` in their manifests but call
+`startForeground(id, notification)` without the corresponding type parameter. Android 14 (API 34)
+introduced strict enforcement: if a foreground service type is declared in the manifest the
+`startForeground()` call MUST include `ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE` or
+the system throws `MissingForegroundServiceTypeException` and kills the app. This explains:
+- Crash immediately after the notification permission dialog is dismissed (the VM tries to
+  start/resume the service as the activity returns to foreground)
+- Crash on every subsequent cold open (onCreate → startForegroundService → onCreate in service →
+  startForeground without type → exception)
+
+**Steps to reproduce**: Install on any Android 14+ device (API 34+). Start either app. Observe
+`MissingForegroundServiceTypeException` in logcat immediately after the system tries to start
+the foreground service.
+
+**Expected behavior**: `startForeground()` passes `ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE`
+on API 29+, matching the manifest declaration. On older APIs (API < 29) the 2-arg form is used.
+**Actual behavior**: Both services call `startForeground(id, notification)` without the type —
+crash on Android 14+.
+
+**Files involved**:
+- `app-bridge/src/main/kotlin/com/inputbridge/bridge/service/BridgeService.kt` (line 142)
+- `app-receiver/src/main/kotlin/com/inputbridge/receiver/service/ReceiverService.kt` (line 106)
+
+**Priority**: Critical (crash on every launch on Android 14+, which includes OnePlus Pad Go)
+**Status**: ✅ FIXED (Session 017)
+**Fix**: Added `Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q` guard and pass
+`ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE` as the third argument on API 29+.
+
+---
+
 ## BUG-059 — `else ->` in `BridgeService.startPipeline()` silently routes unrecognized `TransportMode` to UDP
 
 **Description**: `startPipeline()` uses `when (prefs.transportMode)` with only one explicit arm

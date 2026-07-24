@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 016 — first-launch crash + deep else→ audit BUG-058→062 (2026-07-22)
+> **Last updated:** Session 017 — foreground service type crash BUG-063 + logos (2026-07-24)
 
 ---
 
@@ -108,7 +108,7 @@ app-receiver/             — Tablet receiver app (transport → inject)
 - GitHub Actions: `.github/workflows/ci.yml`
 - Debug APK artifacts + unit tests on every push to `main`, `develop`, `feature/**`, `phase/**`
 - Release APKs built on `main` push (requires `SIGNING_KEYSTORE_BASE64` secret)
-- Last green build: Session 015 (BUG-054→057); Session 016 pushed (BUG-058→062)
+- Last green build: Session 016 (BUG-058→062); Session 017 pushed (BUG-063 + logos)
 - APK outputs: `app-bridge/build/outputs/apk/debug/` + `app-receiver/build/outputs/apk/debug/`
 
 ---
@@ -131,6 +131,7 @@ All bugs BUG-001 through BUG-053 are tracked in `BUGS.md`.
   - BUG-055 FIXED — continue in run{} inline lambda — Kotlin 2.0 experimental feature, CI failure
   - BUG-056 FALSE POSITIVE — ViewModel Context: Koin uses androidContext() (Application), safe
   - BUG-057 FIXED — MainActivity.applyKeepScreenOn() bypassed Koin DI for BridgePreferences
+- BUG-063: found in Session 017 — startForeground() missing type → MissingForegroundServiceTypeException on Android 14+; FIXED
 - BUG-058–062: found in Session 016
   - BUG-058 FIXED — requestNotificationPermissionIfNeeded() called before setContent{} — moved after
   - BUG-059 FIXED — else→ in BridgeService.startPipeline() silently routed WIFI_DIRECT/TCP to UDP

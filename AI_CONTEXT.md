@@ -185,6 +185,21 @@ override fun onCreate(savedInstanceState: Bundle?) {
 }
 ```
 
+### Foreground service type is mandatory on Android 14+ (BUG-063)
+
+Both `BridgeService` and `ReceiverService` declare `android:foregroundServiceType="connectedDevice"`
+in their manifests. Every `startForeground()` call MUST use the 3-argument overload:
+```kotlin
+if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+    startForeground(id, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+} else {
+    startForeground(id, notification)
+}
+```
+If you add a second `startForeground()` call anywhere (e.g. in `onStartCommand` or after a
+notification update), apply the same guard. Calling the 2-arg form on Android 14+ (API 34)
+throws `MissingForegroundServiceTypeException` and crashes the entire app.
+
 ### PacketType exhaustiveness in service hot loops (BUG-059–062)
 
 `ReceiverService`'s receive loop and `BridgeService`'s incoming-packet loop both use exhaustive
