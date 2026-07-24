@@ -2,6 +2,7 @@ package com.inputbridge.bridge.service
 
 import android.app.*
 import android.content.*
+import android.content.pm.ServiceInfo
 import android.hardware.usb.*
 import android.os.*
 import androidx.core.app.NotificationCompat
