@@ -2,6 +2,32 @@
 
 ---
 
+## Session 018 — Imported project setup and CI verification
+**Date:** 2026-07-24
+**Agent:** Replit Agent
+**Status:** ✅ Complete
+
+### Goals
+- Review the imported Android multi-module project and its operating instructions.
+- Investigate the reported `BridgeService` `ServiceInfo` compile failure.
+- Check the latest CI results and verify the recent Android crash fixes.
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|----|----------|-------------|---------|
+| BUG-063 | Critical | Android 14 foreground-service type crash | Already fixed in imported HEAD; latest CI passes |
+| — | Critical | Missing `ServiceInfo` import in `BridgeService` | Already fixed in imported HEAD; latest CI passes |
+
+### What Was Changed
+- No production code changes were necessary: `BridgeService` and `ReceiverService` both contain the explicit `android.content.pm.ServiceInfo` import.
+- Verified the latest Android CI run completed successfully and published both debug APK artifacts, test results, and release artifacts.
+- Verified the working tree is clean and the imported project is aligned with `origin/main`.
+
+### Remaining Validation
+- Physical-device validation remains necessary for the Redmi 9 bridge, OnePlus Pad Go receiver, and Portronics Key2 Combo hardware path.
+
+---
+
 ## Session 017 — Foreground service type crash + app logos (BUG-063)
 **Date:** 2026-07-24
 **Agent:** Claude (Replit)

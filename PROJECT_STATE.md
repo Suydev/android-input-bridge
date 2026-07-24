@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 017 — foreground service type crash BUG-063 + logos (2026-07-24)
+> **Last updated:** Session 018 — imported project setup and CI verification (2026-07-24)
 
 ---
 
@@ -108,7 +108,7 @@ app-receiver/             — Tablet receiver app (transport → inject)
 - GitHub Actions: `.github/workflows/ci.yml`
 - Debug APK artifacts + unit tests on every push to `main`, `develop`, `feature/**`, `phase/**`
 - Release APKs built on `main` push (requires `SIGNING_KEYSTORE_BASE64` secret)
-- Last green build: Session 016 (BUG-058→062); Session 017 pushed (BUG-063 + logos)
+- Last green build: Session 018 verification of imported HEAD (Android CI + Release passed)
 - APK outputs: `app-bridge/build/outputs/apk/debug/` + `app-receiver/build/outputs/apk/debug/`
 
 ---
@@ -138,3 +138,12 @@ All bugs BUG-001 through BUG-053 are tracked in `BUGS.md`.
   - BUG-060 FIXED — else→ in ReceiverService packet handler corrupted packet-loss statistics
   - BUG-061 FIXED — else→Unit in BridgeService.startIncomingLoop() swallowed future rx→bridge packets
   - BUG-062 FIXED — else→ in WelcomeScreen TransportMode display strings
+
+## Session 018 — Imported project setup and CI verification
+
+- The reported `BridgeService` `ServiceInfo` compile failure is already fixed in the imported
+  HEAD commit; both service files contain the explicit `android.content.pm.ServiceInfo` import.
+- The latest Android CI and Release workflows completed successfully for the imported HEAD.
+- Debug bridge/receiver APKs, test results, and release artifacts are available from CI.
+- No production code changes were needed during this setup verification.
+- Remaining validation is hardware-only: Redmi 9 + OnePlus Pad Go + Portronics Key2 Combo.

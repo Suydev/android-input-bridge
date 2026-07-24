@@ -4,6 +4,17 @@ Complete checklist of all project tasks. Never delete completed tasks. Always ap
 
 ---
 
+## Session 018 — Imported project setup and CI verification ✅
+
+- [x] Reviewed imported project structure, agent instructions, skills, and persistent memory
+- [x] Investigated the reported `BridgeService` `ServiceInfo` import failure
+- [x] Verified the import fix is present in both service classes
+- [x] Verified latest Android CI and Release workflows passed for imported HEAD
+- [x] Confirmed debug APK, test-result, and release artifacts are available from CI
+- [ ] Hardware validation on Redmi 9 + OnePlus Pad Go + Portronics Key2 Combo (follow-up)
+
+---
+
 ## Phase 1 — Scaffold ✅
 
 - [x] Repository structure (all modules)
