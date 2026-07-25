@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 018 — imported project setup and CI verification (2026-07-24)
+> **Last updated:** Session 019 — hard-bug audit and pipeline hardening BUG-064→BUG-074 (2026-07-25)
 
 ---
 

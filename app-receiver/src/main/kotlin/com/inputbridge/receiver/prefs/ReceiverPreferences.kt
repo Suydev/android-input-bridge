@@ -22,14 +22,6 @@ class ReceiverPreferences(context: Context) {
         set(value) = prefs.edit().putInt(KEY_PORT, value).apply()
 
     /**
-     * Mouse pointer sensitivity multiplier applied in [AccessibilityCommandBus].
-     * Range 0.1–5.0. Defaults to 1.0 (no scaling).
-     */
-    var mouseSensitivity: Float
-        get() = prefs.getFloat(KEY_MOUSE_SENSITIVITY, DEFAULT_SENSITIVITY)
-        set(value) = prefs.edit().putFloat(KEY_MOUSE_SENSITIVITY, value).apply()
-
-    /**
      * 6-digit session PIN displayed to the user so the bridge operator can enter
      * it in the bridge app to complete pairing.
      */
@@ -86,7 +78,6 @@ class ReceiverPreferences(context: Context) {
     companion object {
         private const val PREF_FILE              = "receiver_config"
         private const val KEY_PORT               = "port"
-        private const val KEY_MOUSE_SENSITIVITY  = "mouse_sensitivity"
         private const val KEY_SESSION_PIN        = "session_pin"
         private const val KEY_PAIRED_BRIDGE_IP   = "paired_bridge_ip"
         private const val KEY_IS_PAIRED          = "is_paired"
@@ -94,6 +85,5 @@ class ReceiverPreferences(context: Context) {
         private const val KEY_SHOW_CURSOR_OVERLAY = "show_cursor_overlay"
         private const val KEY_AUTO_START_ON_BOOT  = "auto_start_on_boot"
         const val DEFAULT_PORT        = 54321
-        const val DEFAULT_SENSITIVITY = 1.0f
     }
 }

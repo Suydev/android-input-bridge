@@ -92,31 +92,6 @@ fun ReceiverSettingsScreen(onBack: () -> Unit, viewModel: ReceiverViewModel) {
 
             HorizontalDivider(color = ReceiverDim.copy(alpha = 0.3f))
 
-            // ── Mouse ─────────────────────────────────────────────────────────
-            SectionHeader("Mouse")
-
-            Text(
-                "Pointer Sensitivity: %.1f×".format(config.mouse.sensitivity),
-                color = ReceiverOnSurface, fontFamily = FontFamily.Monospace, fontSize = 13.sp,
-            )
-            Slider(
-                value = config.mouse.sensitivity,
-                onValueChange = { viewModel.setMouseSensitivity(it) },
-                valueRange = 0.1f..5.0f,
-                steps = 48,
-                colors = SliderDefaults.colors(
-                    thumbColor = ReceiverPrimary,
-                    activeTrackColor = ReceiverPrimary,
-                    inactiveTrackColor = ReceiverDim.copy(alpha = 0.3f),
-                ),
-            )
-            Text(
-                "Adjust if the pointer feels too fast or too slow. Changes apply immediately.",
-                color = ReceiverDim, fontSize = 12.sp, fontFamily = FontFamily.Monospace,
-            )
-
-            HorizontalDivider(color = ReceiverDim.copy(alpha = 0.3f))
-
             // ── Display / cursor overlay ──────────────────────────────────────
             SectionHeader("Display")
 

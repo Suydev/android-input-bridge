@@ -250,3 +250,19 @@ Complete checklist of all project tasks. Never delete completed tasks. Always ap
 - [ ] Macro recording: MACROS_ENABLED feature (Phase 8)
 - [ ] Help text: onboarding tooltips (Phase 8)
 - [x] Version info: BuildConfig display in About screen (already done in Phase 5)
+
+## Session 019 — Hard-bug audit and pipeline hardening
+- [x] Audit full pipeline for runtime crashes before hardware test
+- [x] BUG-064: Service coroutine exception boundaries (handleRuntimeFailure)
+- [x] BUG-065: Boot receiver runCatching guard
+- [x] BUG-066: lifecycle.withStarted notification permission fix
+- [x] BUG-067: Remove receiver-side mouse sensitivity doubling
+- [x] BUG-068: Confirm click-after-move ordering is safe (analysis)
+- [x] BUG-069: Dual-priority UDP send channels + socket tuning
+- [x] BUG-070: @Volatile on screenWidth/screenHeight
+- [x] BUG-071: Log tryEmit() drops for keyboard/click events
+- [x] BUG-072: Replace == 0f cursor-init guard with explicit flag
+- [x] BUG-073: Split EventPacketFactory sequence counter (input vs control)
+- [x] BUG-074: Handle ClosedReceiveChannelException in UDP send loop
+- [x] Update BUGS.md, SESSION_LOG.md, TASKS.md, PROJECT_STATE.md
+- [x] Commit and push all changes

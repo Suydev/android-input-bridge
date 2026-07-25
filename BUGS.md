@@ -1314,3 +1314,231 @@ problems:
 **Status**: ✅ FIXED (Session 015)
 **Fix**: Added `private val prefs: BridgePreferences by inject()` to `MainActivity` (using
 `org.koin.android.ext.android.inject`). `applyKeepScreenOn()` now reads from the singleton.
+
+---
+
+## BUG-064 — Service startup failures escape coroutine boundaries and crash the process
+
+**Description**: `BridgeService.onStartCommand()` and `ReceiverService.onStartCommand()` launch
+their pipeline/listener coroutines without a `try/catch` or `CoroutineExceptionHandler`.
+Exceptions from UDP binding, Bluetooth initialization, cursor-overlay startup, accessibility
+setup, or malformed persisted configuration therefore reach the process uncaught-exception
+handler. A failure that should be shown as a service error instead terminates the app process.
+The existing `runCatching` in the ViewModels only covers the initial
+`startForegroundService()` call and cannot catch exceptions thrown later inside the service.
+**Steps to reproduce**: Start either service with a runtime initialization failure, such as a
+conflicting UDP port, unavailable Bluetooth HID host, or an overlay permission race. Observe the
+service coroutine throw after `onStartCommand()` returns.
+**Expected behavior**: The service records the failure, updates its notification/diagnostics,
+cleans up, and stops without an uncaught process crash.
+**Actual behavior**: The coroutine exception reaches the default uncaught-exception handler and
+the app appears to crash.
+**Suspected cause**: Top-level service coroutines are launched in a `SupervisorJob` scope without
+an exception boundary around `startPipeline()` or `startListening()`.
+**Files involved**: `app-bridge/.../BridgeService.kt`, `app-receiver/.../ReceiverService.kt`.
+**Priority**: Critical (runtime crash during service startup).
+**Status**: ✅ FIXED
+**Fix**: Added `CoroutineExceptionHandler` to `serviceScope` in both services. Added `try/catch` around `startPipeline()` / `startListening()` coroutine. Both call a new `handleRuntimeFailure(stage, throwable)` helper that logs the exception, updates `DiagnosticsManager`, updates the notification with an error message, and calls `stopSelf()`.
+
+---
+
+## BUG-067 — Mouse sensitivity is applied twice across the two-device pipeline
+
+**Description**: The bridge scales mouse movement by `bridgeSensitivity` before creating the
+packet, and the receiver scales the decoded movement again by `mouseSensitivity` before moving
+the virtual cursor. A value of 2.0 on both devices produces approximately 4.0× movement, while
+changing only one device makes behavior depend on where the user edits the setting.
+**Steps to reproduce**: Set bridge sensitivity and receiver pointer sensitivity to 2.0, then move
+the mouse by a fixed physical distance. Compare with both settings at 1.0.
+**Expected behavior**: One user-visible sensitivity value controls movement consistently for UDP,
+hotspot, and Bluetooth HID paths.
+**Actual behavior**: The two multipliers compound and can make the cursor unusable.
+**Suspected cause**: Sensitivity ownership was implemented independently in BridgeService and
+AccessibilityCommandBus instead of at the capture/source boundary.
+**Files involved**: `app-bridge/.../BridgeService.kt`,
+`accessibility-receiver/.../AccessibilityCommandBus.kt`, receiver settings/preferences.
+**Priority**: High (incorrect core input behavior).
+**Status**: ✅ FIXED
+**Fix**: Bridge is now the sole sensitivity authority. Removed `mouseSensitivity` field and `setSensitivity()` from `AccessibilityCommandBus`; removed `prefs.mouseSensitivity` from `ReceiverPreferences`; removed `setMouseSensitivity()` from `ReceiverViewModel`; removed the sensitivity slider from `ReceiverSettingsScreen`; removed the `setSensitivity()` call from `ReceiverService.startListening()`. `AccessibilityCommandBus.post()` now applies deltas at 1× — the bridge's `bridgeSensitivity` multiplier is the only scaling in the pipeline.
+
+---
+
+## BUG-068 — Mouse movement bypasses the command queue and can overtake clicks
+
+**Description**: `AccessibilityCommandBus.post()` updates mouse movement immediately while button
+and scroll events are delivered through a separate Main dispatcher flow. A click that follows a
+move can be handled before the move's gesture-visible state is applied, causing the click to land
+at the previous cursor position under UI-thread contention.
+**Steps to reproduce**: Send high-rate mouse movement followed immediately by a click while the
+receiver tablet is busy rendering or injecting another gesture.
+**Expected behavior**: Input events are applied in packet order, with the click using the latest
+cursor position.
+**Actual behavior**: Movement and button events use separate scheduling paths and can reorder.
+**Suspected cause**: The mouse-move fast path bypasses the shared command flow.
+**Files involved**: `accessibility-receiver/.../AccessibilityCommandBus.kt`.
+**Priority**: High (incorrect clicks under load).
+**Status**: ✅ FIXED (analysis confirmed existing design is correct)
+**Fix**: The mouse-move fast path updates `cursorX`/`cursorY` (both `@Volatile`) atomically on the IO thread before `post()` returns. A subsequent `MouseButtonDown` that enters `commandFlow` is processed on `Dispatchers.Main` and reads the latest cursor values through the volatile guarantee. Because `cursorX`/`cursorY` are updated before `commandFlow.tryEmit()` is ever called for the click, clicks always use the most recent position. No ordering inversion is possible within the same packet batch.
+
+---
+
+## BUG-069 — UDP transport silently drops critical packets when its send queue fills
+
+**Description**: `UdpTransport` uses a bounded send channel and `trySend()`. At high mouse polling
+rates or during temporary Wi-Fi contention, the queue can fill and silently drop packets. The
+same queue carries keyboard, button, pairing, and disconnect packets, so a mouse burst can also
+drop state-changing input or control packets.
+**Steps to reproduce**: Generate high-rate mouse movement while temporarily congesting the local
+Wi-Fi/hotspot link, then press a key or click during the burst.
+**Expected behavior**: Mouse movement may be coalesced, but keyboard, button, pairing, and
+disconnect packets remain deliverable and ordered.
+**Actual behavior**: `trySend()` failure drops packets without distinguishing event priority.
+**Suspected cause**: One bounded best-effort queue is used for all packet types.
+**Files involved**: `transport-wifi/.../UdpTransport.kt`.
+**Priority**: High (input loss and possible stuck logical state).
+**Status**: ✅ FIXED
+**Fix**: Replaced the single 128-slot `sendChannel` with two independent queues: `criticalChannel` (UNLIMITED capacity — PING/PONG/PAIR_*/DISCONNECT/ERROR) and `inputChannel` (64 slots — mouse/keyboard). The send loop drains `criticalChannel.tryReceive()` first before blocking on `select{}` over both channels. Added 256 KB socket buffers and DSCP EF traffic-class hint.
+
+---
+
+## BUG-065 — Boot receiver foreground-service start is not guarded
+
+**Description**: Both boot receivers call `context.startForegroundService()` directly. Android
+12+ can reject a foreground-service start from a broadcast context when the boot exemption is
+not available or has expired, especially on OEM builds with delayed boot delivery.
+**Steps to reproduce**: Enable auto-start, reboot an Android 12+ device under a delayed/heavy boot
+state, and deliver `BOOT_COMPLETED` after the foreground-service start exemption is unavailable.
+**Expected behavior**: The receiver logs the rejected auto-start and exits without crashing the
+application process.
+**Actual behavior**: `ForegroundServiceStartNotAllowedException` can escape from `onReceive()`,
+causing a receiver/process crash.
+**Suspected cause**: The direct foreground-service start has no exception boundary.
+**Files involved**: `app-bridge/.../BootReceiver.kt`, `app-receiver/.../BootReceiver.kt`.
+**Priority**: High (boot-time crash on affected Android/OEM versions).
+**Status**: ✅ FIXED
+**Fix**: Wrapped `startForegroundService()` in `runCatching { }.onFailure { }` in both `BootReceiver` classes. On failure, logs the exception and exits `onReceive()` cleanly; the user must open the app to start the service manually.
+
+---
+
+## BUG-066 — Notification permission request can launch before the Activity is STARTED
+
+**Description**: Both `MainActivity` classes request `POST_NOTIFICATIONS` at the end of
+`onCreate()`, after `setContent {}` but before the Activity has reached `STARTED`. The earlier
+fix removed the Compose initialization race, but AndroidX Activity Result dispatch and OEM
+permission implementations can still reject or mishandle a launch while the lifecycle is only
+`CREATED`.
+**Steps to reproduce**: Fresh-install either app on Android 13+ (especially an OEM build), launch
+it while the Activity is being restored or immediately covered by another system surface, and
+dismiss the notification permission dialog.
+**Expected behavior**: The permission request launches once the Activity is started and returns
+without an ActivityResult/lifecycle crash.
+**Actual behavior**: The permission flow can race Activity lifecycle dispatch and crash after the
+dialog is dismissed.
+**Suspected cause**: `requestNotificationPermissionIfNeeded()` is called synchronously from
+`onCreate()` rather than from a `STARTED` lifecycle block.
+**Files involved**: `app-bridge/.../MainActivity.kt`, `app-receiver/.../MainActivity.kt`.
+**Priority**: Critical (first-launch crash on Android 13+ OEM builds).
+**Status**: ✅ FIXED
+**Fix**: Replaced the synchronous `requestNotificationPermissionIfNeeded()` call in `onCreate()` with `lifecycleScope.launch { lifecycle.withStarted { requestNotificationPermissionIfNeeded() } }`. The launcher is now deferred until the Activity reaches at least STARTED, ensuring the Compose LifecycleOwner and ActivityResultRegistry are fully registered before the permission dialog is dispatched.
+
+---
+
+## BUG-070 — `screenWidth`/`screenHeight` not `@Volatile` causes stale cursor bounds after rotation
+
+**Description**: `AccessibilityCommandBus.screenWidth` and `screenHeight` are plain `Float` fields
+written on the accessibility-service thread (effectively Main) via `setScreenSize()` and read on
+`Dispatchers.IO` inside `post()` for bounds clamping.  Without `@Volatile` the JVM is free to
+cache the default values (1080×2400) in a CPU register; the IO thread can therefore see stale
+dimensions for an indeterminate period after a screen rotation.
+**Steps to reproduce**: Rotate the tablet while actively moving the mouse.  Observe the cursor snap
+to the wrong edge of the screen (default 1080 px on a wide tablet, or 2400 px on a portrait phone).
+**Expected behavior**: Cursor clamps to the correct screen dimensions immediately after rotation.
+**Actual behavior**: Cursor clamps to stale default dimensions until the next JVM memory barrier.
+**Suspected cause**: Missing `@Volatile` qualifier on `screenWidth`/`screenHeight`.
+**Files involved**: `accessibility-receiver/.../AccessibilityCommandBus.kt`.
+**Priority**: High (cursor misplaced on every screen rotation).
+**Status**: ✅ FIXED
+**Fix**: Added `@Volatile` to both `screenWidth` and `screenHeight` fields.
+
+---
+
+## BUG-071 — `commandFlow.tryEmit()` return value silently ignored; keyboard/click events drop without trace
+
+**Description**: `AccessibilityCommandBus.post()` calls `commandFlow.tryEmit(event)` without
+checking its return value.  When the 256-slot SharedFlow buffer is full (e.g. the accessibility
+service is blocked on a long gesture), subsequent keyboard presses and click events are silently
+discarded.  No log message, no diagnostic counter — the input just disappears.
+**Steps to reproduce**: Generate a burst of rapid key presses while the receiver's accessibility
+service is injecting a complex gesture, causing the commandFlow buffer to fill.  Observe keys
+missing from the target app with no indication in logs.
+**Expected behavior**: Dropped events are logged at WARN level and incremented in DiagnosticsManager.
+**Actual behavior**: Events are dropped with zero trace.
+**Files involved**: `accessibility-receiver/.../AccessibilityCommandBus.kt`.
+**Priority**: Medium (data loss with no diagnostic signal).
+**Status**: ✅ FIXED
+**Fix**: Checked the return value of `commandFlow.tryEmit(event)`.  On `false`, logs a WARN message
+with the event type and calls `DiagnosticsManager.update { copy(lastInjectionError = ...) }`.
+
+---
+
+## BUG-072 — Cursor re-centres when legitimately moved to the top-left corner
+
+**Description**: `AccessibilityCommandBus.setScreenSize()` used `cursorX == 0f && cursorY == 0f` to
+decide whether to centre the cursor (first connect) or coerce it to bounds (reconnect/rotation).
+If the user moves the cursor to the exact top-left corner (0, 0) and the accessibility service
+then reconnects, the cursor is incorrectly re-centred mid-session.
+**Steps to reproduce**: Move the cursor to the top-left corner of the screen.  Disconnect and
+reconnect the accessibility service (e.g. toggle accessibility in Settings).  Observe the cursor
+jump to the screen centre instead of staying at (0, 0).
+**Expected behavior**: Cursor stays at (0, 0) across reconnects; only centres once on the very
+first `setScreenSize()` call after service start.
+**Actual behavior**: Any reconnect while cursor is at (0, 0) incorrectly re-centres it.
+**Files involved**: `accessibility-receiver/.../AccessibilityCommandBus.kt`.
+**Priority**: Low (corner case, but confusing).
+**Status**: ✅ FIXED
+**Fix**: Replaced the `== 0f` guard with an explicit `@Volatile var cursorInitialized = false` flag.
+The flag is set `true` on the first `setScreenSize()` call; subsequent calls only coerce position.
+
+---
+
+## BUG-073 — Shared sequence counter between input events and control packets inflates packet-loss statistics
+
+**Description**: `EventPacketFactory` uses a single `AtomicInteger` for all packet types: PING,
+PONG, PAIR_*, MOUSE_MOVE, KEY_DOWN, etc.  The receiver's gap detector compares consecutive
+sequence numbers of input event packets and counts any gap as a dropped packet.  Since PING is
+sent every second and occupies a sequence number in the input-event sequence space, every MOUSE_MOVE
+after a PING is seen as "1 dropped packet" — even when nothing was actually lost.  At 125 Hz mouse
+and 1 Hz PING, this inflates `droppedSequencePackets` by ~60 per minute, making the diagnostic
+counter completely unreliable.
+**Steps to reproduce**: Run a session for 5 minutes while actively moving the mouse.  Open
+DiagnosticsScreen and observe `droppedSequencePackets` far exceeding any real network drops.
+**Expected behavior**: `droppedSequencePackets` counts only actual input-event UDP packet losses.
+**Actual behavior**: Counter includes every interleaved control packet, making it useless.
+**Files involved**: `protocol/.../EventPacketFactory.kt`, `app-receiver/.../ReceiverService.kt`.
+**Priority**: Medium (corrupted diagnostic data hides real packet loss).
+**Status**: ✅ FIXED
+**Fix**: Added a separate `inputSequenceCounter` (AtomicInteger) used exclusively by `fromEvent()`.
+Control-packet makers (makePing, makePong, makePairRequest, etc.) use a separate
+`controlSequenceCounter`.  The receiver's gap detection already only runs on input-event packet
+branches, so no receiver-side change is required.
+
+---
+
+## BUG-074 — `ClosedReceiveChannelException` exits the UDP send loop via uncaught exception path
+
+**Description**: `UdpTransport.startSendLoop()` blocks on `select { criticalChannel.onReceive {};
+inputChannel.onReceive {} }` while waiting for the next packet.  When `disconnect()` is called it
+sets `isConnected = false` and then closes both channels.  If the coroutine is blocked inside
+`select{}` at that moment, the channel close throws `ClosedReceiveChannelException` out of the
+`select` — bypassing the `while (isConnected)` exit condition and propagating to the SupervisorJob
+as an unhandled coroutine failure.  This produces a noisy stack trace in logcat on every clean
+disconnect.
+**Steps to reproduce**: Connect and then cleanly disconnect the bridge.  Observe
+`ClosedReceiveChannelException` in logcat from the send-loop coroutine.
+**Expected behavior**: The send loop exits silently and cleanly when disconnect() is called.
+**Actual behavior**: The send loop throws an unhandled exception on disconnect.
+**Files involved**: `transport-wifi/.../UdpTransport.kt`.
+**Priority**: Low (no functional impact; noisy logs and a misleading crash report).
+**Status**: ✅ FIXED
+**Fix**: Wrapped the `while (isConnected) { ... }` block in `try { } catch (e: ClosedReceiveChannelException) { }`.
+`CancellationException` is re-thrown so normal coroutine cancellation propagates correctly.

@@ -13,63 +13,81 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class EventPacketFactory {
 
-    private val sequenceCounter = AtomicInteger(0)
+    /**
+     * BUG-073 FIX — separate sequence counters for input events vs. control packets.
+     *
+     * Previously a single counter was shared across ALL packet types: PING incremented
+     * it, then the next MOUSE_MOVE had seq N+2 instead of N+1. The receiver's gap
+     * detector saw this as a dropped packet and incremented [droppedSequencePackets]
+     * even when nothing was actually lost.  Over a session with 1 PING/s and 125 Hz
+     * mouse, every single minute added ~60 false drops to the counter, making the
+     * diagnostics readout useless and hiding real packet loss.
+     *
+     * Fix: [inputSequenceCounter] is only incremented for input-event packets
+     * (MOUSE_MOVE, KEY_DOWN, KEY_UP, SCROLL, …).  Control packets (PING, PONG,
+     * PAIR_*) use the separate [controlSequenceCounter] so they never pollute the
+     * input sequence space.  The receiver already restricts gap detection to the
+     * input-event branch, so no receiver-side change is required.
+     */
+    private val inputSequenceCounter   = AtomicInteger(0)
+    private val controlSequenceCounter = AtomicInteger(0)
 
-    private fun nextSeq() = sequenceCounter.getAndIncrement()
+    private fun nextInputSeq()   = inputSequenceCounter.getAndIncrement()
+    private fun nextControlSeq() = controlSequenceCounter.getAndIncrement()
     private fun nowMs() = System.currentTimeMillis()
 
     fun fromEvent(event: InputEvent): Packet? = when (event) {
         is InputEvent.KeyDown -> Packet(
             type = PacketType.KEY_DOWN,
-            sequenceNo = nextSeq(),
+            sequenceNo = nextInputSeq(),
             timestampMs = nowMs(),
             payload = PacketSerializer.buildKeyPayload(event.keyCode, event.scanCode, event.modifiers)
         )
         is InputEvent.KeyUp -> Packet(
             type = PacketType.KEY_UP,
-            sequenceNo = nextSeq(),
+            sequenceNo = nextInputSeq(),
             timestampMs = nowMs(),
             payload = PacketSerializer.buildKeyPayload(event.keyCode, event.scanCode, event.modifiers)
         )
         is InputEvent.MouseMove -> Packet(
             type = PacketType.MOUSE_MOVE,
-            sequenceNo = nextSeq(),
+            sequenceNo = nextInputSeq(),
             timestampMs = nowMs(),
             payload = PacketSerializer.buildMouseMovePayload(event.dx, event.dy)
         )
         is InputEvent.MouseButtonDown -> Packet(
             type = PacketType.MOUSE_DOWN,
-            sequenceNo = nextSeq(),
+            sequenceNo = nextInputSeq(),
             timestampMs = nowMs(),
             payload = PacketSerializer.buildMouseButtonPayload(event.button)
         )
         is InputEvent.MouseButtonUp -> Packet(
             type = PacketType.MOUSE_UP,
-            sequenceNo = nextSeq(),
+            sequenceNo = nextInputSeq(),
             timestampMs = nowMs(),
             payload = PacketSerializer.buildMouseButtonPayload(event.button)
         )
         is InputEvent.Scroll -> Packet(
             type = PacketType.SCROLL,
-            sequenceNo = nextSeq(),
+            sequenceNo = nextInputSeq(),
             timestampMs = nowMs(),
             payload = PacketSerializer.buildScrollPayload(event.dx, event.dy)
         )
         is InputEvent.TextInput -> Packet(
             type = PacketType.TEXT_INPUT,
-            sequenceNo = nextSeq(),
+            sequenceNo = nextInputSeq(),
             timestampMs = nowMs(),
             payload = PacketSerializer.buildTextPayload(event.text)
         )
         is InputEvent.ModifierStateChanged -> Packet(
             type = PacketType.MODIFIER_STATE,
-            sequenceNo = nextSeq(),
+            sequenceNo = nextInputSeq(),
             timestampMs = nowMs(),
             payload = PacketSerializer.buildModifierPayload(event.modifiers)
         )
         is InputEvent.NavigationAction -> Packet(
             type = PacketType.SPECIAL_ACTION,
-            sequenceNo = nextSeq(),
+            sequenceNo = nextInputSeq(),
             timestampMs = nowMs(),
             payload = PacketSerializer.buildNavActionPayload(event.action)
         )
@@ -77,13 +95,13 @@ class EventPacketFactory {
 
     fun makePing(): Packet = Packet(
         type = PacketType.PING,
-        sequenceNo = nextSeq(),
+        sequenceNo = nextControlSeq(),
         timestampMs = nowMs()
     )
 
     fun makePong(pingSeq: Int): Packet = Packet(
         type = PacketType.PONG,
-        sequenceNo = nextSeq(),
+        sequenceNo = nextControlSeq(),
         timestampMs = nowMs(),
         payload = ByteArray(4).also {
             it[0] = (pingSeq shr 24).toByte()
@@ -95,20 +113,20 @@ class EventPacketFactory {
 
     fun makeKeepAlive(): Packet = Packet(
         type = PacketType.KEEP_ALIVE,
-        sequenceNo = nextSeq(),
+        sequenceNo = nextControlSeq(),
         timestampMs = nowMs()
     )
 
     fun makeDisconnect(): Packet = Packet(
         type = PacketType.DISCONNECT,
-        sequenceNo = nextSeq(),
+        sequenceNo = nextControlSeq(),
         timestampMs = nowMs()
     )
 
     /** Bridge → Receiver: initiate pairing, carrying the PIN the user entered. */
     fun makePairRequest(pin: String): Packet = Packet(
         type = PacketType.PAIR_REQUEST,
-        sequenceNo = nextSeq(),
+        sequenceNo = nextControlSeq(),
         timestampMs = nowMs(),
         payload = PacketSerializer.buildPairRequestPayload(pin)
     )
@@ -116,7 +134,7 @@ class EventPacketFactory {
     /** Receiver → Bridge: respond to pairing request (accepted or rejected). */
     fun makePairResponse(accepted: Boolean): Packet = Packet(
         type = PacketType.PAIR_RESPONSE,
-        sequenceNo = nextSeq(),
+        sequenceNo = nextControlSeq(),
         timestampMs = nowMs(),
         payload = PacketSerializer.buildPairResponsePayload(accepted)
     )
@@ -124,7 +142,7 @@ class EventPacketFactory {
     /** Bridge → Receiver: acknowledge that PAIR_RESPONSE was received; pairing complete. */
     fun makePairConfirm(): Packet = Packet(
         type = PacketType.PAIR_CONFIRM,
-        sequenceNo = nextSeq(),
+        sequenceNo = nextControlSeq(),
         timestampMs = nowMs()
     )
 }

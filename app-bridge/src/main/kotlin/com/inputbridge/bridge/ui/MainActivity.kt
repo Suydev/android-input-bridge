@@ -14,6 +14,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.withStarted
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -127,13 +128,15 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // BUG-058 FIX: request notification permission AFTER setContent{} so the Compose
-        // LifecycleOwner and ActivityResultRegistry are fully initialised before the permission
-        // dialog appears. Calling launch() before setContent{} (while the activity is still in
-        // CREATED state) causes an IllegalStateException on Android 13+ OEM builds when the
-        // system dispatches the permission result back to a Compose LifecycleOwner that does
-        // not yet exist.
-        requestNotificationPermissionIfNeeded()
+        // BUG-058 + BUG-066 FIX: defer the permission launcher until the activity is at
+        // least STARTED. Calling launch() synchronously inside onCreate() — even after
+        // setContent{} — can race with Compose's LifecycleOwner registration on OEM builds
+        // (OnePlus OxygenOS, MIUI) and throw IllegalStateException when the system tries
+        // to dispatch the result back to a LifecycleOwner that does not yet exist.
+        // lifecycle.withStarted{} suspends until STARTED then runs the block exactly once.
+        lifecycleScope.launch {
+            lifecycle.withStarted { requestNotificationPermissionIfNeeded() }
+        }
     }
 
     override fun onResume() {

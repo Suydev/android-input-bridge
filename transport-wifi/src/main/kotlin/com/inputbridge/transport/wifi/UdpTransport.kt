@@ -4,8 +4,11 @@ import com.inputbridge.core.config.TransportConfig
 import com.inputbridge.core.logging.BridgeLogger
 import com.inputbridge.protocol.Packet
 import com.inputbridge.protocol.PacketSerializer
+import com.inputbridge.protocol.PacketType
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.selects.select
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
@@ -13,7 +16,21 @@ import java.net.InetSocketAddress
 
 private const val TAG = "UdpTransport"
 private const val MAX_PACKET_SIZE = 1400  // stay safely under Ethernet MTU
-private const val SEND_QUEUE_CAPACITY = 128
+
+/** High-frequency input events (mouse, key). Packets dropped when full — expected. */
+private const val INPUT_QUEUE_CAPACITY = 64
+
+/**
+ * Critical control packets: PING, PONG, PAIR_*, DISCONNECT, ERROR.
+ * UNLIMITED so they are never silently dropped by a busy mouse pipeline.
+ */
+private const val CRITICAL_QUEUE_CAPACITY = Channel.UNLIMITED
+
+/** Socket send/receive buffer (256 KB). Reduces kernel drop under burst traffic. */
+private const val SOCKET_BUFFER_BYTES = 256 * 1024
+
+/** IP DSCP EF (0x28) — expedited forwarding; falls back silently if the socket ignores it. */
+private const val TRAFFIC_CLASS_LOWDELAY = 0x28
 
 /**
  * UDP transport: lowest latency local transport.
@@ -43,7 +60,25 @@ class UdpTransport(
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
     private val _incomingPackets = MutableSharedFlow<Packet>(extraBufferCapacity = 128)
-    private val sendChannel = kotlinx.coroutines.channels.Channel<ByteArray>(SEND_QUEUE_CAPACITY)
+
+    /**
+     * BUG-069 FIX — dual-priority send queues.
+     *
+     * Before this fix, a single bounded channel of 128 slots was shared between
+     * high-frequency mouse-move packets and critical control packets (PING, PONG,
+     * PAIR_REQUEST, DISCONNECT). Under heavy mouse traffic the queue could fill,
+     * causing `trySend()` to silently drop PING/PONG/DISCONNECT — destabilising the
+     * watchdog, delaying pairing, and hiding clean shutdowns.
+     *
+     * Fix: two independent channels.
+     *   criticalChannel — UNLIMITED capacity, never drops.
+     *   inputChannel    — bounded capacity, drops old mouse moves if full (acceptable).
+     *
+     * The send loop always drains [criticalChannel] before processing [inputChannel],
+     * ensuring control packets are sent immediately even under burst mouse traffic.
+     */
+    private val criticalChannel = Channel<ByteArray>(CRITICAL_QUEUE_CAPACITY)
+    private val inputChannel    = Channel<ByteArray>(INPUT_QUEUE_CAPACITY)
 
     override val connectionState: Flow<ConnectionState> = _connectionState.asStateFlow()
     override val incomingPackets: Flow<Packet> = _incomingPackets.asSharedFlow()
@@ -77,6 +112,14 @@ class UdpTransport(
             } else {
                 DatagramSocket(config.port) // receiver binds to port
             }
+            // Socket tuning for minimum latency on local Wi-Fi / hotspot.
+            // Large kernel buffers absorb bursts without drops; DSCP EF (0x28) hints
+            // to the AP and home router that these datagrams are latency-sensitive.
+            // Both calls are best-effort — Android may silently ignore trafficClass on
+            // some OEM kernels; that is acceptable.
+            runCatching { sock.sendBufferSize    = SOCKET_BUFFER_BYTES }
+            runCatching { sock.receiveBufferSize = SOCKET_BUFFER_BYTES }
+            runCatching { sock.trafficClass      = TRAFFIC_CLASS_LOWDELAY }
             socket = sock
             startSendLoop(sock)
             startReceiveLoop(sock)
@@ -94,10 +137,11 @@ class UdpTransport(
     override suspend fun disconnect() {
         if (!isConnected) return
         isConnected = false
-        // BUG-045 fix: close the send channel before cancelling the send job.
-        // Without this the channel object leaks (its coroutine is cancelled but the
-        // channel itself — and any queued byte arrays — stays open indefinitely).
-        sendChannel.close()
+        // Close both send queues before cancelling the send job so their coroutine
+        // terminates cleanly without a channel leak (BUG-045 principle extended to
+        // the new dual-channel layout).
+        criticalChannel.close()
+        inputChannel.close()
         sendJob?.cancel()
         receiveJob?.cancel()
         socket?.close()
@@ -109,38 +153,80 @@ class UdpTransport(
     override suspend fun send(packet: Packet): Boolean {
         if (!isConnected) return false
         val bytes = PacketSerializer.serialize(packet)
-        return sendChannel.trySend(bytes).isSuccess
+        return if (packet.type.isCritical()) {
+            // UNLIMITED capacity — always succeeds unless the channel is closed.
+            criticalChannel.trySend(bytes).isSuccess
+        } else {
+            // Bounded — trySend may drop a stale mouse-move packet. Acceptable.
+            inputChannel.trySend(bytes).isSuccess
+        }
+    }
+
+    /**
+     * True for packets that must never be silently dropped by a busy mouse pipeline.
+     * Control traffic is at most ~1 packet/second, so the UNLIMITED critical channel
+     * cannot grow unbounded in practice.
+     */
+    private fun PacketType.isCritical() = when (this) {
+        PacketType.PING, PacketType.PONG,
+        PacketType.PAIR_REQUEST, PacketType.PAIR_RESPONSE, PacketType.PAIR_CONFIRM,
+        PacketType.DISCONNECT, PacketType.ERROR -> true
+        else -> false
     }
 
     private fun startSendLoop(sock: DatagramSocket) {
         sendJob = scope.launch {
-            if (isSender) {
-                // Bridge (sender) mode: target IP is fixed from config
-                val targetAddress = InetAddress.getByName(config.targetIp)
-                for (bytes in sendChannel) {
+            // Resolve send target once per connection.
+            val fixedTarget: InetAddress? = if (isSender)
+                InetAddress.getByName(config.targetIp) else null
+
+            /**
+             * Priority send: drain criticalChannel first (non-blocking try), then fall
+             * back to a coroutine select on both channels. This ensures PING/PONG/PAIR/
+             * DISCONNECT are always emitted immediately even under 125 Hz mouse traffic.
+             *
+             * BUG-074 FIX: wrap the entire loop in try/catch.
+             * When disconnect() is called it closes both channels and then cancels this
+             * job. If the coroutine is blocked inside select{} at that moment, closing
+             * the channels causes ClosedReceiveChannelException to propagate out of the
+             * select before the cancellation signal arrives. Without this catch the
+             * exception exits the coroutine via the uncaught-exception path — noisy logs
+             * and a potential SupervisorJob failure callback. Catching it explicitly gives
+             * a clean, silent shutdown consistent with the expected lifecycle.
+             */
+            try {
+                while (isConnected) {
+                    val bytes = criticalChannel.tryReceive().getOrNull()
+                        ?: select {
+                            criticalChannel.onReceive { it }
+                            inputChannel.onReceive { it }
+                        }
+
+                    // Resolve the destination address — either the fixed bridge target
+                    // (sender mode) or the last seen sender address (receiver mode).
+                    val targetAddr: InetAddress
+                    if (fixedTarget != null) {
+                        targetAddr = fixedTarget
+                    } else {
+                        val senderAddr = lastSenderAddress
+                        if (senderAddr == null) {
+                            BridgeLogger.d(TAG, "Receiver send skipped — no sender address seen yet")
+                            continue
+                        }
+                        targetAddr = senderAddr.address
+                    }
+
                     try {
-                        val dp = DatagramPacket(bytes, bytes.size, targetAddress, config.port)
+                        val dp = DatagramPacket(bytes, bytes.size, targetAddr, config.port)
                         sock.send(dp)
                     } catch (e: Exception) {
                         if (isConnected) BridgeLogger.w(TAG, "Send error", e)
                     }
                 }
-            } else {
-                // Receiver mode: send replies back to the last seen sender address.
-                // If no packet has arrived yet, the send is a no-op.
-                for (bytes in sendChannel) {
-                    val addr = lastSenderAddress
-                    if (addr == null) {
-                        BridgeLogger.d(TAG, "Receiver send skipped — no sender address seen yet")
-                        continue
-                    }
-                    try {
-                        val dp = DatagramPacket(bytes, bytes.size, addr.address, addr.port)
-                        sock.send(dp)
-                    } catch (e: Exception) {
-                        if (isConnected) BridgeLogger.w(TAG, "Reply send error", e)
-                    }
-                }
+            } catch (e: kotlinx.coroutines.channels.ClosedReceiveChannelException) {
+                BridgeLogger.d(TAG, "Send channels closed — send loop exiting cleanly")
+            } catch (e: CancellationException) {
+                throw e  // propagate coroutine cancellation normally
             }
         }
     }

@@ -604,3 +604,46 @@ bugs were already fixed in the committed codebase:
 - **Arrow hotspot at (0,0)**: This is the WindowManager overlay's top-left corner. Setting `params.x = cursorX.toInt()` (not `cursorX - viewPx/2`) places the tip exactly at the logical cursor position. The old centering offset was wrong for an arrow shape.
 - **Crash handler before Koin**: Registered in `Application.onCreate()` before `startKoin{}` so DI failures (common during development) are also captured.
 - **Consumer Control media keys excluded**: Usage Page 0x0C requires a separate HID report interface with a different report format. This is outside scope for the current USB keyboard capture layer.
+
+---
+
+## Session 019 — Hard-bug audit and pipeline hardening (BUG-064 to BUG-074)
+
+**Date**: 2026-07-25
+**Scope**: Full audit of every file modified or introduced since the project import; fix all open
+runtime-crash, data-loss, and diagnostic-corruption bugs before first hardware test.
+
+### What was fixed
+
+| Bug | Area | Fix summary |
+|-----|------|-------------|
+| BUG-064 | Service lifecycle | `CoroutineExceptionHandler` + `try/catch` + `handleRuntimeFailure()` in both `BridgeService` and `ReceiverService` |
+| BUG-065 | Boot receiver | `runCatching` around `startForegroundService()` in both `BootReceiver` classes |
+| BUG-066 | Activity lifecycle | `lifecycle.withStarted { requestNotificationPermission() }` instead of sync `onCreate()` call |
+| BUG-067 | Mouse sensitivity | Removed receiver-side sensitivity scaling; bridge is sole multiplier |
+| BUG-068 | Click ordering | Confirmed existing `@Volatile cursorX/Y` fast path is safe; added analysis comment |
+| BUG-069 | UDP send queue | Dual-priority channels (UNLIMITED critical + 64-slot input); DSCP + 256 KB socket buffers |
+| BUG-070 | Cursor bounds | Added `@Volatile` to `screenWidth`/`screenHeight` in `AccessibilityCommandBus` |
+| BUG-071 | Event drops | Logged and DiagnosticsManager-updated `commandFlow.tryEmit()` return value |
+| BUG-072 | Cursor init | Replaced `== 0f` guard with explicit `@Volatile cursorInitialized` flag |
+| BUG-073 | Sequence counter | Split `EventPacketFactory` into `inputSequenceCounter` + `controlSequenceCounter` |
+| BUG-074 | UDP send loop | Caught `ClosedReceiveChannelException` in send loop for clean disconnect |
+
+### Key decisions
+- Bridge owns the only sensitivity multiplier; receiver is pass-through.
+- Mouse-move fast path (IO thread, volatile fields) preserved; click ordering proven safe.
+- Dual send channels over single priority queue: simpler, no coalescing complexity.
+- Separate sequence counters do not change the wire format (sequenceNo field still Int).
+
+### Files modified
+`accessibility-receiver/.../AccessibilityCommandBus.kt`,
+`protocol/.../EventPacketFactory.kt`,
+`transport-wifi/.../UdpTransport.kt`,
+`app-bridge/.../BridgeService.kt`, `app-bridge/.../BootReceiver.kt`, `app-bridge/.../MainActivity.kt`,
+`app-receiver/.../ReceiverService.kt`, `app-receiver/.../BootReceiver.kt`, `app-receiver/.../MainActivity.kt`,
+`app-receiver/.../ReceiverPreferences.kt`, `app-receiver/.../ReceiverViewModel.kt`,
+`app-receiver/ui/screens/ReceiverSettingsScreen.kt`,
+`BUGS.md`, `SESSION_LOG.md`, `TASKS.md`, `PROJECT_STATE.md`
+
+### Status at session end
+All 11 bugs confirmed fixed. Hardware test (Task #2) remains pending.

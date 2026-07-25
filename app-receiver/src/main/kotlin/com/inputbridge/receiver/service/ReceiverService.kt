@@ -56,7 +56,14 @@ private const val BRIDGE_SILENCE_TIMEOUT_MS = 15_000L // silence > this → noti
  */
 class ReceiverService : Service() {
 
-    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val serviceExceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        if (throwable !is CancellationException) {
+            handleRuntimeFailure("receiver background task", throwable)
+        }
+    }
+    private val serviceScope = CoroutineScope(
+        Dispatchers.IO + SupervisorJob() + serviceExceptionHandler
+    )
     private var wakeLock: PowerManager.WakeLock? = null
 
     private lateinit var prefs: ReceiverPreferences
@@ -159,8 +166,29 @@ class ReceiverService : Service() {
             BridgeLogger.d(TAG, "onStartCommand: listener already starting/running — ignoring")
             return START_STICKY
         }
-        serviceScope.launch { startListening() }
+        serviceScope.launch {
+            try {
+                startListening()
+            } catch (t: Throwable) {
+                if (t !is CancellationException) handleRuntimeFailure("receiver startup", t)
+            }
+        }
         return START_STICKY
+    }
+
+    private fun handleRuntimeFailure(stage: String, throwable: Throwable) {
+        BridgeLogger.e(TAG, "$stage failed — stopping service", throwable)
+        val detail = "${throwable.javaClass.simpleName}: " +
+            (throwable.message?.take(180) ?: "no message")
+        DiagnosticsManager.update {
+            copy(
+                receiverServiceRunning = false,
+                transportConnected = false,
+                lastError = "$stage: $detail",
+            )
+        }
+        runCatching { updateNotification("Service error — open Diagnostics") }
+        runCatching { stopSelf() }
     }
 
     override fun onDestroy() {
@@ -198,11 +226,6 @@ class ReceiverService : Service() {
     // ── Receive pipeline ──────────────────────────────────────────────────────
 
     private suspend fun startListening() {
-        // Apply persisted sensitivity before receiving any events.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            AccessibilityCommandBus.setSensitivity(prefs.mouseSensitivity)
-        }
-
         // Ensure a session PIN exists; generate one if this is first run.
         if (prefs.sessionPin.isEmpty()) {
             prefs.generateNewPin()

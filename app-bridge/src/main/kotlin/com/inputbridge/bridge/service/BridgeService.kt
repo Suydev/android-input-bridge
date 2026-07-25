@@ -54,7 +54,14 @@ private const val PAIR_TIMEOUT_MS = 10_000L    // wait this long for PAIR_RESPON
  */
 class BridgeService : Service() {
 
-    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val serviceExceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        if (throwable !is CancellationException) {
+            handleRuntimeFailure("bridge background task", throwable)
+        }
+    }
+    private val serviceScope = CoroutineScope(
+        Dispatchers.IO + SupervisorJob() + serviceExceptionHandler
+    )
     private var wakeLock: PowerManager.WakeLock? = null
 
     private lateinit var usbManager: UsbManager
@@ -169,8 +176,30 @@ class BridgeService : Service() {
             BridgeLogger.d(TAG, "onStartCommand: pipeline already starting/running — ignoring")
             return START_STICKY
         }
-        serviceScope.launch { startPipeline() }
+        serviceScope.launch {
+            try {
+                startPipeline()
+            } catch (t: Throwable) {
+                if (t !is CancellationException) handleRuntimeFailure("bridge startup", t)
+            }
+        }
         return START_STICKY
+    }
+
+    private fun handleRuntimeFailure(stage: String, throwable: Throwable) {
+        BridgeLogger.e(TAG, "$stage failed — stopping service", throwable)
+        val detail = "${throwable.javaClass.simpleName}: " +
+            (throwable.message?.take(180) ?: "no message")
+        DiagnosticsManager.update {
+            copy(
+                bridgeServiceRunning = false,
+                transportConnected = false,
+                inputCaptureActive = false,
+                lastError = "$stage: $detail",
+            )
+        }
+        runCatching { updateNotification("Service error — open Diagnostics") }
+        runCatching { stopSelf() }
     }
 
     override fun onDestroy() {

@@ -109,7 +109,9 @@ class ReceiverViewModel(
     private val _config = MutableStateFlow(
         AppConfig(
             transport = TransportConfig(port = prefs.port),
-            mouse     = MouseConfig(sensitivity = prefs.mouseSensitivity),
+            // Mouse scaling is owned by the bridge capture side. Keeping the
+            // receiver transparent avoids compounding the multiplier.
+            mouse     = MouseConfig(),
             display   = DisplayConfig(
                 showCursorOverlay = prefs.showCursorOverlay,
                 autoStartOnBoot   = prefs.autoStartOnBoot,
@@ -123,21 +125,6 @@ class ReceiverViewModel(
     fun setListenPort(port: Int) {
         _config.update { it.copy(transport = it.transport.copy(port = port)) }
         prefs.port = port
-    }
-
-    // ── Mouse settings ────────────────────────────────────────────────────────
-
-    /**
-     * Update the mouse sensitivity multiplier.
-     * Range 0.1–5.0. Persisted and applied immediately if service is running.
-     */
-    fun setMouseSensitivity(sensitivity: Float) {
-        val clamped = sensitivity.coerceIn(0.1f, 5.0f)
-        _config.update { it.copy(mouse = it.mouse.copy(sensitivity = clamped)) }
-        prefs.mouseSensitivity = clamped
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
-            com.inputbridge.accessibility.AccessibilityCommandBus.setSensitivity(clamped)
-        }
     }
 
     // ── Display / system settings ─────────────────────────────────────────────

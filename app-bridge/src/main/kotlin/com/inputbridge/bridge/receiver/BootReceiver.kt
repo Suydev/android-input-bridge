@@ -29,6 +29,14 @@ class BootReceiver : BroadcastReceiver() {
         }
 
         BridgeLogger.i("BridgeBootReceiver", "Boot completed — starting bridge service")
-        context.startForegroundService(Intent(context, BridgeService::class.java))
+        runCatching {
+            context.startForegroundService(Intent(context, BridgeService::class.java))
+        }.onFailure {
+            BridgeLogger.e(
+                "BridgeBootReceiver",
+                "Auto-start rejected by the system; open the app to start manually",
+                it,
+            )
+        }
     }
 }

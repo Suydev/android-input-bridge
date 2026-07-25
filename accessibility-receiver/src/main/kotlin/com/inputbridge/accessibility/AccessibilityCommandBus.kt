@@ -26,7 +26,8 @@ private const val TAG = "AccessibilityCommandBus"
  *
  * Mouse cursor simulation:
  * - Tracks a virtual cursor position in screen coordinates.
- * - Mouse moves update this virtual position (scaled by [mouseSensitivity]).
+ * - Mouse moves update this virtual position. Scaling is owned by the bridge
+ *   capture side so UDP, hotspot, and Bluetooth HID paths use one multiplier.
  * - Left click dispatches a tap gesture at the current virtual position.
  * - Right click dispatches a long-press.
  * - The position starts at the screen centre; clamped to screen bounds.
@@ -38,7 +39,6 @@ private const val TAG = "AccessibilityCommandBus"
  * - TextInput events are forwarded to [InputBridgeAccessibilityService.injectText].
  *
  * Call [setService] / [clearService] from the AccessibilityService lifecycle.
- * Call [setSensitivity] from the ReceiverService to apply persisted settings.
  */
 @RequiresApi(Build.VERSION_CODES.N)
 object AccessibilityCommandBus {
@@ -61,8 +61,30 @@ object AccessibilityCommandBus {
 
     @Volatile private var cursorX = 0f
     @Volatile private var cursorY = 0f
-    private var screenWidth  = 1080f
-    private var screenHeight = 2400f
+
+    /**
+     * BUG-070 FIX — @Volatile on screen dimensions.
+     *
+     * screenWidth/screenHeight are written from the accessibility-service thread
+     * (effectively Main) via [setScreenSize], and read from Dispatchers.IO in
+     * [post] for bounds clamping. Without @Volatile the JVM can cache the default
+     * values (1080×2400) in a CPU register, so the IO thread never sees the real
+     * screen dimensions after a rotation or first-connect.
+     *
+     * Symptom: cursor clamps to the wrong edge of the screen (default 1080px wide
+     * on a 1600px tablet, or vice-versa) until the next JVM memory barrier.
+     */
+    @Volatile private var screenWidth  = 1080f
+    @Volatile private var screenHeight = 2400f
+
+    /**
+     * BUG-072 FIX — explicit initialization flag.
+     *
+     * The previous guard `cursorX == 0f && cursorY == 0f` incorrectly re-centred
+     * the cursor when the user had legitimately moved it to the top-left corner.
+     * Use a dedicated flag so the center-on-first-connect logic is robust.
+     */
+    @Volatile private var cursorInitialized = false
 
     /**
      * Current virtual cursor position in screen pixels.
@@ -80,19 +102,6 @@ object AccessibilityCommandBus {
 
     // ── Configuration ─────────────────────────────────────────────────────────
 
-    /**
-     * Mouse pointer sensitivity multiplier. Applied to every dx/dy before
-     * updating the virtual cursor position. Set from [ReceiverService] at startup.
-     */
-    @Volatile var mouseSensitivity: Float = 1.0f
-        private set
-
-    /** Update the pointer sensitivity multiplier (0.1–10). */
-    fun setSensitivity(s: Float) {
-        mouseSensitivity = s.coerceIn(0.1f, 10f)
-        BridgeLogger.d(TAG, "Sensitivity set to $mouseSensitivity")
-    }
-
     // ── Service attachment ────────────────────────────────────────────────────
 
     fun setService(svc: InputBridgeAccessibilityService) {
@@ -108,11 +117,19 @@ object AccessibilityCommandBus {
     fun setScreenSize(width: Int, height: Int) {
         screenWidth  = width.toFloat()
         screenHeight = height.toFloat()
-        // Re-centre the virtual cursor when screen size is (re-)established.
-        cursorX = screenWidth / 2f
-        cursorY = screenHeight / 2f
+        // First connect: centre the cursor so it starts visible mid-screen.
+        // Subsequent calls (accessibility reconnect, rotation): clamp to new bounds
+        // but preserve position so the cursor doesn't jump to centre unexpectedly.
+        if (!cursorInitialized) {
+            cursorInitialized = true
+            cursorX = screenWidth / 2f
+            cursorY = screenHeight / 2f
+        } else {
+            cursorX = cursorX.coerceIn(0f, screenWidth - 1f)
+            cursorY = cursorY.coerceIn(0f, screenHeight - 1f)
+        }
         _cursorPosition.value = Pair(cursorX, cursorY)
-        BridgeLogger.i(TAG, "Screen size updated: ${width}×${height}, cursor centred")
+        BridgeLogger.i(TAG, "Screen size updated: ${width}×${height}, cursor preserved")
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -133,11 +150,21 @@ object AccessibilityCommandBus {
      */
     fun post(event: InputEvent) {
         if (event is InputEvent.MouseMove) {
-            cursorX = (cursorX + event.dx * mouseSensitivity).coerceIn(0f, screenWidth - 1f)
-            cursorY = (cursorY + event.dy * mouseSensitivity).coerceIn(0f, screenHeight - 1f)
+            cursorX = (cursorX + event.dx).coerceIn(0f, screenWidth - 1f)
+            cursorY = (cursorY + event.dy).coerceIn(0f, screenHeight - 1f)
             _cursorPosition.value = Pair(cursorX, cursorY)
         } else {
-            commandFlow.tryEmit(event)
+            // BUG-071 FIX: check the return value.
+            // tryEmit() returns false when the 256-slot buffer is full — e.g. the
+            // accessibility service is blocked on a long gesture and events pile up.
+            // Without this check, keyboard/click events are silently discarded with
+            // no trace in logs or diagnostics, making them impossible to debug.
+            if (!commandFlow.tryEmit(event)) {
+                BridgeLogger.w(TAG, "CommandFlow full — dropped ${event::class.simpleName}")
+                DiagnosticsManager.update {
+                    copy(lastInjectionError = "Event buffer full — dropped ${event::class.simpleName}")
+                }
+            }
         }
     }
 
@@ -182,8 +209,8 @@ object AccessibilityCommandBus {
 
             // ── Scroll ────────────────────────────────────────────────────────
             is InputEvent.Scroll -> {
-                val scrollDx = event.dx * SCROLL_PIXEL_MULTIPLIER * mouseSensitivity
-                val scrollDy = event.dy * SCROLL_PIXEL_MULTIPLIER * mouseSensitivity
+                val scrollDx = event.dx * SCROLL_PIXEL_MULTIPLIER
+                val scrollDy = event.dy * SCROLL_PIXEL_MULTIPLIER
                 svc.swipe(
                     x1 = cursorX,
                     y1 = cursorY,
