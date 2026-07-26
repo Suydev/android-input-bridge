@@ -1542,3 +1542,97 @@ disconnect.
 **Status**: ✅ FIXED
 **Fix**: Wrapped the `while (isConnected) { ... }` block in `try { } catch (e: ClosedReceiveChannelException) { }`.
 `CancellationException` is re-thrown so normal coroutine cancellation propagates correctly.
+
+---
+
+## BUG-075 — Services bypass Koin DI singleton for BridgePreferences / ReceiverPreferences
+
+**Description**: `BridgeService.onCreate()` instantiates `BridgePreferences(this)` directly with the
+Service context, and `ReceiverService.onCreate()` does the same for `ReceiverPreferences(this)`.
+Both create a second in-memory object that is not the Koin `single{}` singleton. The ViewModel
+holds the Koin singleton; the service holds a separate instance. Although SharedPreferences is
+process-scoped so both instances read/write the same file, the pattern violates §5.5 of
+`AI_CONTEXT.md`: "Never create BridgePreferences(activityContext) — always inject via Koin."
+**Steps to reproduce**: Inspect `BridgeService.onCreate()` line 148 and `ReceiverService.onCreate()` line 112.
+**Expected behavior**: Services obtain `BridgePreferences` / `ReceiverPreferences` from the Koin
+singleton via `by inject()`.
+**Actual behavior**: Services create a fresh instance with the Service context, bypassing Koin.
+**Suspected cause**: Oversight; the BUG-057 fix only corrected MainActivity and did not audit
+service classes.
+**Files involved**: `app-bridge/.../BridgeService.kt:148`, `app-receiver/.../ReceiverService.kt:112`.
+**Priority**: Medium
+**Status**: 🔴 OPEN
+
+---
+
+## BUG-076 — Deprecated system drawable used as notification small icon
+
+**Description**: Both `BridgeService.buildNotification()` and `ReceiverService.buildNotification()`
+set the notification small icon to `android.R.drawable.ic_menu_send`. This is a deprecated
+internal Android system drawable that is not guaranteed to exist on all OEM builds. MIUI and
+OxygenOS have been documented to remove or alter internal `android.R.drawable.*` resources.
+If absent, the notification may display a blank/broken icon in the status bar; on some devices
+the notification manager silently skips displaying the notification entirely, which is the only
+user-visible signal that the foreground service is active.
+**Steps to reproduce**: Install on MIUI device; start the bridge service; observe the status bar icon.
+**Expected behavior**: A properly-drawn notification icon appears in the status bar.
+**Actual behavior**: Icon may be broken or absent on OEM ROMs.
+**Suspected cause**: Using an internal Android drawable rather than an app-owned drawable resource.
+**Files involved**: `app-bridge/.../BridgeService.kt:766`, `app-receiver/.../ReceiverService.kt:449`.
+**Priority**: Low
+**Status**: 🔴 OPEN
+
+---
+
+## BUG-077 — Service runtime failures are not surfaced in the app UI
+
+**Description**: When `handleRuntimeFailure()` is called in either service, it writes the error
+message to `DiagnosticsManager.lastError` and updates the foreground-service notification text to
+"Service error — open Diagnostics". However, the app's main screens (WelcomeScreen for both apps)
+never read or display `lastError`. A user whose foreground notification is suppressed by MIUI (no
+POST_NOTIFICATIONS permission, or MIUI notification blocking) will see the service stop with
+absolutely no visual explanation. They must proactively navigate to the Diagnostics screen, which
+is not obvious on first use.
+**Steps to reproduce**: Start the bridge service with no target IP configured; service stops; no
+error banner appears on the WelcomeScreen.
+**Expected behavior**: An inline error banner appears on WelcomeScreen whenever `lastError` is
+non-null, telling the user what went wrong.
+**Actual behavior**: No banner; user sees "Bridge stopped" state with no explanation.
+**Suspected cause**: Missing UI layer for `DiagnosticsData.lastError` on the primary screens.
+**Files involved**: `app-bridge/.../WelcomeScreen.kt`, `app-receiver/.../WelcomeScreen.kt`.
+**Priority**: High
+**Status**: 🔴 OPEN
+
+---
+
+## BUG-078 — AccessibilityCommandBus.scope missing CoroutineExceptionHandler — silent crash on Main thread
+
+**Description**: `AccessibilityCommandBus` declares its coroutine scope as
+`CoroutineScope(Dispatchers.Main + SupervisorJob())` with **no `CoroutineExceptionHandler`**.
+The `init {}` block immediately launches a `commandFlow.collect { handleEvent(it) }` coroutine
+on this scope. If `handleEvent()` (or any accessibility API it calls, such as
+`performGlobalAction`, `dispatchGesture`, or `findFocus`) throws any uncaught exception, the
+exception propagates out of the `collect {}` lambda and out of the `scope.launch {}` child
+coroutine. With `SupervisorJob` and no `CoroutineExceptionHandler`, the Kotlin coroutines runtime
+delivers the uncaught exception to the current thread's `Thread.uncaughtExceptionHandler` — on
+`Dispatchers.Main` this is the Main thread. Our custom crash handler in `ReceiverApplication`
+catches it, logs it, and calls `previousCrashHandler.uncaughtException()`. On MIUI and OxygenOS,
+the OEM's default crash handler terminates the process **silently**, with no system "App has
+stopped" dialog. The user sees the app disappear with no message — exactly the reported symptom.
+**Steps to reproduce**:
+1. Install receiver APK on OnePlus Pad Go (OxygenOS) or any MIUI device.
+2. Enable the accessibility service.
+3. Start the receiver and trigger any input event that causes an accessibility API to throw
+   (e.g., stale AccessibilityNodeInfo reference, null window, etc.).
+4. App disappears with no dialog.
+**Expected behavior**: Exceptions inside `handleEvent()` are caught by the scope's
+`CoroutineExceptionHandler`, logged to `BridgeLogger` and `DiagnosticsManager`, and do not
+propagate to the thread's uncaught exception handler.
+**Actual behavior**: Exception reaches Main thread's uncaught exception handler → MIUI/OxygenOS
+kills the process silently.
+**Suspected cause**: `CoroutineExceptionHandler` was not added to `AccessibilityCommandBus.scope`
+when the scope was introduced. Both services have handlers; this singleton object does not.
+**Files involved**: `accessibility-receiver/.../AccessibilityCommandBus.kt` (scope declaration
+and `init {}` block).
+**Priority**: Critical
+**Status**: 🔴 OPEN

@@ -5,6 +5,8 @@ import androidx.annotation.RequiresApi
 import com.inputbridge.core.logging.BridgeLogger
 import com.inputbridge.core.model.*
 import com.inputbridge.diagnostics.DiagnosticsManager
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -43,7 +45,19 @@ private const val TAG = "AccessibilityCommandBus"
 @RequiresApi(Build.VERSION_CODES.N)
 object AccessibilityCommandBus {
 
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    // BUG-078 FIX: a bare scope with SupervisorJob but no CoroutineExceptionHandler lets uncaught
+    // exceptions from handleEvent() reach the Main thread's UncaughtExceptionHandler, which kills
+    // the process silently on MIUI/OxygenOS — exactly the reported "silent crash" symptom.
+    private val scope = CoroutineScope(
+        Dispatchers.Main + SupervisorJob() + CoroutineExceptionHandler { _, throwable ->
+            if (throwable !is CancellationException) {
+                BridgeLogger.e(TAG, "Uncaught exception in accessibility command handler", throwable)
+                DiagnosticsManager.update {
+                    copy(lastInjectionError = "Accessibility handler crash: ${throwable.javaClass.simpleName}")
+                }
+            }
+        }
+    )
     private val commandFlow = MutableSharedFlow<InputEvent>(extraBufferCapacity = 256)
 
     @Volatile private var service: InputBridgeAccessibilityService? = null
@@ -174,7 +188,18 @@ object AccessibilityCommandBus {
         scope.launch {
             commandFlow.collect { event ->
                 val t0 = System.nanoTime()
-                handleEvent(event)
+                // BUG-078 FIX: defense-in-depth — catch any exception thrown by handleEvent so it
+                // cannot propagate out of the collect lambda even if the scope handler is bypassed.
+                try {
+                    handleEvent(event)
+                } catch (t: Throwable) {
+                    if (t !is CancellationException) {
+                        BridgeLogger.e(TAG, "handleEvent threw for ${event::class.simpleName}", t)
+                        DiagnosticsManager.update {
+                            copy(lastInjectionError = "handleEvent crash (${event::class.simpleName}): ${t.javaClass.simpleName}")
+                        }
+                    }
+                }
                 lastInjectUs.set((System.nanoTime() - t0) / 1_000L)
             }
         }

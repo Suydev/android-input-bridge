@@ -13,10 +13,12 @@ import com.inputbridge.protocol.EventPacketFactory
 import com.inputbridge.protocol.PacketSerializer
 import com.inputbridge.protocol.PacketToEventConverter
 import com.inputbridge.protocol.PacketType
+import com.inputbridge.receiver.R
 import com.inputbridge.receiver.prefs.ReceiverPreferences
 import com.inputbridge.receiver.ui.MainActivity
 import com.inputbridge.transport.wifi.UdpTransport
 import kotlinx.coroutines.*
+import org.koin.android.ext.android.inject
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -66,7 +68,8 @@ class ReceiverService : Service() {
     )
     private var wakeLock: PowerManager.WakeLock? = null
 
-    private lateinit var prefs: ReceiverPreferences
+    // BUG-075 FIX: use Koin singleton instead of creating a fresh instance with the Service context.
+    private val prefs: ReceiverPreferences by inject()
     private var udpTransport: UdpTransport? = null
     private var receiveJob: Job? = null
     private var counterFlushJob: Job? = null
@@ -109,7 +112,6 @@ class ReceiverService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        prefs = ReceiverPreferences(this)
         createNotificationChannel()
         // BUG-063 FIX: Android 14 (API 34) throws MissingForegroundServiceTypeException when
         // the manifest declares android:foregroundServiceType but startForeground() omits the
@@ -446,7 +448,8 @@ class ReceiverService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("InputBridge Receiver")
             .setContentText(status)
-            .setSmallIcon(android.R.drawable.ic_menu_send)
+            // BUG-076 FIX: system drawables may be absent on OEM ROMs; use app-owned resource.
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pi)
             .setOngoing(true)
             .setSilent(true)

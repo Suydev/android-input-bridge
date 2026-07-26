@@ -1,0 +1,15 @@
+<!--
+  Notification small icon for InputBridge (receiver app).
+  Single-color vector — Android applies its own tinting in the status bar.
+  BUG-076 FIX: replaces the deprecated android.R.drawable.ic_menu_send.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Send / forward arrow shape (material "send" icon path) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M2.01,21L23,12 2.01,3 2,10l15,2 -15,2z" />
+</vector>

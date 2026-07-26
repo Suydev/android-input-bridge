@@ -6,6 +6,7 @@ import android.content.pm.ServiceInfo
 import android.hardware.usb.*
 import android.os.*
 import androidx.core.app.NotificationCompat
+import com.inputbridge.bridge.R
 import com.inputbridge.bridge.prefs.BridgePreferences
 import com.inputbridge.bridge.ui.MainActivity
 import com.inputbridge.core.config.TransportConfig
@@ -19,6 +20,7 @@ import com.inputbridge.protocol.PacketType
 import com.inputbridge.transport.bt.BluetoothHidTransport
 import com.inputbridge.transport.wifi.UdpTransport
 import kotlinx.coroutines.*
+import org.koin.android.ext.android.inject
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -65,7 +67,8 @@ class BridgeService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
 
     private lateinit var usbManager: UsbManager
-    private lateinit var prefs: BridgePreferences
+    // BUG-075 FIX: use Koin singleton instead of creating a fresh instance with the Service context.
+    private val prefs: BridgePreferences by inject()
 
     private val packetFactory = EventPacketFactory()
 
@@ -145,7 +148,6 @@ class BridgeService : Service() {
     override fun onCreate() {
         super.onCreate()
         usbManager = getSystemService(USB_SERVICE) as UsbManager
-        prefs = BridgePreferences(this)
         createNotificationChannel()
         // BUG-063 FIX: Android 14 (API 34) throws MissingForegroundServiceTypeException when
         // the manifest declares android:foregroundServiceType but startForeground() omits the
@@ -763,7 +765,8 @@ class BridgeService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("InputBridge Active")
             .setContentText(status)
-            .setSmallIcon(android.R.drawable.ic_menu_send)
+            // BUG-076 FIX: system drawables may be absent on OEM ROMs; use app-owned resource.
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pi)
             .setOngoing(true)
             .setSilent(true)

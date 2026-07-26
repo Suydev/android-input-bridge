@@ -89,6 +89,30 @@ fun WelcomeScreen(
 
         // ── Action buttons ────────────────────────────────────────────────────
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // BUG-077 FIX: surface any service failure directly on the welcome screen so the user
+            // does not need to open Diagnostics to learn why the service stopped.
+            diagnostics.lastError?.let { error ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors   = CardDefaults.cardColors(
+                        containerColor = ReceiverError.copy(alpha = 0.12f),
+                    ),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("✗", color = ReceiverError, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
+                        Text(
+                            text       = error,
+                            color      = ReceiverError,
+                            fontSize   = 12.sp,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                }
+            }
             if (!isAccessibilityEnabled) {
                 OutlinedButton(
                     onClick = onAccessibility,
