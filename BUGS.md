@@ -1740,3 +1740,75 @@ and `init {}` block).
 **Priority**: High
 **Status**: ✅ FIXED (Session 021)
 **Fix**: `BridgeService` starts its event collector before invoking `UsbInputCapture.start()` and cancels it if startup fails.
+
+## BUG-087 — Reopen UDP send queues when a transport reconnects
+
+**Description**: `UdpTransport.disconnect()` closes both send channels, but `connect()` reuses those same closed channel instances. Any later `send()` returns false even after a successful reconnect.
+**Steps to reproduce**: Create one `UdpTransport`, call `connect()`, `disconnect()`, then `connect()` and send a packet.
+**Expected behavior**: A reconnect restores normal packet sending.
+**Actual behavior**: All outgoing packets are rejected because both channels remain closed.
+**Suspected cause**: Queue lifecycle is coupled to disconnect but the queue objects are immutable and never recreated.
+**Files involved**: `transport-wifi/src/main/kotlin/com/inputbridge/transport/wifi/UdpTransport.kt`.
+**Priority**: High
+**Status**: ✅ FIXED (Session 022)
+**Fix**: Recreate both queues for each new connection and pass their session-local instances to the sender loop.
+
+## BUG-088 — Publish UDP connection state safely across reader and writer threads
+
+**Description**: `UdpTransport.isConnected` is read by separate IO coroutines and written by service callers without `@Volatile` or synchronization. A reader/writer can cache a stale value and continue after disconnect or exit despite a successful connect.
+**Steps to reproduce**: Repeatedly start/stop UDP transport while traffic is active on a multi-core device.
+**Expected behavior**: Every transport coroutine promptly observes connection and disconnection transitions.
+**Actual behavior**: Loop lifetime is dependent on unsynchronised memory visibility.
+**Suspected cause**: Plain mutable Boolean used as a cross-thread lifecycle guard.
+**Files involved**: `transport-wifi/src/main/kotlin/com/inputbridge/transport/wifi/UdpTransport.kt`.
+**Priority**: High
+**Status**: ✅ FIXED (Session 022)
+**Fix**: Mark `isConnected` as `@Volatile` so I/O loops reliably observe lifecycle transitions.
+
+## BUG-089 — Reject invalid bridge target before reporting UDP connected
+
+**Description**: Sender-mode DNS/IP resolution occurs inside the asynchronous send coroutine. A malformed target causes that coroutine to fail after `connect()` has returned true and the UI has announced a working UDP connection.
+**Steps to reproduce**: Enter an invalid receiver address in bridge settings, then start the bridge.
+**Expected behavior**: Startup fails visibly and no connected state is reported.
+**Actual behavior**: The transport is shown as connected but no pairing, PING, keyboard, or mouse packet can ever leave the bridge.
+**Suspected cause**: Target validation is deferred past the connection result boundary and no coroutine exception path updates diagnostics.
+**Files involved**: `transport-wifi/src/main/kotlin/com/inputbridge/transport/wifi/UdpTransport.kt`.
+**Priority**: High
+**Status**: ✅ FIXED (Session 022)
+**Fix**: Resolve the configured sender target synchronously in `connect()` and report an error before starting I/O when resolution fails.
+
+## BUG-090 — Do not label a listening UDP socket as a connected bridge
+
+**Description**: Both services set `DiagnosticsData.transportConnected = true` immediately after a UDP socket opens/binds. The receiver UI then says “Bridge connected” before any PING or accepted pairing request has arrived; the bridge UI says “Connected to” a target before receiving a PONG.
+**Steps to reproduce**: Start either app with the peer app off or unreachable.
+**Expected behavior**: The UI shows listening/connecting until a valid peer response proves the pipeline is live.
+**Actual behavior**: Both apps show a false connected state, obscuring failed pairing and dead input paths.
+**Suspected cause**: Socket availability and peer reachability share one diagnostics field.
+**Files involved**: `app-bridge/src/main/kotlin/com/inputbridge/bridge/service/BridgeService.kt`, `app-receiver/src/main/kotlin/com/inputbridge/receiver/service/ReceiverService.kt`.
+**Priority**: High
+**Status**: ✅ FIXED (Session 022)
+**Fix**: Keep transport state disconnected until the bridge receives a PONG or accepted pairing, or the receiver receives a PING or accepted pairing request.
+
+## BUG-091 — Stop old UDP receive loops before reconnecting
+
+**Description**: `UdpTransport.disconnect()` cancels its receive job and closes its socket, but does not wait for the job to finish. A new `connect()` can set the shared `isConnected` flag back to `true` before the old receive coroutine handles the closed-socket exception. The old coroutine then sees a connected transport, catches `SocketException`, and immediately retries `receive()` on its permanently closed socket in a tight loop.
+**Steps to reproduce**: Connect a `UdpTransport`, disconnect it, then reconnect the same instance immediately while traffic is active.
+**Expected behavior**: The old reader exits before a new connection becomes active; only the new socket has a receive loop.
+**Actual behavior**: The cancelled reader can log repeated receive errors and consume CPU while the new connection is active.
+**Suspected cause**: Reader-loop lifetime is guarded only by the mutable transport-wide `isConnected` flag, which is reused for the next connection.
+**Files involved**: `transport-wifi/src/main/kotlin/com/inputbridge/transport/wifi/UdpTransport.kt`.
+**Priority**: High
+**Status**: ✅ FIXED (Session 022)
+**Fix**: Guard the receive loop with both the transport state and its own coroutine cancellation state.
+
+## BUG-092 — Clear receiver peer endpoint between UDP sessions
+
+**Description**: Receiver-mode `UdpTransport` retains `lastSenderAddress` across `disconnect()` and a later `connect()`. Before the next bridge sends its first datagram, a queued control packet can be sent to the previous bridge endpoint.
+**Steps to reproduce**: Pair a receiver with bridge A, disconnect, reconnect the same transport instance, then enqueue a receiver control packet before bridge B sends a packet.
+**Expected behavior**: A newly connected receiver has no reply destination until it observes a datagram in the new session.
+**Actual behavior**: The control packet can be sent to bridge A's stale IP and ephemeral port.
+**Suspected cause**: `lastSenderAddress` is session state but is not cleared at either connection boundary.
+**Files involved**: `transport-wifi/src/main/kotlin/com/inputbridge/transport/wifi/UdpTransport.kt`.
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 022)
+**Fix**: Clear `lastSenderAddress` when opening and closing a UDP session.

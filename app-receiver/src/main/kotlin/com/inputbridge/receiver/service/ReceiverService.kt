@@ -259,7 +259,9 @@ class ReceiverService : Service() {
 
         BridgeLogger.i(TAG, "Listening for packets on UDP port $port (PIN=$sessionPin)")
         updateNotification("Listening on UDP :$port — PIN: $sessionPin")
-        DiagnosticsManager.update { copy(transportConnected = true) }
+        // BUG-090 FIX: binding a local port is not evidence that a bridge is connected.
+        // PING or an accepted PAIR_REQUEST flips this to true once a live peer is observed.
+        DiagnosticsManager.update { copy(transportConnected = false) }
 
         // Phase 7: start cursor overlay now that the transport is live
         startCursorOverlayIfNeeded()
@@ -342,7 +344,7 @@ class ReceiverService : Service() {
                             prefs.pairedBridgeIp = senderIp
                             prefs.isPaired = true
                             DiagnosticsManager.update {
-                                copy(isPaired = true, pairedPeerIp = senderIp)
+                                copy(isPaired = true, pairedPeerIp = senderIp, transportConnected = true)
                             }
                             updateNotification("Paired with bridge ($senderIp)")
                         } else {
@@ -362,6 +364,7 @@ class ReceiverService : Service() {
                         // knows the bridge is alive. Also clear any previously-shown
                         // silence notification so it re-fires if the bridge goes silent again.
                         lastPingReceivedMs = System.currentTimeMillis()
+                        DiagnosticsManager.update { copy(transportConnected = true) }
                         if (bridgeSilenceNotified) {
                             bridgeSilenceNotified = false
                             // BUG-047 fix: pairedBridgeIp can be empty in open-mode sessions

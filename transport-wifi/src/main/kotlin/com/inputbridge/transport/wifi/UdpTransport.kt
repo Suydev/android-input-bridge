@@ -77,11 +77,12 @@ class UdpTransport(
      * The send loop always drains [criticalChannel] before processing [inputChannel],
      * ensuring control packets are sent immediately even under burst mouse traffic.
      */
-    private val criticalChannel = Channel<ByteArray>(CRITICAL_QUEUE_CAPACITY)
-    private val inputChannel    = Channel<ByteArray>(INPUT_QUEUE_CAPACITY)
+    private var criticalChannel = Channel<ByteArray>(CRITICAL_QUEUE_CAPACITY)
+    private var inputChannel    = Channel<ByteArray>(INPUT_QUEUE_CAPACITY)
 
     override val connectionState: Flow<ConnectionState> = _connectionState.asStateFlow()
     override val incomingPackets: Flow<Packet> = _incomingPackets.asSharedFlow()
+    @Volatile
     override var isConnected: Boolean = false
         private set
 
@@ -107,6 +108,9 @@ class UdpTransport(
         if (isConnected) return true
         _connectionState.value = ConnectionState.Connecting
         return try {
+            // BUG-089 FIX: resolve before announcing success. A malformed address must
+            // fail connect(), not kill the asynchronous send coroutine after the UI is live.
+            val fixedTarget = if (isSender) InetAddress.getByName(config.targetIp) else null
             val sock = if (isSender) {
                 DatagramSocket().also { it.soTimeout = 0 }
             } else {
@@ -121,11 +125,21 @@ class UdpTransport(
             runCatching { sock.receiveBufferSize = SOCKET_BUFFER_BYTES }
             runCatching { sock.trafficClass      = TRAFFIC_CLASS_LOWDELAY }
             socket = sock
+            // BUG-087 FIX: disconnect closes its queues. Every new connection gets
+            // fresh queues, and the old send loop retains its own references while it
+            // is being cancelled so it cannot consume packets from the new session.
+            val newCriticalChannel = Channel<ByteArray>(CRITICAL_QUEUE_CAPACITY)
+            val newInputChannel = Channel<ByteArray>(INPUT_QUEUE_CAPACITY)
+            criticalChannel = newCriticalChannel
+            inputChannel = newInputChannel
+            // BUG-092 FIX: the reply endpoint belongs to one receiver-mode session.
+            // Never send a new session's control traffic to a previous bridge.
+            lastSenderAddress = null
             // BUG-082 FIX: both loops use isConnected as their first condition.
             // Publish the live state before launching them so an immediately scheduled
             // coroutine cannot exit permanently before its first receive/send.
             isConnected = true
-            startSendLoop(sock)
+            startSendLoop(sock, fixedTarget, newCriticalChannel, newInputChannel)
             startReceiveLoop(sock)
             _connectionState.value = ConnectionState.Connected
             BridgeLogger.i(TAG, "UDP transport connected (sender=$isSender port=${config.port})")
@@ -140,6 +154,8 @@ class UdpTransport(
     override suspend fun disconnect() {
         if (!isConnected) return
         isConnected = false
+        // BUG-092 FIX: no peer endpoint is valid after this socket closes.
+        lastSenderAddress = null
         // Close both send queues before cancelling the send job so their coroutine
         // terminates cleanly without a channel leak (BUG-045 principle extended to
         // the new dual-channel layout).
@@ -177,12 +193,13 @@ class UdpTransport(
         else -> false
     }
 
-    private fun startSendLoop(sock: DatagramSocket) {
+    private fun startSendLoop(
+        sock: DatagramSocket,
+        fixedTarget: InetAddress?,
+        criticalQueue: Channel<ByteArray>,
+        inputQueue: Channel<ByteArray>,
+    ) {
         sendJob = scope.launch {
-            // Resolve send target once per connection.
-            val fixedTarget: InetAddress? = if (isSender)
-                InetAddress.getByName(config.targetIp) else null
-
             /**
              * Priority send: drain criticalChannel first (non-blocking try), then fall
              * back to a coroutine select on both channels. This ensures PING/PONG/PAIR/
@@ -199,10 +216,10 @@ class UdpTransport(
              */
             try {
                 while (isConnected) {
-                    val bytes = criticalChannel.tryReceive().getOrNull()
+                    val bytes = criticalQueue.tryReceive().getOrNull()
                         ?: select {
-                            criticalChannel.onReceive { it }
-                            inputChannel.onReceive { it }
+                            criticalQueue.onReceive { it }
+                            inputQueue.onReceive { it }
                         }
 
                     // Resolve the destination address — either the fixed bridge target
@@ -241,7 +258,10 @@ class UdpTransport(
         receiveJob = scope.launch {
             val buf = ByteArray(MAX_PACKET_SIZE)
             val dp = DatagramPacket(buf, buf.size)
-            while (isConnected) {
+            // BUG-091 FIX: isConnected is reused for the next session. Also honour this
+            // job's cancellation so an old reader cannot spin on its closed socket after
+            // an immediate reconnect publishes isConnected = true again.
+            while (isConnected && coroutineContext.isActive) {
                 try {
                     sock.receive(dp)
                     // Track the sender address for receiver-mode replies (PONG etc.)

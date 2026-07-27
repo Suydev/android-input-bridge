@@ -2,6 +2,36 @@
 
 ---
 
+## Session 022 — Harden UDP reconnect lifecycle (BUG-087 → BUG-092)
+**Date:** 2026-07-27
+**Agent:** Codex
+**Status:** 🔄 In Progress — GitHub Actions verification pending
+
+### Goals
+- Repair the UDP reconnect, target-validation, connection-state, and reply-endpoint lifecycle defects.
+- Validate the receiver launch on the connected OnePlus Pad Go without replacing its installed APK.
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|---|---|---|---|
+| BUG-087 | High | Reconnect reused closed send queues. | Fixed. |
+| BUG-088 | High | UDP lifecycle flag lacked cross-thread visibility. | Fixed. |
+| BUG-089 | High | Invalid targets failed after a false connected state. | Fixed. |
+| BUG-090 | High | Socket bind/open was incorrectly shown as peer connectivity. | Fixed. |
+| BUG-091 | High | Old receive reader could spin after an immediate reconnect. | Fixed. |
+| BUG-092 | Medium | Receiver retained a prior session's reply endpoint. | Fixed. |
+
+### What Was Changed
+- `UdpTransport.kt`: makes every connection own fresh queues and peer state, validates sender targets before startup, and prevents cancelled readers from surviving a reconnect.
+- `BridgeService.kt`, `ReceiverService.kt`: only report a live UDP peer after PONG/PING or accepted pairing evidence.
+- `BUGS.md`, `TASKS.md`, `PROJECT_STATE.md`, `AI_CONTEXT.md`, and agent memory: record the UDP session-boundary rules.
+
+### Device Validation
+- OnePlus Pad Go (Android 14) is reachable through ADB. Both debug activities launch; ReceiverService binds UDP 54321 without a foreground-service crash.
+- Accessibility is disabled and the Redmi 9/USB HID dongle is not attached, so end-to-end injection and capture remain pending.
+
+---
+
 ## Session 021 — Repair pairing, USB capture, and cursor pipeline (BUG-080 → BUG-086)
 **Date:** 2026-07-27
 **Agent:** Codex

@@ -289,6 +289,17 @@ Manual hardware test (Portronics Key2 Combo) not yet performed.
   visual geometry: inset the shape for its stroke/shadow and compensate with the same layout
   offset.
 
+## Session 022 UDP session invariants
+
+- **A UDP reconnect creates a new session.** Recreate every closed send queue and clear the
+  receiver's observed peer endpoint before starting its reader/writer jobs. Never let a new
+  session send to the prior bridge's ephemeral port.
+- **A transport-wide lifecycle flag is not enough for an old coroutine.** Reader loops must also
+  honour their own `coroutineContext.isActive`; otherwise a cancelled reader can resume against a
+  closed socket once a fast reconnect publishes `isConnected = true`.
+- **A bound socket is not peer connectivity.** The bridge reports UDP connected only after PONG
+  or accepted pairing; the receiver does so only after PING or an accepted pairing request.
+
 ## Recommended next implementation step
 
 **Phase 5 remainder**: rolling latency average display, latency trace timestamps across pipeline stages.

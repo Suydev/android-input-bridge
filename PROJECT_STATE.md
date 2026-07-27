@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 021 — transport and USB capture repair BUG-080→086 (2026-07-27)
+> **Last updated:** Session 022 — UDP session lifecycle hardening BUG-087→092 (2026-07-27)
 
 ---
 
@@ -85,6 +85,7 @@
 | `WRITE_SETTINGS` | In bridge manifest but not actually used — screen brightness via `WindowManager.LayoutParams` |
 | Cursor overlay API level | `CursorOverlayService` requires API 24+ (`@RequiresApi(N)`) — guarded by `Build.VERSION.SDK_INT` checks |
 | Physical validation | Source fixes for UDP reply routing and USB capture are not installed on devices yet; a rebuilt APK and two-device test remain required |
+| Current tablet validation | OnePlus Pad Go (Android 14) launches both installed debug apps; ReceiverService listens on UDP 54321 without a foreground-service-type crash. Accessibility and bridge-hardware tests remain pending. |
 
 ---
 

@@ -4,6 +4,14 @@ Complete checklist of all project tasks. Never delete completed tasks. Always ap
 
 ---
 
+## Session 022 — UDP lifecycle hardening
+
+- [x] Repair reconnect queue reuse, lifecycle visibility, early target validation, and false UDP-connected state (BUG-087→090)
+- [x] Repair immediate-reconnect receive-loop lifetime and stale receiver reply endpoint reuse (BUG-091→092)
+- [x] Launch both installed debug apps on OnePlus Pad Go through ADB; verify ReceiverService starts without an Android 14 foreground-service crash
+- [ ] Build on GitHub Actions and install the validated APKs when explicitly approved
+- [ ] Enable receiver accessibility, attach Redmi 9 + Portronics USB HID receiver, and validate pairing/PONG plus keyboard, mouse, and cursor injection
+
 ## Session 021 — UDP, USB capture, and cursor repair
 
 - [x] Document and correct the receiver reply-port, UDP lifecycle, USB reader lifecycle, USB cleanup, and startup-subscription defects (BUG-081→086)

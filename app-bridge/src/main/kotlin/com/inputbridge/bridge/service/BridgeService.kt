@@ -308,8 +308,10 @@ class BridgeService : Service() {
         }
 
         BridgeLogger.i(TAG, "UDP transport ready → $targetIp:$port")
+        // BUG-090 FIX: a UDP socket opening proves only local availability. Wait for
+        // PAIR_RESPONSE or PONG before the UI says the remote receiver is connected.
         DiagnosticsManager.update {
-            copy(transportMode = "UDP", transportConnected = true, targetIp = targetIp)
+            copy(transportMode = "UDP", transportConnected = false, targetIp = targetIp)
         }
 
         // Register incoming-packet collector BEFORE sending any packet, so
@@ -437,6 +439,9 @@ class BridgeService : Service() {
                             if (latency in 0L..10_000L) {
                                 lastPongReceivedMs = System.currentTimeMillis()
                                 DiagnosticsManager.recordLatency(latency)
+                                // BUG-090 FIX: a PONG proves the configured receiver is
+                                // reachable, unlike merely creating a local UDP socket.
+                                DiagnosticsManager.update { copy(transportConnected = true) }
                                 BridgeLogger.d(TAG, "PONG received — latency=${latency}ms")
                             }
                         }
@@ -492,7 +497,9 @@ class BridgeService : Service() {
         return if (accepted) {
             prefs.isPaired = true
             transport.send(packetFactory.makePairConfirm())
-            DiagnosticsManager.update { copy(isPaired = true, pairedPeerIp = prefs.targetIp) }
+            DiagnosticsManager.update {
+                copy(isPaired = true, pairedPeerIp = prefs.targetIp, transportConnected = true)
+            }
             BridgeLogger.i(TAG, "Pairing confirmed")
             updateNotification("Paired — waiting for USB device…")
             true
