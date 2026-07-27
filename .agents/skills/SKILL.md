@@ -11,7 +11,14 @@
 
 ## 1. Onboarding Sequence (First Action Every Session)
 
-Before writing any code, run this exact sequence of reads in a single parallel batch:
+Before writing any code, read the project documents in the exact order required by
+`AGENTS.md`: `AGENTS.md`, `AI_CONTEXT.md`, `PROJECT_STATE.md`, `BUGS.md`, `TASKS.md`, the
+recent `SESSION_LOG.md` entries, `.agents/memory/MEMORY.md`, then this skill. Do not replace
+that protocol with a partial parallel batch: the complete bug registry is required context.
+
+When the repository is opened outside Replit (for example in Termux), use the available shell
+tools instead of the Replit examples below. Prefer `rg`; if it is unavailable, use
+`grep -RIn` or `find … -exec grep` without blocking the audit.
 
 ```javascript
 // In CodeExecution — batch all reads at session start
@@ -24,7 +31,8 @@ const [agentsMd, aiCtx, projState, tasksMd] = await Promise.all([
 ]);
 ```
 
-Then read the tail of SESSION_LOG.md and the MEMORY index:
+For Replit specifically, these reads can be batched only after preserving that order in the
+result review. Then read the tail of SESSION_LOG.md and the MEMORY index:
 
 ```
 ReadFile: SESSION_LOG.md  (start_line: 1, end_line: 80)
@@ -343,6 +351,21 @@ await markTaskComplete({ commit_message: "fix: Session NNN — ..." });
 - **No database** — no Replit database; all persistence is in SharedPreferences on-device.
 - **Build tools** — not installed locally; all compilation happens in GitHub Actions CI.
   Use CI logs (§3) to verify builds, not local `./gradlew` (won't work in Replit).
+
+### Physical-device validation outside Replit
+
+- `adb devices -l` must show the intended phone/tablet as `device` before attempting install or
+  log capture. A wireless-debugging *pairing* port and the normal ADB *connection* port can be
+  different; use `adb connect <ip:port>` for an already paired device.
+- Do not clear or replace a user's installed APK, build locally, or start long Gradle work after
+  the user has explicitly declined it. Record the source fix and the exact device validation
+  still needed instead.
+- For this pipeline, test both apps together after installation: receiver listening on the same
+  UDP port as bridge settings, correct PIN accepted, PONG received, USB keyboard events observed,
+  USB mouse events observed, and cursor hotspot/shape checked with the overlay enabled.
+- Pairing/PONG replies must target the bridge's observed source endpoint, not the receiver's
+  configured listening port. USB reader and UDP transport lifecycle flags must be true before
+  their background loops are launched.
 
 ---
 

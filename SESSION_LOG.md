@@ -2,6 +2,38 @@
 
 ---
 
+## Session 021 — Repair pairing, USB capture, and cursor pipeline (BUG-080 → BUG-086)
+**Date:** 2026-07-27
+**Agent:** Codex
+**Status:** 🔄 In Progress — source repair documented; build and physical-device validation deferred by user
+
+### Goals
+- Diagnose the reported correct-PIN failure, no keyboard/mouse capture, USB permission-without-input state, and malformed cursor.
+- Preserve the findings as explicit project invariants for the next agent.
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|---|---|---|---|
+| BUG-080 | Critical | ViewModel called `refreshStatus()` before backing StateFlow construction. | Fixed in current HEAD; documented. |
+| BUG-081 | Critical | Receiver replied to its configured listen port instead of the bridge's ephemeral source port. | Fixed in `UdpTransport`. |
+| BUG-082 | Critical | UDP loops could start before `isConnected` and exit immediately. | Fixed in `UdpTransport`. |
+| BUG-083 | Critical | USB HID readers could start before `isActive` and exit immediately. | Fixed in `UsbInputCapture`. |
+| BUG-084 | High | Failed USB startup closed claimed interfaces without release. | Fixed in `UsbInputCapture`. |
+| BUG-085 | Medium | Cursor outline, shadow, and handle were clipped by the overlay canvas. | Fixed in `CursorOverlayService`. |
+| BUG-086 | High | Bridge subscribed to a replay-free input flow after readers started. | Fixed in `BridgeService`. |
+
+### What Was Changed
+- `UdpTransport.kt`: preserves the complete sender endpoint for receiver replies and establishes connection state before I/O loops.
+- `UsbInputCapture.kt`, `BridgeService.kt`: makes keyboard/mouse readers reliably live, preserves startup reports, and releases failed captures correctly.
+- `CursorOverlayService.kt`: redraws the pointer in a padded canvas with hotspot compensation.
+- `BUGS.md`, `TASKS.md`, `PROJECT_STATE.md`, `AI_CONTEXT.md`, `AGENTS.md`, `.agents/skills/SKILL.md`, and memory: document the repaired invariants and required real-device test.
+
+### Verification State
+- Static second-pass review and `git diff --check` passed.
+- Local Gradle build, APK installation, CI push, and two-device hardware validation were not run because the user explicitly cancelled local builds. Existing installed APKs are older and do not contain these repairs.
+
+---
+
 ## Session 020 — Startup crash mitigation (BUG-079)
 **Date:** 2026-07-27
 **Agent:** Codex

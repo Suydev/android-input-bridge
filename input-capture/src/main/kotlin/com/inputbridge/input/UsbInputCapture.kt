@@ -73,6 +73,10 @@ class UsbInputCapture(
         connection = conn
 
         var started = false
+        // BUG-083 FIX: reader coroutines test isActive before every bulkTransfer.
+        // Set it before launching any coroutine so an eager IO dispatcher cannot make
+        // the reader exit before startup reaches the end of this method.
+        isActive = true
         for (i in 0 until device.interfaceCount) {
             val iface = device.getInterface(i)
             if (iface.interfaceClass != UsbConstants.USB_CLASS_HID) continue
@@ -113,19 +117,24 @@ class UsbInputCapture(
         }
 
         return if (started) {
-            isActive = true
             _status.value = CaptureStatus.Active
             true
         } else {
             BridgeLogger.e(TAG, "No usable HID interfaces found on device")
+            // BUG-084 FIX: every successful claim must be released before closing,
+            // even when startup finds no usable input endpoint.
+            isActive = false
+            claimedInterfaces.forEach { iface -> conn.releaseInterface(iface) }
+            claimedInterfaces.clear()
             conn.close()
+            connection = null
             _status.value = CaptureStatus.Error("No HID interfaces on device", recoverable = false)
             false
         }
     }
 
     override suspend fun stop() {
-        if (!isActive) return
+        if (!isActive && connection == null) return
         isActive = false
         captureJobs.forEach { it.cancel() }
         captureJobs.clear()

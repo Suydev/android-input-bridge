@@ -206,6 +206,10 @@ Each one has caused at least one bug when violated. Treat them as axiomatic.
 - `UsbInputCapture.start()` — must track every claimed interface in `claimedInterfaces`
 - `UsbInputCapture.stop()` — must call `conn.releaseInterface(iface)` for each before `conn.close()`
 - `UsbInputCapture.isActive` — check this flag at the top of `start()` before claiming anything
+- `UsbInputCapture.start()` — set `isActive = true` **before** launching keyboard or mouse
+  reader coroutines; their loops are intentionally guarded by this flag
+- `BridgeService.startCapture()` — begin collecting `InputCapture.events` before calling
+  `capture.start()`; the flow has `replay = 0`, so subscribing afterwards loses startup reports
 
 ### 4.4 DiagnosticsManager Thread Safety
 - `DiagnosticsManager.update {}` — **only** way to write `_state.value`; never bypass the lock
@@ -215,7 +219,12 @@ Each one has caused at least one bug when violated. Treat them as axiomatic.
 ### 4.5 UDP Transport Bidirectionality
 - `UdpTransport` in receiver mode — must track `lastSenderAddress` for PONG replies
 - `targetIp` can be empty in receiver mode — always check `targetIp.isNotEmpty()` before send
-- UDP port default: 5555 — do not change without updating both apps
+- UDP port default: 54321 — do not change without updating both apps
+- In receiver mode, replies (`PAIR_RESPONSE`, `PONG`, `DISCONNECT`) MUST be sent to the full
+  `lastSenderAddress` including its ephemeral UDP port, never `config.port` (the receiver's own
+  listen port)
+- Set `UdpTransport.isConnected = true` before starting its send/receive coroutines; both loops
+  use the flag as their first loop condition and otherwise may exit immediately
 
 ### 4.6 BT HID Map Synchronization
 - `KeyMap.HID_TO_ANDROID` and `HidReportBuilder.ANDROID_TO_HID` are MANUALLY MAINTAINED INVERSES

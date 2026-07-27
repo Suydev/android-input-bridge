@@ -121,9 +121,12 @@ class UdpTransport(
             runCatching { sock.receiveBufferSize = SOCKET_BUFFER_BYTES }
             runCatching { sock.trafficClass      = TRAFFIC_CLASS_LOWDELAY }
             socket = sock
+            // BUG-082 FIX: both loops use isConnected as their first condition.
+            // Publish the live state before launching them so an immediately scheduled
+            // coroutine cannot exit permanently before its first receive/send.
+            isConnected = true
             startSendLoop(sock)
             startReceiveLoop(sock)
-            isConnected = true
             _connectionState.value = ConnectionState.Connected
             BridgeLogger.i(TAG, "UDP transport connected (sender=$isSender port=${config.port})")
             true
@@ -204,20 +207,23 @@ class UdpTransport(
 
                     // Resolve the destination address — either the fixed bridge target
                     // (sender mode) or the last seen sender address (receiver mode).
-                    val targetAddr: InetAddress
+                    val destination: InetSocketAddress
                     if (fixedTarget != null) {
-                        targetAddr = fixedTarget
+                        destination = InetSocketAddress(fixedTarget, config.port)
                     } else {
                         val senderAddr = lastSenderAddress
                         if (senderAddr == null) {
                             BridgeLogger.d(TAG, "Receiver send skipped — no sender address seen yet")
                             continue
                         }
-                        targetAddr = senderAddr.address
+                        // BUG-081 FIX: senderAddr includes the bridge's ephemeral
+                        // source port. Pairing/PONG replies must go back to that exact
+                        // endpoint, not to the receiver's configured listen port.
+                        destination = senderAddr
                     }
 
                     try {
-                        val dp = DatagramPacket(bytes, bytes.size, targetAddr, config.port)
+                        val dp = DatagramPacket(bytes, bytes.size, destination)
                         sock.send(dp)
                     } catch (e: Exception) {
                         if (isConnected) BridgeLogger.w(TAG, "Send error", e)

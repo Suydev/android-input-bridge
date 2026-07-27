@@ -275,6 +275,20 @@ Receiver app:
 Unit tests exist for protocol serialization and input event models. All tests pass locally.
 Manual hardware test (Portronics Key2 Combo) not yet performed.
 
+## Session 021 pipeline invariants
+
+- **UDP receiver replies use the observed sender endpoint.** The bridge sender binds an
+  ephemeral source port. In receiver mode, send `PAIR_RESPONSE` and `PONG` to the complete
+  `InetSocketAddress` captured from its datagram, never to the receiver's configured listen port.
+- **Set lifecycle flags before starting guarded loops.** `UdpTransport` readers/writers require
+  `isConnected`, and USB HID readers require `isActive`; set each flag before launching the
+  coroutines or they can legitimately exit at their first loop condition.
+- **Subscribe before emitting a non-replaying flow.** `InputCapture.events` has `replay = 0`.
+  `BridgeService` must attach its collector before `UsbInputCapture.start()` launches HID readers.
+- **The overlay pointer needs canvas padding.** Keep the logical hotspot aligned when changing its
+  visual geometry: inset the shape for its stroke/shadow and compensate with the same layout
+  offset.
+
 ## Recommended next implementation step
 
 **Phase 5 remainder**: rolling latency average display, latency trace timestamps across pipeline stages.

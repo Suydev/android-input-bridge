@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 020 — startup crash mitigation BUG-079 (2026-07-27)
+> **Last updated:** Session 021 — transport and USB capture repair BUG-080→086 (2026-07-27)
 
 ---
 
@@ -84,6 +84,7 @@
 | Physical multi-button combo stop | Currently: hold Volume Down 3 s (reliable single-button approach) |
 | `WRITE_SETTINGS` | In bridge manifest but not actually used — screen brightness via `WindowManager.LayoutParams` |
 | Cursor overlay API level | `CursorOverlayService` requires API 24+ (`@RequiresApi(N)`) — guarded by `Build.VERSION.SDK_INT` checks |
+| Physical validation | Source fixes for UDP reply routing and USB capture are not installed on devices yet; a rebuilt APK and two-device test remain required |
 
 ---
 

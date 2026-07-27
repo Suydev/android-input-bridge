@@ -4,6 +4,16 @@ Complete checklist of all project tasks. Never delete completed tasks. Always ap
 
 ---
 
+## Session 021 — UDP, USB capture, and cursor repair
+
+- [x] Document and correct the receiver reply-port, UDP lifecycle, USB reader lifecycle, USB cleanup, and startup-subscription defects (BUG-081→086)
+- [x] Correct the persisted ViewModel initialization-order defect already present in HEAD (BUG-080)
+- [x] Correct cursor pointer bounds, outline, shadow, and hotspot geometry (BUG-085)
+- [ ] Build, install, and validate the repaired APKs on Redmi 9 and OnePlus Pad Go; user explicitly deferred local Gradle work
+- [ ] Verify receiver pairing/PONG, USB keyboard input, USB mouse input, and cursor overlay on real hardware
+
+---
+
 ## Session 020 — Startup crash mitigation
 
 - [x] Audit both application launch paths and confirm GitHub CI succeeds for the current release

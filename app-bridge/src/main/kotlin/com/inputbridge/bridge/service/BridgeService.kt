@@ -673,21 +673,9 @@ class BridgeService : Service() {
         val capture = UsbInputCapture(this, device)
         usbCapture = capture
 
-        if (!capture.start()) {
-            BridgeLogger.e(TAG, "UsbInputCapture failed to start for ${device.deviceName}")
-            DiagnosticsManager.update {
-                copy(inputCaptureActive = false, lastError = "USB capture start failed")
-            }
-            updateNotification("USB error — replug the receiver")
-            return
-        }
-
-        DiagnosticsManager.update {
-            copy(usbDeviceConnected = true, usbPermissionGranted = true, inputCaptureActive = true)
-        }
-        updateNotification("Bridging — ${device.deviceName}")
-        BridgeLogger.i(TAG, "USB capture active for ${device.deviceName}")
-
+        // BUG-086 FIX: InputCapture.events has replay=0. Subscribe before start()
+        // launches USB readers so the first keyboard or mouse report cannot race
+        // past an absent collector.
         captureJob = serviceScope.launch {
             capture.events.collect { rawEvent ->
                 val t0 = System.nanoTime()
@@ -707,13 +695,11 @@ class BridgeService : Service() {
                 // a BT host that disconnects while capture is already running.
                 val bt = btTransport?.takeIf { it.isConnected }
                 if (bt != null) {
-                    // ── BT HID mode: send raw HID report directly (no packet layer) ──
                     val sent = bt.sendInputEvent(event)
                     if (sent) DiagnosticsManager.onPacketSent()
                     else DiagnosticsManager.onSendFailed()
                     lastCaptureToSendUs.set((System.nanoTime() - t0) / 1_000L)
                 } else {
-                    // ── UDP mode: serialize to Packet and send ──────────────────────
                     val packet = packetFactory.fromEvent(event) ?: return@collect
                     val sent = udpTransport?.send(packet) ?: false
                     if (sent) {
@@ -725,6 +711,24 @@ class BridgeService : Service() {
                 }
             }
         }
+
+        if (!capture.start()) {
+            captureJob?.cancel()
+            captureJob = null
+            usbCapture = null
+            BridgeLogger.e(TAG, "UsbInputCapture failed to start for ${device.deviceName}")
+            DiagnosticsManager.update {
+                copy(inputCaptureActive = false, lastError = "USB capture start failed")
+            }
+            updateNotification("USB error — replug the receiver")
+            return
+        }
+
+        DiagnosticsManager.update {
+            copy(usbDeviceConnected = true, usbPermissionGranted = true, inputCaptureActive = true)
+        }
+        updateNotification("Bridging — ${device.deviceName}")
+        BridgeLogger.i(TAG, "USB capture active for ${device.deviceName}")
     }
 
     private suspend fun stopCapture() {

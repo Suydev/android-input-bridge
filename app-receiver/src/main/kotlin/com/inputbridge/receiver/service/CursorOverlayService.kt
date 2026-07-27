@@ -33,11 +33,11 @@ private const val TAG = "CursorOverlayService"
  * The cursor is a classic top-left-pointing arrow with:
  *   - White fill with a thin black outline
  *   - Drop shadow for visibility on any background
- *   - Hotspot at the top-left TIP of the arrow (pixel 0,0 of the view)
+ *   - Hotspot at the arrow tip, inset inside the overlay canvas to prevent clipping
  *
  * Hotspot correction: the old dot centred itself on the cursor position using an
  * offset of -(width/2, height/2). An arrow cursor's hotspot is at its tip (top-left),
- * so the overlay x/y now maps directly to the logical cursor position — no offset.
+ * so the overlay position is offset by the inset to keep the visual tip on the logical cursor.
  *
  * Requires SYSTEM_ALERT_WINDOW permission (canDrawOverlays()). If absent this service
  * exits immediately rather than crashing.
@@ -69,8 +69,7 @@ class CursorOverlayService : Service() {
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
-        // Arrow view: sized to contain the full cursor shape + shadow.
-        // CursorArrowView.CURSOR_DP defines the logical width/height in dp.
+        // Arrow view includes padding for a complete outline and shadow.
         val density = resources.displayMetrics.density
         val viewPx = (CursorArrowView.CURSOR_DP * density).toInt()
 
@@ -118,15 +117,15 @@ class CursorOverlayService : Service() {
     /**
      * Move the overlay so the arrow TIP lands exactly on (x, y).
      *
-     * Because the hotspot is at the top-left corner of the view (the arrow tip is drawn
-     * at (0,0) within the canvas), we position the view directly at the cursor coordinates
-     * with no centering offset.
+     * The arrow tip is inset inside the view so its outline and shadow are not clipped.
+     * Offset the containing view by the same inset to keep the logical hotspot exact.
      */
     private fun updatePosition(x: Float, y: Float) {
         val params = layoutParams ?: return
         val view   = overlayView  ?: return
-        params.x = x.toInt().coerceAtLeast(0)
-        params.y = y.toInt().coerceAtLeast(0)
+        val insetPx = (CursorArrowView.HOTSPOT_INSET_DP * resources.displayMetrics.density).toInt()
+        params.x = (x.toInt() - insetPx).coerceAtLeast(0)
+        params.y = (y.toInt() - insetPx).coerceAtLeast(0)
         runCatching { windowManager.updateViewLayout(view, params) }
     }
 
@@ -149,9 +148,9 @@ class CursorOverlayService : Service() {
 /**
  * Custom View that draws a classic Windows-style arrow cursor.
  *
- * Shape (hotspot at top-left tip, all coordinates in canvas pixels):
+ * Shape (hotspot at the inset tip, all coordinates in canvas pixels):
  *
- *   Tip at (0, 0) — this is the logical cursor hotspot.
+ *   Tip at the inset — overlay placement compensates so this remains the logical cursor hotspot.
  *   Arrow goes:
  *     • Down the left edge (0 → tailTop)
  *     • Cuts inward to form the left side of the tail
@@ -171,8 +170,10 @@ class CursorOverlayService : Service() {
 private class CursorArrowView(context: android.content.Context) : View(context) {
 
     companion object {
-        /** Size of the view in dp — must match what CursorOverlayService allocates. */
-        const val CURSOR_DP = 36
+        /** Size of the complete cursor canvas, including outline and shadow padding. */
+        const val CURSOR_DP = 40
+        /** Inset from canvas edge to the pointer tip; also the hotspot offset. */
+        const val HOTSPOT_INSET_DP = 2
     }
 
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -200,50 +201,44 @@ private class CursorArrowView(context: android.content.Context) : View(context) 
      * Build the arrow and shadow paths for the given canvas size.
      *
      * Normalized shape (width W, height H = same value since view is square):
-     *   Tip:                   (0,           0          )
-     *   Left edge bottom:      (0,           H * 0.72   )
-     *   Tail top-left notch:   (W * 0.22,    H * 0.57   )
-     *   Tail bottom-left:      (W * 0.22,    H * 1.00   ) ← extended slightly out of view
-     *   Tail bottom-right:     (W * 0.37,    H * 1.00   )
-     *   Tail top-right notch:  (W * 0.37,    H * 0.57   )
-     *   Arrow right point:     (W * 0.72,    H * 0.72   )
+     * The shape is inset on every side so the stroke and shadow are never clipped.
      *   Close → back to tip (diagonal edge)
-     *
-     * The tail intentionally extends to H * 1.00 so the bottom of the handle is
-     * clipped by the view boundary rather than floating in mid-air.
      *
      * The shadow path is the same shape offset by (shadowDx, shadowDy) to give
      * the impression of depth.
      */
     private fun buildPaths(W: Float, H: Float) {
+        // BUG-085 FIX: reserve a real margin around the shape. The previous path
+        // touched 0 and H, clipping the pointer border, shadow, and handle.
         val strokeW = (resources.displayMetrics.density * 1.5f).coerceAtLeast(1.5f)
         strokePaint.strokeWidth = strokeW
+        val inset = (HOTSPOT_INSET_DP * resources.displayMetrics.density).coerceAtLeast(strokeW)
+        val shadowOffset = strokeW
+        val usableW = W - inset * 2f - shadowOffset
+        val usableH = H - inset * 2f - shadowOffset
+        val x = inset
+        val y = inset
 
-        // Outline the arrow one stroke-width inside the shadow offset so the
-        // shadow just peeks out from under the fill+stroke layers.
-        val sx = strokeW * 0.5f  // shadow offset X
-        val sy = strokeW * 0.5f  // shadow offset Y
-
-        // Arrow path (hotspot tip at 0,0)
+        // Arrow path (hotspot tip at inset,inset; overlay placement compensates).
         arrowPath.reset()
-        arrowPath.moveTo(0f,       0f)           // tip
-        arrowPath.lineTo(0f,       H * 0.72f)    // left edge
-        arrowPath.lineTo(W * 0.22f, H * 0.57f)  // notch inward
-        arrowPath.lineTo(W * 0.22f, H)           // tail left wall
-        arrowPath.lineTo(W * 0.37f, H)           // tail bottom
-        arrowPath.lineTo(W * 0.37f, H * 0.57f)  // tail right notch
-        arrowPath.lineTo(W * 0.72f, H * 0.72f)  // arrow right point
-        arrowPath.close()                        // diagonal back to tip
+        arrowPath.moveTo(x,                    y)
+        arrowPath.lineTo(x,                    y + usableH * 0.70f)
+        arrowPath.lineTo(x + usableW * 0.22f,  y + usableH * 0.55f)
+        arrowPath.lineTo(x + usableW * 0.22f,  y + usableH)
+        arrowPath.lineTo(x + usableW * 0.40f,  y + usableH)
+        arrowPath.lineTo(x + usableW * 0.40f,  y + usableH * 0.55f)
+        arrowPath.lineTo(x + usableW * 0.75f,  y + usableH * 0.72f)
+        arrowPath.close()
 
-        // Shadow path: same shape shifted right+down
+        // Shadow path: the complete arrow shifted right/down inside the canvas.
         shadowPath.reset()
-        shadowPath.moveTo(sx,             sy)
-        shadowPath.lineTo(sx,             sy + H * 0.72f)
-        shadowPath.lineTo(sx + W * 0.22f, sy + H * 0.57f)
-        shadowPath.lineTo(sx + W * 0.22f, sy + H)
-        shadowPath.lineTo(sx + W * 0.37f, sy + H)
-        shadowPath.lineTo(sx + W * 0.37f, sy + H * 0.57f)
-        shadowPath.lineTo(sx + W * 0.72f, sy + H * 0.72f)
+        shadowPath.moveTo(x + shadowOffset,                   y + shadowOffset)
+        shadowPath.lineTo(x + shadowOffset,                   y + shadowOffset + usableH * 0.70f)
+        shadowPath.lineTo(x + shadowOffset + usableW * 0.22f, y + shadowOffset + usableH * 0.55f)
+        shadowPath.lineTo(x + shadowOffset + usableW * 0.22f, y + shadowOffset + usableH)
+        shadowPath.lineTo(x + shadowOffset + usableW * 0.40f, y + shadowOffset + usableH)
+        shadowPath.lineTo(x + shadowOffset + usableW * 0.40f, y + shadowOffset + usableH * 0.55f)
+        shadowPath.lineTo(x + shadowOffset + usableW * 0.75f, y + shadowOffset + usableH * 0.72f)
         shadowPath.close()
     }
 

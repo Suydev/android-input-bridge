@@ -1666,4 +1666,77 @@ and `init {}` block).
 **Suspected cause**: An `init` block was placed above the backing StateFlow declaration in both ViewModels.
 **Files involved**: `app-bridge/src/main/kotlin/com/inputbridge/bridge/viewmodel/BridgeViewModel.kt`, `app-receiver/src/main/kotlin/com/inputbridge/receiver/viewmodel/ReceiverViewModel.kt`.
 **Priority**: Critical
-**Status**: 🔴 OPEN
+**Status**: ✅ FIXED (Session 021)
+**Fix**: Moved both ViewModel `init` blocks below `_isNetworkAvailable` so `refreshStatus()` cannot access an uninitialized StateFlow.
+
+## BUG-081 — Route receiver control replies to the bridge's ephemeral UDP port
+
+**Description**: In receiver mode, `UdpTransport` remembers the bridge's source address but discards its port when sending `PAIR_RESPONSE` and `PONG`. It instead sends every reply to `config.port`, which is the receiver's listening port (normally 54321), not the source port chosen by the bridge's unbound `DatagramSocket`.
+**Steps to reproduce**: Start receiver on UDP 54321, configure bridge to the receiver IP and port, enter the displayed receiver PIN, then start the bridge.
+**Expected behavior**: The receiver sends `PAIR_RESPONSE` and each `PONG` back to the exact IP and UDP source port that sent the corresponding packet.
+**Actual behavior**: Responses are sent to `<bridge IP>:54321`; the bridge is listening on an ephemeral port, never receives them, and reports pairing failure despite a correct PIN.
+**Suspected cause**: Receiver-mode send loop reconstructs a destination from the configured listen port instead of retaining the complete `InetSocketAddress`.
+**Files involved**: `transport-wifi/src/main/kotlin/com/inputbridge/transport/wifi/UdpTransport.kt`.
+**Priority**: Critical
+**Status**: ✅ FIXED (Session 021)
+**Fix**: Receiver-mode sends now pass the retained sender `InetSocketAddress` directly to `DatagramPacket`, preserving the bridge's ephemeral reply port.
+
+## BUG-082 — Start UDP reader and writer only after transport is connected
+
+**Description**: `UdpTransport.connect()` launches its send and receive coroutines before assigning `isConnected = true`. Both loops use `while (isConnected)` as their first condition, so an immediately scheduled coroutine exits permanently before the flag is set.
+**Steps to reproduce**: Start either UDP pipeline on a device under scheduler load; inspect logs or attempt pairing repeatedly.
+**Expected behavior**: Both UDP loops remain alive for the entire successful connection.
+**Actual behavior**: The transport can report Connected while one or both loops already exited, leaving no input, PONG, or pairing traffic.
+**Suspected cause**: Connection-state publication occurs after asynchronous work begins.
+**Files involved**: `transport-wifi/src/main/kotlin/com/inputbridge/transport/wifi/UdpTransport.kt`.
+**Priority**: Critical
+**Status**: ✅ FIXED (Session 021)
+**Fix**: `connect()` sets `isConnected` immediately after socket setup and before launching either UDP coroutine.
+
+## BUG-083 — Mark USB capture active before launching HID reader jobs
+
+**Description**: `UsbInputCapture.start()` launches a reader for each claimed HID interface while `isActive` is still false. `readKeyboard()` and `readMouse()` both begin with `while (this@UsbInputCapture.isActive && coroutineContext.isActive)`, so a reader scheduled immediately exits before capture is marked active.
+**Steps to reproduce**: Attach the USB keyboard/mouse receiver and start the bridge while the device is under normal scheduler load; move the mouse or press a key.
+**Expected behavior**: Each claimed HID interface starts a persistent reader and emits events.
+**Actual behavior**: One or both readers can terminate before their first `bulkTransfer`, resulting in no captured mouse or keyboard input.
+**Suspected cause**: The active lifecycle flag is assigned after asynchronous reader launch rather than before it.
+**Files involved**: `input-capture/src/main/kotlin/com/inputbridge/input/UsbInputCapture.kt`.
+**Priority**: Critical
+**Status**: ✅ FIXED (Session 021)
+**Fix**: `UsbInputCapture.start()` marks capture active before launching keyboard and mouse reader coroutines.
+
+## BUG-084 — Release claimed USB interfaces when capture startup fails
+
+**Description**: If USB startup claims one or more HID interfaces but finds no usable interrupt-in endpoint, `start()` closes the connection directly while `isActive` is false. `stop()` then returns early and never calls `releaseInterface()` for the entries in `claimedInterfaces`.
+**Steps to reproduce**: Attach an HID device that exposes a HID interface without an interrupt-in endpoint, then start and retry the bridge capture.
+**Expected behavior**: Every successfully claimed interface is released before the connection closes, including failed-start paths.
+**Actual behavior**: Interfaces can remain kernel-claimed until an OS timeout, preventing immediate retry or replug capture.
+**Suspected cause**: The failed-start cleanup bypasses the release-before-close lifecycle path.
+**Files involved**: `input-capture/src/main/kotlin/com/inputbridge/input/UsbInputCapture.kt`.
+**Priority**: High
+**Status**: ✅ FIXED (Session 021)
+**Fix**: Failed startup now releases every claimed interface before closing the USB connection and clears the retained connection reference.
+
+## BUG-085 — Draw the cursor pointer inside its overlay bounds
+
+**Description**: `CursorArrowView` draws its tail to exactly the view's bottom edge and puts the tip/black outline at `(0,0)`. Android clips both the tail and outline, while the shadow is clipped on the right and bottom. The resulting cursor looks cut off rather than like a normal pointer.
+**Steps to reproduce**: Enable the receiver cursor overlay and move the mouse over a light or dark background.
+**Expected behavior**: A complete, crisp arrow pointer with visible outline and shadow is rendered, with its hotspot aligned to the logical cursor position.
+**Actual behavior**: The pointer has a flat clipped handle and partially missing border/shadow.
+**Suspected cause**: The drawing geometry consumes the entire overlay canvas without padding for paint stroke or shadow.
+**Files involved**: `app-receiver/src/main/kotlin/com/inputbridge/receiver/service/CursorOverlayService.kt`.
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 021)
+**Fix**: The arrow now uses an inset canvas with compensated hotspot positioning, leaving room for the full handle, outline, and shadow.
+
+## BUG-086 — Subscribe to USB input before starting HID readers
+
+**Description**: `BridgeService.startCapture()` calls `UsbInputCapture.start()` before launching its collector for `capture.events`. `InputCapture.events` intentionally has `replay = 0`; a keyboard press or mouse movement received during that startup window is discarded because there is no subscriber yet.
+**Steps to reproduce**: Attach the USB receiver while moving the mouse or holding a key, then start the bridge service.
+**Expected behavior**: The bridge subscribes before HID reports can be emitted, so the first keyboard and mouse reports reach the UDP/BT pipeline.
+**Actual behavior**: Early reports are dropped during capture startup, making an already fragile USB connection appear unresponsive.
+**Suspected cause**: Event collection is started after the source readers.
+**Files involved**: `app-bridge/src/main/kotlin/com/inputbridge/bridge/service/BridgeService.kt`.
+**Priority**: High
+**Status**: ✅ FIXED (Session 021)
+**Fix**: `BridgeService` starts its event collector before invoking `UsbInputCapture.start()` and cancels it if startup fails.
