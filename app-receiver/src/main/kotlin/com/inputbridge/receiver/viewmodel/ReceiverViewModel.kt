@@ -23,25 +23,6 @@ class ReceiverViewModel(
     private val prefs: ReceiverPreferences,
 ) : ViewModel() {
 
-    init {
-        // Ensure a PIN exists at ViewModel creation time so it's available
-        // before ReceiverService starts (shown on ConnectionScreen immediately).
-        if (prefs.sessionPin.isEmpty()) {
-            prefs.generateNewPin()
-        }
-        // Publish current PIN into DiagnosticsManager so the UI sees it even
-        // before the service initialises the field itself.
-        DiagnosticsManager.update {
-            copy(
-                sessionPin   = prefs.sessionPin,
-                isPaired     = prefs.isPaired,
-                pairedPeerIp = prefs.pairedBridgeIp,
-            )
-        }
-        // Initialise permission/network status on first load.
-        refreshStatus()
-    }
-
     val diagnostics: StateFlow<DiagnosticsData> = DiagnosticsManager.state
 
     val isReceiverActive: StateFlow<Boolean> = diagnostics
@@ -80,6 +61,23 @@ class ReceiverViewModel(
      */
     private val _isNetworkAvailable = MutableStateFlow(checkNetworkAvailable())
     val isNetworkAvailable: StateFlow<Boolean> = _isNetworkAvailable.asStateFlow()
+
+    init {
+        // BUG-080 FIX: this must follow _isNetworkAvailable's construction. Kotlin runs
+        // property initializers and init blocks in source order, so calling refreshStatus()
+        // earlier dereferenced the uninitialized backing StateFlow during app startup.
+        if (prefs.sessionPin.isEmpty()) {
+            prefs.generateNewPin()
+        }
+        DiagnosticsManager.update {
+            copy(
+                sessionPin   = prefs.sessionPin,
+                isPaired     = prefs.isPaired,
+                pairedPeerIp = prefs.pairedBridgeIp,
+            )
+        }
+        refreshStatus()
+    }
 
     /**
      * Refresh permission status and network availability.

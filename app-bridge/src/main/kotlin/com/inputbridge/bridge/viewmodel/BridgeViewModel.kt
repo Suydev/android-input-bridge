@@ -36,11 +36,6 @@ class BridgeViewModel(
         private const val TAG = "BridgeViewModel"
     }
 
-    init {
-        // Initialise permission/network status on first load.
-        refreshStatus()
-    }
-
     /** Full diagnostics snapshot — source of truth for all status UI. */
     val diagnostics: StateFlow<DiagnosticsData> = DiagnosticsManager.state
 
@@ -69,6 +64,13 @@ class BridgeViewModel(
      */
     private val _isNetworkAvailable = MutableStateFlow(checkNetworkAvailable())
     val isNetworkAvailable: StateFlow<Boolean> = _isNetworkAvailable.asStateFlow()
+
+    init {
+        // BUG-080 FIX: this must follow _isNetworkAvailable's construction. Kotlin runs
+        // property initializers and init blocks in source order, so calling refreshStatus()
+        // earlier dereferenced the uninitialized backing StateFlow during app startup.
+        refreshStatus()
+    }
 
     /**
      * Refresh permission status and network availability.

@@ -1654,3 +1654,16 @@ and `init {}` block).
 **Priority**: Critical
 **Status**: ✅ FIXED (Session 020; Android CI passed)
 **Fix**: Removed automatic notification-permission launches. The existing Permissions screens request the permission from a user tap.
+
+---
+
+## BUG-080 — ViewModel invokes `refreshStatus()` before its state flow is initialized
+
+**Description**: Both `BridgeViewModel` and `ReceiverViewModel` call `refreshStatus()` from an `init` block that appears before `_isNetworkAvailable` in source order. Kotlin initializes properties and init blocks in source order, so `refreshStatus()` writes to a null `MutableStateFlow` and crashes while Koin creates the ViewModel.
+**Steps to reproduce**: Launch `com.inputbridge.receiver.debug` on the OnePlus Pad Go.
+**Expected behavior**: The ViewModel initializes network and battery status, then the welcome screen appears.
+**Actual behavior**: The app crashes during Koin ViewModel creation with `NullPointerException` at `ReceiverViewModel.refreshStatus()`.
+**Suspected cause**: An `init` block was placed above the backing StateFlow declaration in both ViewModels.
+**Files involved**: `app-bridge/src/main/kotlin/com/inputbridge/bridge/viewmodel/BridgeViewModel.kt`, `app-receiver/src/main/kotlin/com/inputbridge/receiver/viewmodel/ReceiverViewModel.kt`.
+**Priority**: Critical
+**Status**: 🔴 OPEN
