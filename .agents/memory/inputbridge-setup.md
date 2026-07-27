@@ -12,9 +12,9 @@ Read README.md, AI_CONTEXT.md, PROJECT_STATE.md, TASKS.md, ROADMAP.md, DECISIONS
 
 **How to apply:** First 10 actions of any new session must be reading these files.
 
-## Current state (Session 011)
+## Current state (Session 020)
 - All Phases 1–7 complete. Phase 8 (Wi-Fi Direct, DataStore, clipboard sync, macros) is future work.
-- All bugs BUG-001 through BUG-031 resolved or documented. BUG-027 (USB bulkTransfer) and BUG-030 (scroll sensitivity) are DEFERRED.
+- BUG-079 prevents an OEM launch crash by keeping `POST_NOTIFICATIONS` requests user-initiated in the Permissions screens; Android CI and Release passed for commit `c1b0497`.
 - GitHub: https://github.com/Suydev/android-input-bridge
 - Push with: `git remote set-url origin "https://$(printenv GITHUB_PAT)@github.com/Suydev/android-input-bridge.git" && git push origin main`
 - CI builds on every push to main — check Actions tab for APK artifacts.

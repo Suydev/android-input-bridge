@@ -1652,5 +1652,5 @@ and `init {}` block).
 **Suspected cause**: Runtime permission launcher invoked from activity startup rather than an explicit user action.
 **Files involved**: `app-bridge/.../MainActivity.kt`, `app-receiver/.../MainActivity.kt`.
 **Priority**: Critical
-**Status**: ✅ FIXED (local, pending device verification)
+**Status**: ✅ FIXED (Session 020; Android CI passed)
 **Fix**: Removed automatic notification-permission launches. The existing Permissions screens request the permission from a user tap.

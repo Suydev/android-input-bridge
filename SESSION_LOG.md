@@ -5,7 +5,7 @@
 ## Session 020 — Startup crash mitigation (BUG-079)
 **Date:** 2026-07-27
 **Agent:** Codex
-**Status:** 🔄 In Progress
+**Status:** ✅ Complete
 
 ### Goals
 - Eliminate the activity-startup runtime permission path implicated in the reported open crash.
@@ -18,8 +18,8 @@
 - `BUGS.md`: verified BUG-075 through BUG-078 were already fixed in code; documented BUG-079.
 
 ### Verification
-- GitHub CI was green for the starting revision. Local Gradle compilation is unavailable in this environment because no JDK is installed.
-- Fresh-device verification remains required after CI builds this change.
+- Android CI and Release both passed for commit `c1b0497`, which contains BUG-079 and the required coroutine-import repair.
+- Fresh-device verification remains required on the affected Android device.
 
 ---
 
