@@ -1,8 +1,5 @@
 package com.inputbridge.receiver.ui
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.KeyEvent
@@ -10,10 +7,6 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
-import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.withStarted
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -22,7 +15,6 @@ import com.inputbridge.receiver.ui.theme.ReceiverTheme
 import com.inputbridge.receiver.viewmodel.ReceiverViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import org.koin.androidx.viewmodel.ext.android.viewModel
 
 /**
@@ -41,16 +33,6 @@ import org.koin.androidx.viewmodel.ext.android.viewModel
 class MainActivity : ComponentActivity() {
 
     private val viewModel: ReceiverViewModel by viewModel()
-
-    // ── POST_NOTIFICATIONS runtime permission (Android 13+) ───────────────────
-
-    /**
-     * Proactively request POST_NOTIFICATIONS so the foreground service notification
-     * is visible on Android 13+ (OnePlus Pad Go target). Without this the
-     * persistent notification is silently suppressed.
-     */
-    private val notificationPermLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* no-op */ }
 
     // ── Emergency stop via Volume Down hold ───────────────────────────────────
 
@@ -110,29 +92,11 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // BUG-058 + BUG-066 FIX: defer the permission launcher until the activity is at
-        // least STARTED. Calling launch() synchronously inside onCreate() — even after
-        // setContent{} — can race with Compose's LifecycleOwner registration on OEM builds
-        // (OnePlus OxygenOS, MIUI) and throw IllegalStateException when the system tries
-        // to dispatch the result back to a LifecycleOwner that does not yet exist.
-        // lifecycle.withStarted{} suspends until STARTED then runs the block exactly once.
-        lifecycleScope.launch {
-            lifecycle.withStarted { requestNotificationPermissionIfNeeded() }
-        }
+        // BUG-079 FIX: do not launch a runtime permission dialog during activity startup.
+        // ReceiverPermissionsScreen owns POST_NOTIFICATIONS and launches it from the user's tap.
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(
-                    this, Manifest.permission.POST_NOTIFICATIONS
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                notificationPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }
-    }
 
     // ── Volume-Down emergency stop ────────────────────────────────────────────
 

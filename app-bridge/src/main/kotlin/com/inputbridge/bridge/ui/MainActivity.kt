@@ -1,8 +1,5 @@
 package com.inputbridge.bridge.ui
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.KeyEvent
@@ -11,10 +8,6 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
-import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.withStarted
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -24,7 +17,6 @@ import com.inputbridge.bridge.ui.theme.BridgeTheme
 import com.inputbridge.bridge.viewmodel.BridgeViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
 import org.koin.androidx.viewmodel.ext.android.viewModel
 
@@ -53,16 +45,6 @@ class MainActivity : ComponentActivity() {
     // where the Application context is correct; the Koin singleton was already created with
     // androidContext() (Application context) in BridgeModule.
     private val prefs: BridgePreferences by inject()
-
-    // ── POST_NOTIFICATIONS runtime permission (Android 13+) ───────────────────
-
-    /**
-     * Request POST_NOTIFICATIONS on first launch so the foreground service
-     * notification is guaranteed to appear. Without it on API 33+ the service
-     * notification is silently suppressed, making the service appear broken.
-     */
-    private val notificationPermLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* no-op */ }
 
     // ── Emergency stop via Volume Down hold ───────────────────────────────────
 
@@ -128,15 +110,8 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // BUG-058 + BUG-066 FIX: defer the permission launcher until the activity is at
-        // least STARTED. Calling launch() synchronously inside onCreate() — even after
-        // setContent{} — can race with Compose's LifecycleOwner registration on OEM builds
-        // (OnePlus OxygenOS, MIUI) and throw IllegalStateException when the system tries
-        // to dispatch the result back to a LifecycleOwner that does not yet exist.
-        // lifecycle.withStarted{} suspends until STARTED then runs the block exactly once.
-        lifecycleScope.launch {
-            lifecycle.withStarted { requestNotificationPermissionIfNeeded() }
-        }
+        // BUG-079 FIX: do not launch a runtime permission dialog during activity startup.
+        // PermissionsScreen owns POST_NOTIFICATIONS and launches it from the user's tap.
     }
 
     override fun onResume() {
@@ -182,22 +157,6 @@ class MainActivity : ComponentActivity() {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-
-    /**
-     * On Android 13+ silently check POST_NOTIFICATIONS and ask for it if denied.
-     * The system dialog only shows once; on subsequent launches ContextCompat
-     * reports the cached result and we skip the launcher.
-     */
-    private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(
-                    this, Manifest.permission.POST_NOTIFICATIONS
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                notificationPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }
-    }
 
     private fun applyKeepScreenOn() {
         // prefs is the Koin-injected singleton — see field declaration above (BUG-057 fix).

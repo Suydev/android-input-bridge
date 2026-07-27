@@ -2,6 +2,27 @@
 
 ---
 
+## Session 020 — Startup crash mitigation (BUG-079)
+**Date:** 2026-07-27
+**Agent:** Codex
+**Status:** 🔄 In Progress
+
+### Goals
+- Eliminate the activity-startup runtime permission path implicated in the reported open crash.
+- Preserve a safe, explicit notification-permission request path.
+
+### What Was Changed
+- `app-bridge/.../MainActivity.kt`: removed automatic `POST_NOTIFICATIONS` launcher invocation from startup.
+- `app-receiver/.../MainActivity.kt`: removed the same startup launcher invocation.
+- Both existing Permissions screens remain responsible for requesting the permission after a user tap.
+- `BUGS.md`: verified BUG-075 through BUG-078 were already fixed in code; documented BUG-079.
+
+### Verification
+- GitHub CI was green for the starting revision. Local Gradle compilation is unavailable in this environment because no JDK is installed.
+- Fresh-device verification remains required after CI builds this change.
+
+---
+
 ## Session 018 — Imported project setup and CI verification
 **Date:** 2026-07-24
 **Agent:** Replit Agent

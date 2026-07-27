@@ -4,6 +4,15 @@ Complete checklist of all project tasks. Never delete completed tasks. Always ap
 
 ---
 
+## Session 020 — Startup crash mitigation
+
+- [x] Audit both application launch paths and confirm GitHub CI succeeds for the current release
+- [x] Remove automatic POST_NOTIFICATIONS permission launches from activity startup (BUG-079)
+- [x] Preserve notification permission requests in the existing user-initiated Permissions screens
+- [ ] Verify fresh launch on the affected Android device and capture logcat if it still fails
+
+---
+
 ## Session 018 — Imported project setup and CI verification ✅
 
 - [x] Reviewed imported project structure, agent instructions, skills, and persistent memory

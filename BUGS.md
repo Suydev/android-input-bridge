@@ -1561,7 +1561,8 @@ singleton via `by inject()`.
 service classes.
 **Files involved**: `app-bridge/.../BridgeService.kt:148`, `app-receiver/.../ReceiverService.kt:112`.
 **Priority**: Medium
-**Status**: 🔴 OPEN
+**Status**: ✅ FIXED (Session 019)
+**Fix**: Both services now obtain their preferences with Koin `by inject()`.
 
 ---
 
@@ -1580,7 +1581,8 @@ user-visible signal that the foreground service is active.
 **Suspected cause**: Using an internal Android drawable rather than an app-owned drawable resource.
 **Files involved**: `app-bridge/.../BridgeService.kt:766`, `app-receiver/.../ReceiverService.kt:449`.
 **Priority**: Low
-**Status**: 🔴 OPEN
+**Status**: ✅ FIXED (Session 019)
+**Fix**: Both apps now use their own monochrome `R.drawable.ic_notification` vector.
 
 ---
 
@@ -1601,7 +1603,8 @@ non-null, telling the user what went wrong.
 **Suspected cause**: Missing UI layer for `DiagnosticsData.lastError` on the primary screens.
 **Files involved**: `app-bridge/.../WelcomeScreen.kt`, `app-receiver/.../WelcomeScreen.kt`.
 **Priority**: High
-**Status**: 🔴 OPEN
+**Status**: ✅ FIXED (Session 019)
+**Fix**: Both welcome screens render an inline error banner from `DiagnosticsData.lastError`.
 
 ---
 
@@ -1635,4 +1638,19 @@ when the scope was introduced. Both services have handlers; this singleton objec
 **Files involved**: `accessibility-receiver/.../AccessibilityCommandBus.kt` (scope declaration
 and `init {}` block).
 **Priority**: Critical
-**Status**: 🔴 OPEN
+**Status**: ✅ FIXED (Session 019)
+**Fix**: The command-bus scope now has a `CoroutineExceptionHandler` that logs and records injection failures.
+
+---
+
+## BUG-079 — Startup permission launcher can crash before the first screen is usable
+
+**Description**: Both activities launched the Android 13+ notification permission dialog as part of startup. Even when deferred until the lifecycle is STARTED, OEM ActivityResult implementations can still fail while the initial Compose hierarchy is being restored.
+**Steps to reproduce**: Fresh-install on an Android 13+ OEM device, open either app, and dismiss or background the notification dialog during startup.
+**Expected behavior**: The app opens its welcome screen without any system dialog being launched automatically.
+**Actual behavior**: The app can crash before the user can interact with the welcome screen.
+**Suspected cause**: Runtime permission launcher invoked from activity startup rather than an explicit user action.
+**Files involved**: `app-bridge/.../MainActivity.kt`, `app-receiver/.../MainActivity.kt`.
+**Priority**: Critical
+**Status**: ✅ FIXED (local, pending device verification)
+**Fix**: Removed automatic notification-permission launches. The existing Permissions screens request the permission from a user tap.

@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 019 — hard-bug audit and pipeline hardening BUG-064→BUG-074 (2026-07-25)
+> **Last updated:** Session 020 — startup crash mitigation BUG-079 (2026-07-27)
 
 ---
 
