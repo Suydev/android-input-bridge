@@ -58,6 +58,8 @@ data class DisplayConfig(
      * Requires SYSTEM_ALERT_WINDOW / canDrawOverlays permission.
      */
     val showCursorOverlay: Boolean = false,
+    /** Size of the receiver cursor overlay in density-independent pixels. */
+    val cursorSizeDp: Int = 40,
 )
 
 data class SecurityConfig(

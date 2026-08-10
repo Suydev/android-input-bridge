@@ -14,6 +14,7 @@ import com.inputbridge.core.config.TransportConfig
 import com.inputbridge.diagnostics.DiagnosticsData
 import com.inputbridge.diagnostics.DiagnosticsManager
 import com.inputbridge.receiver.prefs.ReceiverPreferences
+import com.inputbridge.receiver.service.CursorOverlayService
 import com.inputbridge.receiver.service.ReceiverService
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -112,6 +113,7 @@ class ReceiverViewModel(
             mouse     = MouseConfig(),
             display   = DisplayConfig(
                 showCursorOverlay = prefs.showCursorOverlay,
+                cursorSizeDp      = prefs.cursorSizeDp,
                 autoStartOnBoot   = prefs.autoStartOnBoot,
             ),
         )
@@ -136,6 +138,20 @@ class ReceiverViewModel(
     fun setCursorOverlayEnabled(enabled: Boolean) {
         _config.update { it.copy(display = it.display.copy(showCursorOverlay = enabled)) }
         prefs.showCursorOverlay = enabled
+    }
+
+    fun setCursorSizeDp(sizeDp: Int) {
+        // BUG-098 fix: update the active overlay immediately, not just after a service restart.
+        val constrained = sizeDp.coerceIn(
+            ReceiverPreferences.MIN_CURSOR_SIZE_DP,
+            ReceiverPreferences.MAX_CURSOR_SIZE_DP,
+        )
+        _config.update { it.copy(display = it.display.copy(cursorSizeDp = constrained)) }
+        prefs.cursorSizeDp = constrained
+        if (prefs.showCursorOverlay) {
+            context.stopService(Intent(context, CursorOverlayService::class.java))
+            context.startService(Intent(context, CursorOverlayService::class.java))
+        }
     }
 
     /**

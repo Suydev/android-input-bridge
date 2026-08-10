@@ -25,6 +25,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.inputbridge.receiver.ui.theme.*
 import com.inputbridge.receiver.viewmodel.ReceiverViewModel
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -103,11 +104,11 @@ fun ReceiverSettingsScreen(onBack: () -> Unit, viewModel: ReceiverViewModel) {
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            "Cursor Dot Overlay",
+                            "Cursor Overlay",
                             color = ReceiverOnSurface, fontFamily = FontFamily.Monospace,
                         )
                         Text(
-                            "Show a floating crosshair at the virtual cursor position.",
+                            "Show an arrow at the virtual cursor position.",
                             color = ReceiverDim, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
                         )
                     }
@@ -145,10 +146,36 @@ fun ReceiverSettingsScreen(onBack: () -> Unit, viewModel: ReceiverViewModel) {
                     )
                 } else if (config.display.showCursorOverlay && canDrawOverlays) {
                     Text(
-                        "Overlay active — a green dot shows where clicks will land.",
+                        "Overlay active — the arrow shows where clicks will land.",
                         color = ReceiverPrimary, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
                     )
                 }
+            }
+
+            if (config.display.showCursorOverlay) {
+                Text(
+                    "Cursor size: ${config.display.cursorSizeDp}dp",
+                    color = ReceiverOnSurface,
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+                Slider(
+                    value = config.display.cursorSizeDp.toFloat(),
+                    onValueChange = { viewModel.setCursorSizeDp(it.roundToInt()) },
+                    valueRange = 24f..64f,
+                    steps = 39,
+                    colors = SliderDefaults.colors(
+                        thumbColor = ReceiverPrimary,
+                        activeTrackColor = ReceiverPrimary,
+                        inactiveTrackColor = ReceiverDim.copy(alpha = 0.3f),
+                    ),
+                )
+                Text(
+                    "BUG-098: size changes apply immediately and remain saved.",
+                    color = ReceiverDim,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
             }
 
             HorizontalDivider(color = ReceiverDim.copy(alpha = 0.3f))

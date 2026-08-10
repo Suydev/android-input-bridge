@@ -59,7 +59,10 @@ class UdpTransport(
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
-    private val _incomingPackets = MutableSharedFlow<Packet>(extraBufferCapacity = 128)
+    // BUG-097 fix: connect() starts the socket reader before service startup has finished
+    // installing its collector. Retain the first datagram so an initial PAIR_REQUEST or
+    // PAIR_RESPONSE cannot disappear in that short window; each transport is session-local.
+    private val _incomingPackets = MutableSharedFlow<Packet>(replay = 1, extraBufferCapacity = 128)
 
     /**
      * BUG-069 FIX — dual-priority send queues.

@@ -67,6 +67,14 @@ class ReceiverPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_SHOW_CURSOR_OVERLAY, false)
         set(value) = prefs.edit().putBoolean(KEY_SHOW_CURSOR_OVERLAY, value).apply()
 
+    // BUG-098 fix: persist a tablet-appropriate cursor size instead of hardcoding 40dp.
+    var cursorSizeDp: Int
+        get() = prefs.getInt(KEY_CURSOR_SIZE_DP, DEFAULT_CURSOR_SIZE_DP)
+            .coerceIn(MIN_CURSOR_SIZE_DP, MAX_CURSOR_SIZE_DP)
+        set(value) = prefs.edit()
+            .putInt(KEY_CURSOR_SIZE_DP, value.coerceIn(MIN_CURSOR_SIZE_DP, MAX_CURSOR_SIZE_DP))
+            .apply()
+
     /**
      * When true, [BootReceiver] starts ReceiverService automatically after reboot.
      * User can disable via Settings → System.
@@ -83,7 +91,11 @@ class ReceiverPreferences(context: Context) {
         private const val KEY_IS_PAIRED          = "is_paired"
         // Phase 7
         private const val KEY_SHOW_CURSOR_OVERLAY = "show_cursor_overlay"
+        private const val KEY_CURSOR_SIZE_DP       = "cursor_size_dp"
         private const val KEY_AUTO_START_ON_BOOT  = "auto_start_on_boot"
         const val DEFAULT_PORT        = 54321
+        const val MIN_CURSOR_SIZE_DP = 24
+        const val MAX_CURSOR_SIZE_DP = 64
+        const val DEFAULT_CURSOR_SIZE_DP = 40
     }
 }

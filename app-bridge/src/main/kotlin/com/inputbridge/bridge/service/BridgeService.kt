@@ -319,6 +319,11 @@ class BridgeService : Service() {
         pairResponseDeferred = CompletableDeferred()
         startIncomingLoop(transport)
 
+        // BUG-095 fix: USB discovery is independent from network pairing. A dongle that
+        // was attached before the service started has no second ATTACHED broadcast, so it
+        // must be enumerated before the pairing branch can return early.
+        checkPreAttachedUsb()
+
         // Pairing: only attempt if a PIN is configured AND not already paired.
         if (prefs.pairingPin.isNotEmpty() && !prefs.isPaired) {
             val paired = doPairing(transport)
@@ -351,8 +356,6 @@ class BridgeService : Service() {
         startPingLoop(transport)
         startWatchdog()
 
-        // Handle USB devices already attached before service started
-        checkPreAttachedUsb()
     }
 
     // ── Bluetooth HID pipeline ────────────────────────────────────────────────
@@ -490,26 +493,38 @@ class BridgeService : Service() {
         transport.send(packetFactory.makePairRequest(pin))
         BridgeLogger.i(TAG, "PAIR_REQUEST sent (pin=****)")
 
-        val accepted = withTimeoutOrNull(PAIR_TIMEOUT_MS) {
+        // BUG-096 fix: preserve null so a missing UDP reply is not presented as a bad PIN.
+        val accepted: Boolean? = withTimeoutOrNull(PAIR_TIMEOUT_MS) {
             pairResponseDeferred.await()
-        } ?: false
+        }
 
-        return if (accepted) {
-            prefs.isPaired = true
-            transport.send(packetFactory.makePairConfirm())
-            DiagnosticsManager.update {
-                copy(isPaired = true, pairedPeerIp = prefs.targetIp, transportConnected = true)
+        return when (accepted) {
+            true -> {
+                prefs.isPaired = true
+                transport.send(packetFactory.makePairConfirm())
+                DiagnosticsManager.update {
+                    copy(isPaired = true, pairedPeerIp = prefs.targetIp, transportConnected = true)
+                }
+                BridgeLogger.i(TAG, "Pairing confirmed")
+                updateNotification("Paired — waiting for USB device…")
+                true
             }
-            BridgeLogger.i(TAG, "Pairing confirmed")
-            updateNotification("Paired — waiting for USB device…")
-            true
-        } else {
-            BridgeLogger.w(TAG, "Pairing rejected or timed out")
-            updateNotification("Pairing failed — check PIN in Settings")
-            DiagnosticsManager.update {
-                copy(isPaired = false, lastError = "Pairing failed — check PIN matches receiver display")
+            false -> {
+                BridgeLogger.w(TAG, "Pairing rejected by receiver")
+                updateNotification("Pairing rejected — check PIN in Settings")
+                DiagnosticsManager.update {
+                    copy(isPaired = false, lastError = "Pairing rejected — PIN does not match receiver display")
+                }
+                false
             }
-            false
+            null -> {
+                BridgeLogger.w(TAG, "Pairing response timed out")
+                updateNotification("Pairing timed out — check receiver is listening")
+                DiagnosticsManager.update {
+                    copy(isPaired = false, lastError = "Pairing timed out — check receiver, IP, port, and Wi-Fi")
+                }
+                false
+            }
         }
     }
 
@@ -639,7 +654,16 @@ class BridgeService : Service() {
 
     private fun onUsbAttached(device: UsbDevice) {
         BridgeLogger.i(TAG, "USB HID device attached: ${device.deviceName}")
-        DiagnosticsManager.update { copy(usbDeviceName = device.deviceName) }
+        // BUG-094 fix: hardware detection is useful before permission/capture succeeds.
+        // Keep it separate from inputCaptureActive so the UI never claims no device exists.
+        DiagnosticsManager.update {
+            copy(
+                usbDeviceConnected = true,
+                usbDeviceName = device.deviceName,
+                usbPermissionGranted = usbManager.hasPermission(device),
+                inputCaptureActive = false,
+            )
+        }
 
         if (usbManager.hasPermission(device)) {
             serviceScope.launch { startCapture(device) }
@@ -686,6 +710,10 @@ class BridgeService : Service() {
         captureJob = serviceScope.launch {
             capture.events.collect { rawEvent ->
                 val t0 = System.nanoTime()
+
+                // BUG-095 fix: capture can start before pairing, but a configured PIN must
+                // still prevent keyboard/mouse events from leaving the bridge until accepted.
+                if (prefs.pairingPin.isNotEmpty() && !prefs.isPaired) return@collect
 
                 // Apply bridge-side sensitivity to mouse movement deltas.
                 // prefs.bridgeSensitivity is 0.1–5.0; default 1.0 (no change).

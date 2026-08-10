@@ -1812,3 +1812,75 @@ and `init {}` block).
 **Priority**: Medium
 **Status**: ✅ FIXED (Session 022)
 **Fix**: Clear `lastSenderAddress` when opening and closing a UDP session.
+
+## BUG-093 — CI release artifacts do not consume the configured signing credentials
+
+**Description**: The GitHub Actions release job decodes a keystore and exports signing environment variables, but `AndroidAppConventionPlugin` defines no release `signingConfig`. Gradle therefore does not use `SIGNING_KEYSTORE_PATH`, `SIGNING_KEY_ALIAS`, `SIGNING_KEY_PASSWORD`, or `SIGNING_STORE_PASSWORD` when assembling release APKs.
+**Steps to reproduce**: Configure all four signing secrets, push to `main`, and inspect the Gradle application extension: the release build type has no assigned signing configuration.
+**Expected behavior**: When all signing inputs are supplied, both release APKs are signed with the configured release key. A main-branch release must fail clearly if any required signing input is absent.
+**Actual behavior**: CI can upload unsigned release artifacts even when a keystore is decoded.
+**Suspected cause**: Signing setup was added to the workflow but not to the shared Android application convention plugin.
+**Files involved**: `.github/workflows/ci.yml`, `build-logic/src/main/kotlin/AndroidAppConventionPlugin.kt`.
+**Priority**: High
+**Status**: 🔴 OPEN
+**Fix**:
+
+## BUG-094 — USB attachment is not reported until capture succeeds
+
+**Description**: `BridgeService.onUsbAttached()` records only the device name. It leaves `DiagnosticsData.usbDeviceConnected` false until `UsbInputCapture.start()` succeeds, so the bridge UI continues to show “no device connected” while Android has already detected the HID receiver and is awaiting USB permission or transport setup.
+**Steps to reproduce**: Start the bridge, attach the Portronics USB receiver, and inspect the bridge status while the USB permission prompt is visible or capture startup is pending.
+**Expected behavior**: The UI immediately shows the attached HID device, then separately reports whether permission and capture are active.
+**Actual behavior**: The UI says no device is connected until the full capture pipeline succeeds.
+**Suspected cause**: The physical-device state and the capture-active state are published together only after `startCapture()` returns true.
+**Files involved**: `app-bridge/src/main/kotlin/com/inputbridge/bridge/service/BridgeService.kt`.
+**Priority**: High
+**Status**: 🔴 OPEN
+**Fix**:
+
+## BUG-095 — Pre-attached USB capture is blocked by pairing failure
+
+**Description**: `BridgeService.startUdpPipeline()` calls `checkPreAttachedUsb()` only after the pairing branch. If pairing is rejected or times out, the function returns before enumerating an already attached USB HID receiver. The dynamic attach receiver cannot recover this case because its attach broadcast was delivered before the service began listening.
+**Steps to reproduce**: Attach the USB keyboard/mouse receiver, start the bridge with an incorrect or temporarily unreachable pairing configuration, then correct the configuration without physically replugging the dongle.
+**Expected behavior**: The bridge detects and prepares the attached HID device independently of pairing; input delivery is gated until pairing succeeds when a PIN is configured.
+**Actual behavior**: The device remains invisible until it is physically replugged after a successful pairing.
+**Suspected cause**: USB enumeration is incorrectly sequenced after the pairing early-return path.
+**Files involved**: `app-bridge/src/main/kotlin/com/inputbridge/bridge/service/BridgeService.kt`.
+**Priority**: Critical
+**Status**: 🔴 OPEN
+**Fix**:
+
+## BUG-096 — Pairing timeout is falsely reported as a wrong PIN
+
+**Description**: `BridgeService.doPairing()` collapses a rejected `PAIR_RESPONSE` and a `withTimeoutOrNull()` timeout into the same false result, then always tells the user to check the PIN. A correct PIN therefore appears wrong whenever the receiver is not listening, an initial datagram is lost, or the installed APK lacks reply-port fixes.
+**Steps to reproduce**: Configure the correct receiver PIN but stop the receiver service or block UDP traffic, then start the bridge.
+**Expected behavior**: The bridge distinguishes an explicit receiver rejection from a response timeout and gives an actionable network/listener message for the latter.
+**Actual behavior**: Both conditions display “Pairing failed — check PIN matches receiver display”.
+**Suspected cause**: The nullable timeout result is immediately converted to `false`.
+**Files involved**: `app-bridge/src/main/kotlin/com/inputbridge/bridge/service/BridgeService.kt`.
+**Priority**: High
+**Status**: 🔴 OPEN
+**Fix**:
+
+## BUG-097 — Receiver can drop an early pairing request before its collector starts
+
+**Description**: `ReceiverService.startListening()` starts `UdpTransport`, which immediately starts its receive coroutine, before registering the service collector for `incomingPackets`. The flow has `replay = 0`, so a PAIR_REQUEST arriving in that startup interval is discarded. The bridge then times out and misreports the result as a wrong PIN.
+**Steps to reproduce**: Start bridge and receiver in quick succession, or restart the receiver while the bridge is already retrying a PAIR_REQUEST.
+**Expected behavior**: The receiver subscribes to incoming packets before its UDP reader can emit them.
+**Actual behavior**: A valid initial pairing request can be lost during receiver startup.
+**Suspected cause**: Collector installation occurs after `UdpTransport.connect()` starts the receive loop.
+**Files involved**: `app-receiver/src/main/kotlin/com/inputbridge/receiver/service/ReceiverService.kt`, `transport-wifi/src/main/kotlin/com/inputbridge/transport/wifi/UdpTransport.kt`.
+**Priority**: High
+**Status**: 🔴 OPEN
+**Fix**:
+
+## BUG-098 — Receiver cursor cannot be sized or kept fully on-screen
+
+**Description**: The receiver overlay uses a fixed 40dp cursor and only clamps the overlay origin to the top and left edges. At the right or bottom screen edge, part of the pointer is clipped; users also cannot adjust its size for tablet-scale displays.
+**Steps to reproduce**: Enable the overlay, move the virtual cursor to the right or bottom edge, and inspect the pointer; try to adjust its size from receiver settings.
+**Expected behavior**: The complete pointer remains visible at every screen edge and receiver settings provides a persistent size control.
+**Actual behavior**: The arrow can be clipped and its size is fixed.
+**Suspected cause**: Overlay positioning ignores the view dimensions and the cursor geometry is hardcoded.
+**Files involved**: `app-receiver/src/main/kotlin/com/inputbridge/receiver/service/CursorOverlayService.kt`, `app-receiver/src/main/kotlin/com/inputbridge/receiver/ui/screens/ReceiverSettingsScreen.kt`, `app-receiver/src/main/kotlin/com/inputbridge/receiver/prefs/ReceiverPreferences.kt`.
+**Priority**: Medium
+**Status**: 🔴 OPEN
+**Fix**:

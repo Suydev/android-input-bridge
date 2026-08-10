@@ -17,11 +17,13 @@ import androidx.annotation.RequiresApi
 import com.inputbridge.accessibility.AccessibilityCommandBus
 import com.inputbridge.core.logging.BridgeLogger
 import com.inputbridge.diagnostics.DiagnosticsManager
+import com.inputbridge.receiver.prefs.ReceiverPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import org.koin.android.ext.android.inject
 
 private const val TAG = "CursorOverlayService"
 
@@ -56,6 +58,8 @@ class CursorOverlayService : Service() {
     private lateinit var windowManager: WindowManager
     private var overlayView: CursorArrowView? = null
     private var layoutParams: WindowManager.LayoutParams? = null
+    private var overlaySizePx = 0
+    private val prefs: ReceiverPreferences by inject()
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
@@ -69,9 +73,11 @@ class CursorOverlayService : Service() {
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
-        // Arrow view includes padding for a complete outline and shadow.
+        // BUG-098 fix: Arrow size is user-configurable and persisted for tablet displays.
+        // The view still includes padding for a complete outline and shadow.
         val density = resources.displayMetrics.density
-        val viewPx = (CursorArrowView.CURSOR_DP * density).toInt()
+        val viewPx = (prefs.cursorSizeDp * density).toInt().coerceAtLeast(1)
+        overlaySizePx = viewPx
 
         val params = WindowManager.LayoutParams(
             viewPx, viewPx,
@@ -103,7 +109,7 @@ class CursorOverlayService : Service() {
             return
         }
 
-        BridgeLogger.i(TAG, "Cursor arrow overlay created (view=${viewPx}px)")
+        BridgeLogger.i(TAG, "Cursor arrow overlay created (view=${viewPx}px, size=${prefs.cursorSizeDp}dp)")
         DiagnosticsManager.update { copy(cursorOverlayActive = true) }
 
         // Observe cursor position and move the overlay view.
@@ -115,7 +121,8 @@ class CursorOverlayService : Service() {
     }
 
     /**
-     * Move the overlay so the arrow TIP lands exactly on (x, y).
+     * Move the overlay so the arrow TIP lands exactly on (x, y), except at the
+     * right/bottom screen edges where the complete pointer must remain visible.
      *
      * The arrow tip is inset inside the view so its outline and shadow are not clipped.
      * Offset the containing view by the same inset to keep the logical hotspot exact.
@@ -124,8 +131,12 @@ class CursorOverlayService : Service() {
         val params = layoutParams ?: return
         val view   = overlayView  ?: return
         val insetPx = (CursorArrowView.HOTSPOT_INSET_DP * resources.displayMetrics.density).toInt()
-        params.x = (x.toInt() - insetPx).coerceAtLeast(0)
-        params.y = (y.toInt() - insetPx).coerceAtLeast(0)
+        // BUG-098 fix: clamp both edges using the actual configured overlay size.
+        // The old top/left-only clamp allowed the view to disappear off right/bottom.
+        val maxX = (resources.displayMetrics.widthPixels - overlaySizePx).coerceAtLeast(0)
+        val maxY = (resources.displayMetrics.heightPixels - overlaySizePx).coerceAtLeast(0)
+        params.x = (x.toInt() - insetPx).coerceIn(0, maxX)
+        params.y = (y.toInt() - insetPx).coerceIn(0, maxY)
         runCatching { windowManager.updateViewLayout(view, params) }
     }
 
@@ -165,13 +176,11 @@ class CursorOverlayService : Service() {
  *   2. Fill pass: white fill
  *   3. Stroke pass: thin black outline for sharpness on any background
  *
- * View is sized to CURSOR_DP × CURSOR_DP so the arrow fits with room for the shadow.
+ * View is sized by receiver preference so the arrow fits the target display.
  */
 private class CursorArrowView(context: android.content.Context) : View(context) {
 
     companion object {
-        /** Size of the complete cursor canvas, including outline and shadow padding. */
-        const val CURSOR_DP = 40
         /** Inset from canvas edge to the pointer tip; also the hotspot offset. */
         const val HOTSPOT_INSET_DP = 2
     }
