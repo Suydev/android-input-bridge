@@ -81,6 +81,28 @@
             android:foregroundServiceType="connectedDevice"
             android:enabled="true" />
 
+        <!-- Mouse trackpad overlay — transparent fullscreen, turns phone screen into trackpad -->
+        <activity
+            android:name=".ui.MouseTrackpadActivity"
+            android:exported="false"
+            android:theme="@style/Theme.InputBridgeTrackpad"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize" />
+
+        <!-- Accessibility service for USB keyboard capture — intercepts all key events -->
+        <service
+            android:name=".service.BridgeAccessibilityService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/bridge_accessibility_service_config" />
+        </service>
+
         <receiver
             android:name=".receiver.BootReceiver"
             android:exported="true"

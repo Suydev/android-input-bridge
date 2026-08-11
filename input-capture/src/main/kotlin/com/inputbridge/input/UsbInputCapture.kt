@@ -63,14 +63,18 @@ class UsbInputCapture(
     override suspend fun start(): Boolean {
         if (isActive) return true
         _status.value = CaptureStatus.Starting
+        BridgeLogger.i(TAG, "start() called for ${device.deviceName} " +
+            "(class=${device.deviceClass}, interfaces=${device.interfaceCount})")
 
         val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
         val conn = usbManager.openDevice(device) ?: run {
-            BridgeLogger.e(TAG, "Failed to open USB device: ${device.deviceName}")
+            BridgeLogger.e(TAG, "Failed to open USB device: ${device.deviceName} — " +
+                "check if another app holds the device or USB permission is missing")
             _status.value = CaptureStatus.Error("Cannot open USB device", recoverable = false)
             return false
         }
         connection = conn
+        BridgeLogger.i(TAG, "USB device opened: ${device.deviceName}")
 
         var started = false
         // BUG-083 FIX: reader coroutines test isActive before every bulkTransfer.
@@ -79,7 +83,13 @@ class UsbInputCapture(
         isActive = true
         for (i in 0 until device.interfaceCount) {
             val iface = device.getInterface(i)
-            if (iface.interfaceClass != UsbConstants.USB_CLASS_HID) continue
+            BridgeLogger.d(TAG, "Interface $i: class=${iface.interfaceClass} " +
+                "subclass=${iface.interfaceSubclass} protocol=${iface.interfaceProtocol} " +
+                "endpoints=${iface.endpointCount}")
+            if (iface.interfaceClass != UsbConstants.USB_CLASS_HID) {
+                BridgeLogger.d(TAG, "  → skipping non-HID interface (class=${iface.interfaceClass})")
+                continue
+            }
             if (!conn.claimInterface(iface, true)) {
                 BridgeLogger.w(TAG, "Could not claim HID interface $i — skipping")
                 continue
@@ -197,10 +207,13 @@ class UsbInputCapture(
         val buf = ByteArray(endpoint.maxPacketSize.coerceAtLeast(8))
         var prevKeys = IntArray(6)
         var prevModifiers: ModifierState = ModifierState.NONE
+        var reportCount = 0L
+        BridgeLogger.i(TAG, "Keyboard reader started (endpoint.maxPacket=${endpoint.maxPacketSize})")
 
         while (this@UsbInputCapture.isActive && coroutineContext.isActive) {
             val transferred = conn.bulkTransfer(endpoint, buf, buf.size, TRANSFER_TIMEOUT_MS)
             if (transferred < 2) continue  // need at least modifier byte + reserved
+            reportCount++
 
             val modByte = buf[0]
             val modifiers = parseModifiers(modByte)
@@ -225,11 +238,16 @@ class UsbInputCapture(
                 if (curr != 0 && curr !in prevKeys) {
                     val androidCode = KeyMap.hidToAndroid(curr)
                     _events.emit(InputEvent.KeyDown(androidCode, curr, modifiers))
+                    if (reportCount <= 5L) {
+                        BridgeLogger.i(TAG, "Key report #$reportCount: HID=0x${curr.toString(16)} " +
+                            "→ Android=$androidCode (${KeyEvent.keyCodeToString(androidCode)})")
+                    }
                 }
             }
             // Pad prevKeys to 6 slots so the "not in" check works correctly next iteration
             prevKeys = IntArray(6).also { dst -> currentKeys.copyInto(dst) }
         }
+        BridgeLogger.i(TAG, "Keyboard reader stopped after $reportCount reports")
     }
 
     // ── Mouse reader ──────────────────────────────────────────────────────────
@@ -252,16 +270,24 @@ class UsbInputCapture(
     ) = withContext(Dispatchers.IO) {
         val buf = ByteArray(endpoint.maxPacketSize.coerceAtLeast(8))
         var prevButtons = 0
+        var reportCount = 0L
+        BridgeLogger.i(TAG, "Mouse reader started (endpoint.maxPacket=${endpoint.maxPacketSize})")
 
         while (this@UsbInputCapture.isActive && coroutineContext.isActive) {
             val transferred = conn.bulkTransfer(endpoint, buf, buf.size, TRANSFER_TIMEOUT_MS)
             if (transferred < 3) continue
+            reportCount++
 
             val buttons = buf[0].toInt() and 0x07   // bits 0–2: left, right, middle
             val dx      = buf[1].toByte().toFloat()  // signed relative X
             val dy      = buf[2].toByte().toFloat()  // signed relative Y
             // Wheel (byte 3) present in 4-byte and 5-byte reports
             val wheel   = if (transferred >= 4) buf[3].toByte().toFloat() else 0f
+
+            if (reportCount <= 3L || reportCount % 500L == 0L) {
+                BridgeLogger.d(TAG, "Mouse report #$reportCount: dx=$dx dy=$dy " +
+                    "wheel=$wheel buttons=$buttons bytes=$transferred")
+            }
 
             // Mouse movement — emit if either axis has a delta
             if (dx != 0f || dy != 0f) {
@@ -280,11 +306,18 @@ class UsbInputCapture(
                 val wasDown = (prevButtons and mask) != 0
                 val isDown  = (buttons    and mask) != 0
                 val button  = MouseButton.fromId(bit.toByte())
-                if (!wasDown && isDown) _events.emit(InputEvent.MouseButtonDown(button))
-                if (wasDown  && !isDown) _events.emit(InputEvent.MouseButtonUp(button))
+                if (!wasDown && isDown) {
+                    BridgeLogger.d(TAG, "Mouse button DOWN: $button")
+                    _events.emit(InputEvent.MouseButtonDown(button))
+                }
+                if (wasDown  && !isDown) {
+                    BridgeLogger.d(TAG, "Mouse button UP: $button")
+                    _events.emit(InputEvent.MouseButtonUp(button))
+                }
             }
             prevButtons = buttons
         }
+        BridgeLogger.i(TAG, "Mouse reader stopped after $reportCount reports")
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

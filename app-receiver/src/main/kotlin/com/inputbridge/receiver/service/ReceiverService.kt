@@ -428,9 +428,18 @@ class ReceiverService : Service() {
                         }
                         lastInputSeqNo = seq
 
-                        val event = PacketToEventConverter.toInputEvent(packet) ?: return@collect
+                        val event = PacketToEventConverter.toInputEvent(packet)
+                        if (event == null) {
+                            BridgeLogger.w(TAG, "PacketToEventConverter returned null for ${packet.type}")
+                            return@collect
+                        }
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                            AccessibilityCommandBus.post(event)
+                            if (AccessibilityCommandBus.isServiceConnected()) {
+                                AccessibilityCommandBus.post(event)
+                            } else {
+                                BridgeLogger.w(TAG, "Accessibility service not connected — " +
+                                    "dropping ${event::class.simpleName}")
+                            }
                         } else {
                             BridgeLogger.w(TAG, "Android N+ required for accessibility injection — skipping")
                         }

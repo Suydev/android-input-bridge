@@ -1,6 +1,7 @@
 package com.inputbridge.accessibility
 
 import android.os.Build
+import android.view.KeyEvent
 import androidx.annotation.RequiresApi
 import com.inputbridge.core.logging.BridgeLogger
 import com.inputbridge.core.model.*
@@ -128,6 +129,9 @@ object AccessibilityCommandBus {
         BridgeLogger.i(TAG, "Service detached")
     }
 
+    /** Check whether the accessibility service is currently connected. */
+    fun isServiceConnected(): Boolean = service != null
+
     fun setScreenSize(width: Int, height: Int) {
         screenWidth  = width.toFloat()
         screenHeight = height.toFloat()
@@ -220,6 +224,8 @@ object AccessibilityCommandBus {
 
             // ── Mouse clicks ──────────────────────────────────────────────────
             is InputEvent.MouseButtonDown -> {
+                BridgeLogger.d(TAG, "Tap/longPress at (${cursorX.toInt()}, ${cursorY.toInt()}) " +
+                    "button=${event.button}")
                 when (event.button) {
                     MouseButton.LEFT    -> svc.tap(cursorX, cursorY)
                     MouseButton.RIGHT   -> svc.longPress(cursorX, cursorY)
@@ -236,6 +242,9 @@ object AccessibilityCommandBus {
             is InputEvent.Scroll -> {
                 val scrollDx = event.dx * SCROLL_PIXEL_MULTIPLIER
                 val scrollDy = event.dy * SCROLL_PIXEL_MULTIPLIER
+                BridgeLogger.d(TAG, "Scroll: dx=${event.dx} dy=${event.dy} " +
+                    "→ swipe(${cursorX.toInt()},${cursorY.toInt()} → " +
+                    "${(cursorX - scrollDx).toInt()},${(cursorY - scrollDy).toInt()})")
                 svc.swipe(
                     x1 = cursorX,
                     y1 = cursorY,
@@ -246,24 +255,34 @@ object AccessibilityCommandBus {
             }
 
             // ── Keyboard ──────────────────────────────────────────────────────
-            is InputEvent.KeyDown -> svc.injectKeyCode(event.keyCode, event.modifiers)
+            is InputEvent.KeyDown -> {
+                BridgeLogger.d(TAG, "KeyDown: keyCode=${event.keyCode} " +
+                    "(${KeyEvent.keyCodeToString(event.keyCode)})")
+                svc.injectKeyCode(event.keyCode, event.modifiers)
+            }
 
             // KeyUp: no action needed — injection is complete on KeyDown.
             is InputEvent.KeyUp -> Unit
 
             // ── Text injection ────────────────────────────────────────────────
-            is InputEvent.TextInput -> svc.injectText(event.text)
+            is InputEvent.TextInput -> {
+                BridgeLogger.d(TAG, "TextInput: ${event.text.take(20)}…")
+                svc.injectText(event.text)
+            }
 
             // ── Navigation ────────────────────────────────────────────────────
-            is InputEvent.NavigationAction -> when (event.action) {
-                AndroidNavAction.BACK          -> svc.goBack()
-                AndroidNavAction.HOME          -> svc.goHome()
-                AndroidNavAction.RECENTS       -> svc.goRecents()
-                AndroidNavAction.NOTIFICATIONS -> svc.openNotifications()
-                AndroidNavAction.POWER,
-                AndroidNavAction.VOLUME_UP,
-                AndroidNavAction.VOLUME_DOWN,
-                AndroidNavAction.SCREENSHOT    -> Unit // Require system-level privileges
+            is InputEvent.NavigationAction -> {
+                BridgeLogger.d(TAG, "Navigation: ${event.action}")
+                when (event.action) {
+                    AndroidNavAction.BACK          -> svc.goBack()
+                    AndroidNavAction.HOME          -> svc.goHome()
+                    AndroidNavAction.RECENTS       -> svc.goRecents()
+                    AndroidNavAction.NOTIFICATIONS -> svc.openNotifications()
+                    AndroidNavAction.POWER,
+                    AndroidNavAction.VOLUME_UP,
+                    AndroidNavAction.VOLUME_DOWN,
+                    AndroidNavAction.SCREENSHOT    -> Unit // Require system-level privileges
+                }
             }
 
             // Modifier state change: modifiers are embedded in subsequent KeyDown events.

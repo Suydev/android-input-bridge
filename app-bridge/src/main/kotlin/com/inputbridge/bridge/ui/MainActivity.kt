@@ -1,7 +1,11 @@
 package com.inputbridge.bridge.ui
 
+import android.content.Intent
+import android.hardware.usb.UsbConstants
+import android.hardware.usb.UsbManager
 import android.os.Bundle
 import android.os.SystemClock
+import android.util.Log
 import android.view.KeyEvent
 import android.view.WindowManager
 import android.widget.Toast
@@ -13,6 +17,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.inputbridge.bridge.prefs.BridgePreferences
+import com.inputbridge.bridge.service.BridgeService
 import com.inputbridge.bridge.ui.screens.*
 import com.inputbridge.bridge.ui.theme.BridgeTheme
 import com.inputbridge.bridge.viewmodel.BridgeViewModel
@@ -57,6 +62,7 @@ class MainActivity : ComponentActivity() {
     private var emergencyStopJob: Job? = null
 
     private companion object {
+        private const val TAG = "MainActivity"
         /** How long to hold Volume Down to trigger emergency stop (ms). */
         const val EMERGENCY_HOLD_MS = 3_000L
     }
@@ -120,6 +126,42 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // Re-apply keep-screen-on in case the pref changed while away.
         applyKeepScreenOn()
+        // BUG-101 FIX: scan for USB HID devices when the activity resumes.
+        // When the app is already running and a USB device is plugged in, the system
+        // calls onResume() on the existing activity — NOT onCreate(). Without this scan,
+        // USB detection depends entirely on the BroadcastReceiver which may not fire
+        // (device class=0, RECEIVER_NOT_EXPORTED, or device was pre-attached).
+        scanUsbAndStartIfNeeded()
+    }
+
+    /**
+     * BUG-101 FIX: scan UsbManager.deviceList for HID devices and start the bridge
+     * service if one is found and the service is not already running.
+     *
+     * This handles the case where:
+     * - User plugs in USB dongle while the app is already in the foreground
+     * - The ATTACHED broadcast was missed or blocked
+     * - The device was pre-attached before the service started
+     */
+    private fun scanUsbAndStartIfNeeded() {
+        val usbManager = getSystemService(USB_SERVICE) as UsbManager
+        val deviceList = usbManager.deviceList
+        for ((name, device) in deviceList) {
+            for (i in 0 until device.interfaceCount) {
+                if (device.getInterface(i).interfaceClass == UsbConstants.USB_CLASS_HID) {
+                    Log.i(TAG, "Activity.onResume: HID device found — $name " +
+                        "(vendor=${device.vendorId}, product=${device.productId})")
+                    // Start the bridge service — it will handle USB permission and capture.
+                    // If the service is already running, startForegroundService is a no-op.
+                    try {
+                        startForegroundService(Intent(this, BridgeService::class.java))
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to start bridge service from onResume: ${e.message}")
+                    }
+                    return
+                }
+            }
+        }
     }
 
     // ── Volume-Down emergency stop ────────────────────────────────────────────

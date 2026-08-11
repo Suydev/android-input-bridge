@@ -7,4 +7,11 @@
         <item name="android:statusBarColor">@android:color/black</item>
         <item name="android:navigationBarColor">@android:color/black</item>
     </style>
+
+    <!-- Transparent fullscreen theme for MouseTrackpadActivity -->
+    <style name="Theme.InputBridgeTrackpad" parent="android:Theme.Translucent.NoTitleBar">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
 </resources>

@@ -33,6 +33,7 @@ private const val PONG_TIMEOUT_MS = 10_000L   // no PONG for this long → recon
 private const val WATCHDOG_CHECK_MS = 3_000L
 private const val WATCHDOG_GRACE_MS = 15_000L  // wait before first watchdog check
 private const val PAIR_TIMEOUT_MS = 10_000L    // wait this long for PAIR_RESPONSE
+private const val USB_POLL_INTERVAL_MS = 3_000L // BUG-099: poll for USB devices every 3s
 
 /**
  * Foreground service that owns the USB input capture pipeline and the active transport.
@@ -83,6 +84,13 @@ class BridgeService : Service() {
     private var pingJob: Job? = null
     private var pongResponseJob: Job? = null
     private var watchdogJob: Job? = null
+    private var usbPollJob: Job? = null
+
+    /**
+     * BUG-099 FIX: track the last known USB device so we don't re-request permission
+     * on every poll cycle.
+     */
+    @Volatile private var lastKnownUsbDevice: UsbDevice? = null
 
     /** Timestamp when the last PING was sent. */
     @Volatile private var lastPingSentAtMs = 0L
@@ -164,6 +172,12 @@ class BridgeService : Service() {
         }
         acquireWakeLock()
         registerUsbReceiver()
+        // BUG-099 FIX: scan for USB HID devices immediately at service creation.
+        // Many combo receivers (Portronics Key2 Combo) report device class=0 and
+        // the ATTACHED broadcast may not fire if the device was plugged in before
+        // the manifest filter matched. Running this early ensures USB detection
+        // is independent of network pairing, IP config, and transport startup.
+        checkPreAttachedUsb()
         DiagnosticsManager.update { copy(bridgeServiceRunning = true) }
         BridgeLogger.i(TAG, "BridgeService created")
     }
@@ -236,6 +250,7 @@ class BridgeService : Service() {
 
         // 3. Cancel scope
         serviceScope.cancel()
+        usbPollJob?.cancel()
         pipelineStarted.set(false)
         reconnectInProgress.set(false)
         releaseWakeLock()
@@ -355,6 +370,9 @@ class BridgeService : Service() {
 
         startPingLoop(transport)
         startWatchdog()
+        // BUG-099 FIX: start USB polling so devices plugged in after pipeline
+        // startup are detected even if the ATTACHED broadcast was missed.
+        startUsbPolling()
 
     }
 
@@ -409,6 +427,8 @@ class BridgeService : Service() {
         }
 
         checkPreAttachedUsb()
+        // BUG-099 FIX: start USB polling for BT HID mode too
+        startUsbPolling()
     }
 
     // ── Incoming-packet loop (UDP only) ───────────────────────────────────────
@@ -641,14 +661,66 @@ class BridgeService : Service() {
 
     /** Check for HID devices already connected when the service starts. */
     private fun checkPreAttachedUsb() {
-        val preAttached = usbManager.deviceList.values.firstOrNull { device ->
+        val allDevices = usbManager.deviceList
+        BridgeLogger.i(TAG, "checkPreAttachedUsb: UsbManager.deviceList has ${allDevices.size} device(s)")
+        for ((name, dev) in allDevices) {
+            val ifaceClasses = (0 until dev.interfaceCount).map { i ->
+                val iface = dev.getInterface(i)
+                "cls=${iface.interfaceClass}/sub=${iface.interfaceSubclass}/proto=${iface.interfaceProtocol}"
+            }
+            BridgeLogger.d(TAG, "  USB device: $name (class=${dev.deviceClass}, " +
+                "vendor=${dev.vendorId}, product=${dev.productId}, " +
+                "interfaces=[${ifaceClasses.joinToString()}])")
+        }
+
+        val preAttached = allDevices.values.firstOrNull { device ->
             (0 until device.interfaceCount).any { i ->
                 device.getInterface(i).interfaceClass == UsbConstants.USB_CLASS_HID
             }
         }
         if (preAttached != null) {
-            BridgeLogger.i(TAG, "Pre-attached HID device: ${preAttached.deviceName}")
+            BridgeLogger.i(TAG, "Pre-attached HID device found: ${preAttached.deviceName} " +
+                "(vendor=${preAttached.vendorId}, product=${preAttached.productId})")
+            lastKnownUsbDevice = preAttached
             onUsbAttached(preAttached)
+        } else {
+            BridgeLogger.w(TAG, "No HID device found in UsbManager.deviceList " +
+                "(${allDevices.size} device(s) scanned — device may be blacklisted by framework)")
+        }
+    }
+
+    /**
+     * BUG-099 FIX: poll UsbManager.deviceList every 3 seconds as a fallback.
+     * Handles cases where:
+     * - USB_DEVICE_ATTACHED broadcast was never delivered (device class=0, filter miss)
+     * - Device was plugged in after the service started but before polling began
+     * - OEM ROM silently swallows the broadcast
+     *
+     * Only triggers on new devices not already tracked by [lastKnownUsbDevice].
+     */
+    private fun startUsbPolling() {
+        usbPollJob = serviceScope.launch {
+            var pollCount = 0L
+            while (isActive) {
+                delay(USB_POLL_INTERVAL_MS)
+                pollCount++
+                if (usbCapture?.isActive == true) continue  // already capturing — skip
+                val device = usbManager.deviceList.values.firstOrNull { dev ->
+                    (0 until dev.interfaceCount).any { i ->
+                        dev.getInterface(i).interfaceClass == UsbConstants.USB_CLASS_HID
+                    }
+                }
+                if (device != null && device != lastKnownUsbDevice) {
+                    BridgeLogger.i(TAG, "USB poll #$pollCount found NEW HID device: " +
+                        "${device.deviceName} (vendor=${device.vendorId}, product=${device.productId})")
+                    lastKnownUsbDevice = device
+                    onUsbAttached(device)
+                } else if (device == null && pollCount % 10L == 0L) {
+                    // Log periodically when no device is found (helps diagnose blacklist issue)
+                    BridgeLogger.d(TAG, "USB poll #$pollCount: no HID device in deviceList " +
+                        "(${usbManager.deviceList.size} total)")
+                }
+            }
         }
     }
 
@@ -700,6 +772,8 @@ class BridgeService : Service() {
 
     private suspend fun startCapture(device: UsbDevice) {
         stopCapture()
+        BridgeLogger.i(TAG, "startCapture: initializing for ${device.deviceName} " +
+            "(interfaces=${device.interfaceCount}, class=${device.deviceClass})")
 
         val capture = UsbInputCapture(this, device)
         usbCapture = capture
@@ -708,12 +782,19 @@ class BridgeService : Service() {
         // launches USB readers so the first keyboard or mouse report cannot race
         // past an absent collector.
         captureJob = serviceScope.launch {
+            var eventCount = 0L
             capture.events.collect { rawEvent ->
                 val t0 = System.nanoTime()
+                eventCount++
 
                 // BUG-095 fix: capture can start before pairing, but a configured PIN must
                 // still prevent keyboard/mouse events from leaving the bridge until accepted.
-                if (prefs.pairingPin.isNotEmpty() && !prefs.isPaired) return@collect
+                if (prefs.pairingPin.isNotEmpty() && !prefs.isPaired) {
+                    if (eventCount <= 5L || eventCount % 100L == 0L) {
+                        BridgeLogger.d(TAG, "Event #$eventCount dropped — waiting for pairing")
+                    }
+                    return@collect
+                }
 
                 // Apply bridge-side sensitivity to mouse movement deltas.
                 // prefs.bridgeSensitivity is 0.1–5.0; default 1.0 (no change).
@@ -725,6 +806,11 @@ class BridgeService : Service() {
                     } else rawEvent
                 }
 
+                if (eventCount <= 3L || eventCount % 500L == 0L) {
+                    BridgeLogger.i(TAG, "Event #$eventCount: ${rawEvent::class.simpleName} " +
+                        "→ transport=${if (btTransport?.isConnected == true) "BT" else "UDP"}")
+                }
+
                 // Guard: btTransport is only non-null when connect() succeeded.
                 // isConnected is checked in addition for defense-in-depth against
                 // a BT host that disconnects while capture is already running.
@@ -732,7 +818,10 @@ class BridgeService : Service() {
                 if (bt != null) {
                     val sent = bt.sendInputEvent(event)
                     if (sent) DiagnosticsManager.onPacketSent()
-                    else DiagnosticsManager.onSendFailed()
+                    else {
+                        DiagnosticsManager.onSendFailed()
+                        BridgeLogger.w(TAG, "BT send failed for event #$eventCount")
+                    }
                     lastCaptureToSendUs.set((System.nanoTime() - t0) / 1_000L)
                 } else {
                     val packet = packetFactory.fromEvent(event) ?: return@collect
@@ -742,11 +831,16 @@ class BridgeService : Service() {
                         lastCaptureToSendUs.set((System.nanoTime() - t0) / 1_000L)
                     } else {
                         DiagnosticsManager.onSendFailed()
+                        if (eventCount <= 5L || eventCount % 200L == 0L) {
+                            BridgeLogger.w(TAG, "UDP send failed for event #$eventCount " +
+                                "(udpTransport=${udpTransport != null})")
+                        }
                     }
                 }
             }
         }
 
+        BridgeLogger.i(TAG, "Calling UsbInputCapture.start()…")
         if (!capture.start()) {
             captureJob?.cancel()
             captureJob = null
@@ -781,8 +875,13 @@ class BridgeService : Service() {
             addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
             addAction(ACTION_USB_PERMISSION)
         }
+        // BUG-100 FIX: RECEIVER_NOT_EXPORTED blocks system broadcasts (ACTION_USB_DEVICE_ATTACHED,
+        // ACTION_USB_DEVICE_DETACHED) on Android 13+. These are sent by the system and must
+        // reach our receiver. Use RECEIVER_EXPORTED so system intents are delivered.
+        // ACTION_USB_PERMISSION is app-specific but the system sends it back via the
+        // PendingIntent, so it also requires RECEIVER_EXPORTED.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(usbReceiver, filter, RECEIVER_NOT_EXPORTED)
+            registerReceiver(usbReceiver, filter, RECEIVER_EXPORTED)
         } else {
             @Suppress("UnspecifiedRegisterReceiverFlag")
             registerReceiver(usbReceiver, filter)

@@ -68,6 +68,7 @@ class InputBridgeAccessibilityService : AccessibilityService() {
         BridgeLogger.i(TAG, "Screen size: ${w}×${h}")
 
         AccessibilityCommandBus.setService(this)
+        BridgeLogger.i(TAG, "AccessibilityCommandBus service attached — ready for injection")
 
         DiagnosticsManager.update {
             copy(

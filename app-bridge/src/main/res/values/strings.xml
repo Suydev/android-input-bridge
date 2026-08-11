@@ -7,4 +7,5 @@
     <string name="notification_text">Forwarding keyboard and mouse input</string>
     <string name="notification_text_connecting">Connecting to receiver…</string>
     <string name="notification_text_disconnected">Disconnected — tap to reconnect</string>
+    <string name="bridge_accessibility_description">Captures USB keyboard input and forwards it to the receiver tablet over the network.</string>
 </resources>

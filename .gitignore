@@ -17,6 +17,11 @@
 
 # Secrets
 secrets.properties
+.env
+
+# CI artifacts (downloaded APKs, build reports)
+ci-artifacts/
+build/
 
 # Generated code
 app-bridge/build/

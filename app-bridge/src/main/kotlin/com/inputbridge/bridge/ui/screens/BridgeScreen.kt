@@ -1,5 +1,6 @@
 package com.inputbridge.bridge.ui.screens
 
+import android.content.Intent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -17,6 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.inputbridge.bridge.ui.MouseTrackpadActivity
 import com.inputbridge.bridge.ui.theme.*
 import com.inputbridge.bridge.viewmodel.BridgeViewModel
 
@@ -191,6 +193,29 @@ fun BridgeScreen(
                     color = BridgeError, fontSize = 12.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold, letterSpacing = 3.sp,
+                )
+            }
+        }
+
+        // MOUSE button — launches trackpad overlay (shown when bridge is active)
+        if (isBridgeActive || diagnostics.bridgeServiceRunning) {
+            val context = LocalView.current.context
+            OutlinedButton(
+                onClick = {
+                    context.startActivity(Intent(context, MouseTrackpadActivity::class.java))
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 80.dp)
+                    .fillMaxWidth(0.5f),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = BridgePrimary),
+                border = BorderStroke(1.dp, BridgePrimary.copy(alpha = 0.5f)),
+            ) {
+                Text(
+                    "MOUSE",
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 3.sp,
+                    fontSize = 12.sp,
                 )
             }
         }
