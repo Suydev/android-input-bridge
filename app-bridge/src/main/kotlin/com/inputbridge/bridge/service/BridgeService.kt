@@ -230,19 +230,17 @@ class BridgeService : Service() {
         watchdogJob?.cancel()
 
         // 2. Release resources in NonCancellable context
-        runBlocking {
-            withContext(NonCancellable + Dispatchers.IO) {
-                runCatching { usbCapture?.stop() }
-                // BUG-040 fix: tell the receiver we are intentionally shutting down
-                // BEFORE closing the socket. Without this, the receiver only discovers
-                // the bridge has gone after its 15-second PING watchdog fires.
-                runCatching {
-                    udpTransport?.send(packetFactory.makeDisconnect())
-                    delay(60L) // give the datagram time to be flushed before socket closes
-                }
-                runCatching { udpTransport?.disconnect() }
-                runCatching { btTransport?.disconnect() }
+        // BUG-103: use GlobalScope.launch instead of runBlocking to avoid ANR on main thread.
+        // runBlocking blocks until delay(60L) + stop() + disconnect() complete, which can
+        // exceed Android's 5-second ANR threshold under memory pressure.
+        CoroutineScope(NonCancellable + Dispatchers.IO).launch {
+            runCatching { usbCapture?.stop() }
+            runCatching {
+                udpTransport?.send(packetFactory.makeDisconnect())
+                delay(60L)
             }
+            runCatching { udpTransport?.disconnect() }
+            runCatching { btTransport?.disconnect() }
         }
         usbCapture    = null
         udpTransport  = null
@@ -637,6 +635,10 @@ class BridgeService : Service() {
                     if (!paired) {
                         BridgeLogger.e(TAG, "Re-pairing failed after reconnect")
                         runCatching { transport.disconnect() }
+                        // BUG-104: null out udpTransport so the service knows it's dead.
+                        // Without this, udpTransport points to a disconnected socket and
+                        // no further reconnect attempts are made.
+                        udpTransport = null
                         reconnectInProgress.set(false)
                         return
                     }

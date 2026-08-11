@@ -47,7 +47,7 @@ class MouseTrackpadActivity : ComponentActivity() {
     private val prefs: BridgePreferences by inject()
     private val packetFactory = EventPacketFactory()
 
-    private var udpTransport: UdpTransport? = null
+    @Volatile private var udpTransport: UdpTransport? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     // ── Screen dimensions ──────────────────────────────────────────────────
@@ -284,9 +284,12 @@ class MouseTrackpadActivity : ComponentActivity() {
         val up = InputEvent.MouseButtonUp(button = button)
         val p1 = packetFactory.fromEvent(down) ?: return
         val p2 = packetFactory.fromEvent(up) ?: return
+        // BUG-102: capture transport reference ONCE so both down and up use the same instance.
+        // If udpTransport becomes null between sends, button-up is still sent on the captured ref.
+        val transport = udpTransport ?: return
         scope.launch {
-            udpTransport?.send(p1)
-            udpTransport?.send(p2)
+            transport.send(p1)
+            transport.send(p2)
         }
     }
 

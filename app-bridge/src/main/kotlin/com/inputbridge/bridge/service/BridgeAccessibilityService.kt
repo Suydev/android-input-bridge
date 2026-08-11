@@ -45,7 +45,7 @@ class BridgeAccessibilityService : AccessibilityService() {
     }
 
     private val packetFactory = EventPacketFactory()
-    private var udpTransport: UdpTransport? = null
+    @Volatile private var udpTransport: UdpTransport? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val prefs: BridgePreferences by lazy {
         BridgePreferences(applicationContext)
@@ -143,7 +143,9 @@ class BridgeAccessibilityService : AccessibilityService() {
         }
 
         val packet = packetFactory.fromEvent(inputEvent) ?: return false
-        scope.launch { transport.send(packet) }
+        // BUG-100: wrap in try-catch — send() may throw IOException if socket closed during
+        // onUnbind→onDestroy race. Uncaught exception kills the app process.
+        scope.launch { runCatching { transport.send(packet) } }
 
         // Log first few events for debugging
         BridgeLogger.d(TAG, "Key event: ${KeyEvent.keyCodeToString(event.keyCode)} " +

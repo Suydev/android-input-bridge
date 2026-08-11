@@ -202,10 +202,9 @@ class ReceiverService : Service() {
         watchdogJob?.cancel()
 
         // 2. Release UDP socket in NonCancellable context
-        runBlocking {
-            withContext(NonCancellable + Dispatchers.IO) {
-                runCatching { udpTransport?.disconnect() }
-            }
+        // BUG-103: use CoroutineScope instead of runBlocking to avoid ANR on main thread.
+        CoroutineScope(NonCancellable + Dispatchers.IO).launch {
+            runCatching { udpTransport?.disconnect() }
         }
         udpTransport = null
 
