@@ -7,6 +7,7 @@ import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
+import android.view.KeyEvent
 import com.inputbridge.core.logging.BridgeLogger
 import com.inputbridge.core.model.*
 import kotlinx.coroutines.*
