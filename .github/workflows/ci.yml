@@ -95,11 +95,13 @@ jobs:
 
   # ── Release APKs (only on main) ─────────────────────────────────────────────
   release:
-    name: Build Release APKs
+    name: Build Signed Release + GitHub Release
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: [ build, test ]
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
@@ -117,26 +119,106 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
-      - name: Decode Keystore
-        if: ${{ env.SIGNING_KEYSTORE_BASE64 != '' }}
+      # ── Signing: use secrets if available, otherwise generate temp keystore ──
+      - name: Decode Keystore (if secrets exist)
+        if: ${{ env.HAS_SIGNING_SECRETS == 'true' }}
         env:
-          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+          HAS_SIGNING_SECRETS: ${{ secrets.SIGNING_KEYSTORE_BASE64 != '' }}
         run: echo "$SIGNING_KEYSTORE_BASE64" | base64 --decode > release.jks
+
+      - name: Generate Temp Keystore (if no secrets)
+        if: ${{ env.HAS_SIGNING_SECRETS != 'true' }}
+        env:
+          HAS_SIGNING_SECRETS: ${{ secrets.SIGNING_KEYSTORE_BASE64 != '' }}
+        run: |
+          keytool -genkeypair -v \
+            -keystore release.jks \
+            -alias inputbridge \
+            -keyalg RSA -keysize 2048 \
+            -validity 10000 \
+            -storepass inputbridge123 \
+            -keypass inputbridge123 \
+            -dname "CN=InputBridge, O=InputBridge Open Source, C=US"
 
       - name: Build Release APKs
         env:
           SIGNING_KEYSTORE_PATH: ${{ github.workspace }}/release.jks
-          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
-          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
-          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS || 'inputbridge' }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD || 'inputbridge123' }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD || 'inputbridge123' }}
         run: ./gradlew :app-bridge:assembleRelease :app-receiver:assembleRelease --stacktrace
+
+      # ── Zipalign + APK Sign v2 (for temp keystore path) ─────────────────────
+      - name: Zipalign and Sign APKs (temp keystore)
+        if: ${{ env.HAS_SIGNING_SECRETS != 'true' }}
+        env:
+          HAS_SIGNING_SECRETS: ${{ secrets.SIGNING_KEYSTORE_BASE64 != '' }}
+        run: |
+          BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/*/ | sort -V | tail -1)
+          ZIPALIGN="$BUILD_TOOLS/zipalign"
+          APKSIGNER="$BUILD_TOOLS/apksigner"
+
+          for APK in app-bridge/build/outputs/apk/release/app-bridge-release-unsigned.apk \
+                      app-receiver/build/outputs/apk/release/app-receiver-release-unsigned.apk; do
+            BASENAME=$(basename "$APK" -unsigned.apk)
+            ALIGNED="${BASENAME}-aligned.apk"
+            SIGNED="${BASENAME}.apk"
+
+            $ZIPALIGN -f 4 "$APK" "$ALIGNED"
+            $APKSIGNER sign \
+              --ks release.jks \
+              --ks-key-alias inputbridge \
+              --ks-pass pass:inputbridge123 \
+              --key-pass pass:inputbridge123 \
+              --out "$SIGNED" \
+              "$ALIGNED"
+            $APKSIGNER verify "$SIGNED"
+            rm -f "$ALIGNED"
+          done
 
       - name: Upload Release APKs
         uses: actions/upload-artifact@v4
         with:
           name: release-apks-${{ github.run_number }}
           path: |
-            app-bridge/build/outputs/apk/release/*.apk
-            app-receiver/build/outputs/apk/release/*.apk
+            app-bridge/build/outputs/apk/release/app-bridge-release.apk
+            app-receiver/build/outputs/apk/release/app-receiver-release.apk
           retention-days: 90
           if-no-files-found: warn
+
+      # ── Create GitHub Release with APKs attached ─────────────────────────────
+      - name: Get version
+        id: version
+        run: echo "tag=v$(date +'%Y.%m.%d')-${{ github.run_number }}" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "InputBridge ${{ steps.version.outputs.tag }}"
+          body: |
+            ## InputBridge ${{ steps.version.outputs.tag }}
+
+            ### Downloads
+            - **app-bridge-release.apk** — Bridge app (install on the phone with USB keyboard/mouse)
+            - **app-receiver-release.apk** — Receiver app (install on the tablet)
+
+            ### What's New
+            - Windows-style arrow cursor overlay (semi-transparent)
+            - Trackpad UI with sensitivity slider and error messages
+            - 32-bit ARM support (Redmi 9, etc.)
+            - Crash fixes: VIBRATE permission, thread safety, ANR prevention
+            - Broken reconnect state fix
+
+            ### Setup
+            1. Install both APKs
+            2. Enable accessibility service for both apps
+            3. Set receiver IP in bridge app settings
+            4. Open MOUSE button in bridge app to start trackpad
+          files: |
+            app-bridge/build/outputs/apk/release/app-bridge-release.apk
+            app-receiver/build/outputs/apk/release/app-receiver-release.apk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
