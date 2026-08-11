@@ -11,6 +11,7 @@ import com.inputbridge.bridge.prefs.BridgePreferences
 import com.inputbridge.bridge.ui.MainActivity
 import com.inputbridge.core.config.TransportConfig
 import com.inputbridge.core.config.TransportMode
+import com.inputbridge.core.discovery.AutoDiscovery
 import com.inputbridge.core.logging.BridgeLogger
 import com.inputbridge.diagnostics.DiagnosticsManager
 import com.inputbridge.input.UsbInputCapture
@@ -66,6 +67,7 @@ class BridgeService : Service() {
         Dispatchers.IO + SupervisorJob() + serviceExceptionHandler
     )
     private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
 
     private lateinit var usbManager: UsbManager
     // BUG-075 FIX: use Koin singleton instead of creating a fresh instance with the Service context.
@@ -171,6 +173,7 @@ class BridgeService : Service() {
             startForeground(NOTIFICATION_ID, buildNotification("Starting…"))
         }
         acquireWakeLock()
+        acquireWifiLock()
         registerUsbReceiver()
         // BUG-099 FIX: scan for USB HID devices immediately at service creation.
         // Many combo receivers (Portronics Key2 Combo) report device class=0 and
@@ -251,6 +254,7 @@ class BridgeService : Service() {
         usbPollJob?.cancel()
         pipelineStarted.set(false)
         reconnectInProgress.set(false)
+        releaseWifiLock()
         releaseWakeLock()
         DiagnosticsManager.update {
             copy(
@@ -301,10 +305,24 @@ class BridgeService : Service() {
         val port = prefs.port
 
         if (targetIp.isBlank()) {
-            BridgeLogger.w(TAG, "Target IP not configured — set it in Settings")
-            updateNotification("Set receiver IP in Settings first")
-            DiagnosticsManager.update { copy(lastError = "Target IP not configured") }
-            pipelineStarted.set(false)
+            BridgeLogger.w(TAG, "Target IP not configured — starting auto-discovery listener")
+            updateNotification("Searching for receiver on network…")
+            DiagnosticsManager.update { copy(lastError = "No IP configured — listening for receiver broadcast") }
+            // BUG-107: listen for receiver broadcast and auto-configure IP
+            serviceScope.launch {
+                AutoDiscovery.listenForReceiver { ip, port ->
+                    BridgeLogger.i(TAG, "Auto-discovered receiver: $ip:$port")
+                    prefs.targetIp = ip
+                    prefs.port = port
+                    DiagnosticsManager.update { copy(targetIp = ip) }
+                    updateNotification("Found receiver at $ip:$port — connecting…")
+                    // Restart pipeline with the discovered IP
+                    pipelineStarted.set(false)
+                    serviceScope.launch {
+                        startPipeline()
+                    }
+                }
+            }
             return
         }
 
@@ -941,6 +959,22 @@ class BridgeService : Service() {
     private fun releaseWakeLock() {
         runCatching { wakeLock?.let { if (it.isHeld) it.release() } }
         wakeLock = null
+    }
+
+    private fun acquireWifiLock() {
+        runCatching {
+            val wifiManager = getSystemService(WIFI_SERVICE) as? android.net.wifi.WifiManager ?: return
+            wifiLock = wifiManager.createWifiLock(
+                android.net.wifi.WifiManager.WIFI_MODE_FULL_LOW_LATENCY,
+                "InputBridge::LowLatency",
+            ).also { it.acquire() }
+            BridgeLogger.i(TAG, "WifiLock acquired (WIFI_MODE_FULL_LOW_LATENCY)")
+        }
+    }
+
+    private fun releaseWifiLock() {
+        runCatching { wifiLock?.let { if (it.isHeld) it.release() } }
+        wifiLock = null
     }
 
     companion object {

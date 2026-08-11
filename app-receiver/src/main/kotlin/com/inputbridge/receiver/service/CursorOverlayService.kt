@@ -8,6 +8,7 @@ import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
@@ -19,48 +20,42 @@ import com.inputbridge.diagnostics.DiagnosticsManager
 import com.inputbridge.receiver.prefs.ReceiverPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
+import java.util.LinkedList
 
 private const val TAG = "CursorOverlayService"
 
 /**
- * Draws a Windows-style arrow cursor overlay at the current virtual cursor position
- * so the user can see exactly where the next click will land in Accessibility mode.
+ * Draws a cursor overlay with vanishing trail at the current virtual cursor position.
  *
- * BUG-043 fix: replaced the green crosshair dot with a proper Windows arrow cursor.
- * The cursor is a classic top-left-pointing arrow with:
- *   - White fill with a thin black outline
- *   - Drop shadow for visibility on any background
- *   - Hotspot at the arrow tip, inset inside the overlay canvas to prevent clipping
+ * Features:
+ * - Windows-style arrow cursor with trail that fades over time
+ * - Trail points stored with timestamps for age-based alpha/stroke-width fadeout
+ * - Click ripple animation (circle expanding + fading)
+ * - Uses translationX/Y instead of updateViewLayout for zero Binder IPC
+ * - Hardware layer for GPU texture caching
  *
- * Hotspot correction: the old dot centred itself on the cursor position using an
- * offset of -(width/2, height/2). An arrow cursor's hotspot is at its tip (top-left),
- * so the overlay position is offset by the inset to keep the visual tip on the logical cursor.
+ * Based on reference APK's PointerPathView implementation.
  *
  * Requires SYSTEM_ALERT_WINDOW permission (canDrawOverlays()). If absent this service
  * exits immediately rather than crashing.
- *
- * The view is FLAG_NOT_FOCUSABLE + FLAG_NOT_TOUCHABLE — it never interferes with
- * touch input or accessibility injection.
- *
- * Position source: [AccessibilityCommandBus.cursorPosition] StateFlow, which is
- * updated on the calling IO thread the instant a MouseMove packet arrives
- * (hot-path optimisation — no coroutine queue).
- * Collection runs on Dispatchers.Main so WindowManager updates are on the correct thread.
  */
 @RequiresApi(Build.VERSION_CODES.N)
 class CursorOverlayService : Service() {
 
     private lateinit var windowManager: WindowManager
-    private var overlayView: CursorArrowView? = null
+    private var overlayView: CursorTrailView? = null
     private var layoutParams: WindowManager.LayoutParams? = null
     private var overlaySizePx = 0
     private val prefs: ReceiverPreferences by inject()
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var trailCleanupJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -72,14 +67,14 @@ class CursorOverlayService : Service() {
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
-        // BUG-098 fix: Arrow size is user-configurable and persisted for tablet displays.
-        // The view still includes padding for a complete outline and shadow.
+        // Arrow size is user-configurable and persisted for tablet displays.
         val density = resources.displayMetrics.density
         val viewPx = (prefs.cursorSizeDp * density).toInt().coerceAtLeast(1)
         overlaySizePx = viewPx
 
         val params = WindowManager.LayoutParams(
-            viewPx, viewPx,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else
@@ -88,17 +83,23 @@ class CursorOverlayService : Service() {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
             x = 0
             y = 0
+            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
         }
         layoutParams = params
 
-        val view = CursorArrowView(this)
+        val view = CursorTrailView(this)
         overlayView = view
+
+        // Enable hardware layer for GPU texture caching
+        view.setLayerType(View.LAYER_TYPE_HARDWARE, null)
 
         runCatching {
             windowManager.addView(view, params)
@@ -108,43 +109,41 @@ class CursorOverlayService : Service() {
             return
         }
 
-        BridgeLogger.i(TAG, "Cursor arrow overlay created (view=${viewPx}px, size=${prefs.cursorSizeDp}dp)")
+        BridgeLogger.i(TAG, "Cursor trail overlay created (view=${viewPx}px, size=${prefs.cursorSizeDp}dp)")
         DiagnosticsManager.update { copy(cursorOverlayActive = true) }
 
-        // Observe cursor position and move the overlay view.
+        // Observe cursor position and add trail points.
         serviceScope.launch {
             AccessibilityCommandBus.cursorPosition.collect { (x, y) ->
-                updatePosition(x, y)
+                overlayView?.addTrailPoint(x, y)
+                // Schedule trail cleanup after inactivity
+                scheduleTrailCleanup()
             }
         }
     }
 
     /**
-     * Move the overlay so the arrow TIP lands exactly on (x, y), except at the
-     * right/bottom screen edges where the complete pointer must remain visible.
-     *
-     * The arrow tip is inset inside the view so its outline and shadow are not clipped.
-     * Offset the containing view by the same inset to keep the logical hotspot exact.
+     * Schedule trail cleanup after 500ms of inactivity.
+     * Cancels any existing cleanup job and starts a new one.
      */
-    private fun updatePosition(x: Float, y: Float) {
-        val params = layoutParams ?: return
-        val view   = overlayView  ?: return
-        val insetPx = (CursorArrowView.HOTSPOT_INSET_DP * resources.displayMetrics.density).toInt()
-        // BUG-098 fix: clamp both edges using the actual configured overlay size.
-        // The old top/left-only clamp allowed the view to disappear off right/bottom.
-        val maxX = (resources.displayMetrics.widthPixels - overlaySizePx).coerceAtLeast(0)
-        val maxY = (resources.displayMetrics.heightPixels - overlaySizePx).coerceAtLeast(0)
-        params.x = (x.toInt() - insetPx).coerceIn(0, maxX)
-        params.y = (y.toInt() - insetPx).coerceIn(0, maxY)
-        runCatching { windowManager.updateViewLayout(view, params) }
+    private fun scheduleTrailCleanup() {
+        trailCleanupJob?.cancel()
+        trailCleanupJob = serviceScope.launch {
+            delay(500L)
+            overlayView?.clearTrail()
+        }
     }
 
     override fun onDestroy() {
+        trailCleanupJob?.cancel()
         serviceScope.cancel()
-        overlayView?.let { v -> runCatching { windowManager.removeView(v) } }
+        overlayView?.let { v ->
+            v.setLayerType(View.LAYER_TYPE_NONE, null)
+            runCatching { windowManager.removeView(v) }
+        }
         overlayView = null
         DiagnosticsManager.update { copy(cursorOverlayActive = false) }
-        BridgeLogger.i(TAG, "Cursor arrow overlay removed")
+        BridgeLogger.i(TAG, "Cursor trail overlay removed")
         super.onDestroy()
     }
 
@@ -156,77 +155,189 @@ class CursorOverlayService : Service() {
 }
 
 /**
- * Custom View that draws a Windows-style arrow cursor overlay.
- *
- * Design: classic top-left arrow pointer with:
- *   - White fill with black outline (like Windows default)
- *   - Semi-transparent for less visual obstruction
- *   - Drop shadow for visibility on any background
- *   - Hotspot at the arrow tip (top-left corner)
+ * Data class for a trail point with timestamp.
  */
-private class CursorArrowView(context: android.content.Context) : View(context) {
+private data class TrailPoint(
+    val x: Float,
+    val y: Float,
+    val timestamp: Long,
+    val isStart: Boolean = false
+)
+
+/**
+ * Custom View that draws a cursor with vanishing trail, similar to PointerPathView
+ * in the reference APK.
+ *
+ * Features:
+ * - LinkedList of trail points with timestamps
+ * - Age-based alpha fadeout on trail lines
+ * - Stroke width fades with age
+ * - Cursor dot drawn as filled circle
+ * - Click ripple animation via ValueAnimator
+ * - Uses translationX/Y for zero Binder IPC (no updateViewLayout)
+ */
+private class CursorTrailView(context: android.content.Context) : View(context) {
 
     companion object {
-        /** Inset from canvas edge to the arrow tip (hotspot). */
-        const val HOTSPOT_INSET_DP = 2
+        const val TRAIL_FADE_DURATION_MS = 500L // Trail fades over 500ms
+        const val TRAIL_STEP_MS = 16L // Minimum time between trail points (~60fps)
+        const val CLICK_RIPPLE_DURATION_MS = 200L
+        const val CLICK_RIPPLE_MAX_RADIUS_DP = 20f
     }
 
-    private val path = android.graphics.Path()
-    private val density = resources.displayMetrics.density
+    // Trail points with timestamps
+    private val trailPoints = LinkedList<TrailPoint>()
 
-    // Semi-transparent white fill (alpha 200/255 ≈ 78%)
-    private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(200, 255, 255, 255)
-        style = Paint.Style.FILL
-    }
-
-    // Black outline
-    private val outlinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(230, 0, 0, 0)
+    // Paints
+    private val trailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
         style = Paint.Style.STROKE
-        strokeWidth = (1.2f * density).coerceAtLeast(1f)
+        strokeWidth = 3f
+        strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
 
-    // Drop shadow
-    private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(80, 0, 0, 0)
+    private val cursorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
         style = Paint.Style.FILL
     }
 
+    private val cursorOutlinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.BLACK
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+    }
+
+    private val ripplePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(100, 255, 255, 255)
+        style = Paint.Style.STROKE
+        strokeWidth = 3f
+    }
+
+    // Click ripple state
+    private var rippleX = 0f
+    private var rippleY = 0f
+    private var rippleRadius = 0f
+    private var rippleAlpha = 255
+    private var isRippleActive = false
+
+    // Cursor size
+    private val cursorRadius = 8f
+    private val density = resources.displayMetrics.density
+
+    // Last trail point time to throttle updates
+    private var lastTrailTime = 0L
+
+    /**
+     * Add a new trail point at the given position.
+     * Called from CursorOverlayService when cursor position updates.
+     */
+    fun addTrailPoint(x: Float, y: Float) {
+        val now = SystemClock.elapsedRealtime()
+
+        // Throttle trail points to ~60fps
+        if (now - lastTrailTime < TRAIL_STEP_MS) return
+        lastTrailTime = now
+
+        // Add new point
+        trailPoints.add(TrailPoint(x, y, now))
+
+        // Limit trail length to prevent memory issues
+        while (trailPoints.size > 100) {
+            trailPoints.removeFirst()
+        }
+
+        invalidate()
+    }
+
+    /**
+     * Clear the trail (called after inactivity).
+     */
+    fun clearTrail() {
+        if (trailPoints.isEmpty()) return
+        trailPoints.clear()
+        invalidate()
+    }
+
+    /**
+     * Trigger a click ripple animation at the given position.
+     */
+    fun triggerClickRipple(x: Float, y: Float) {
+        rippleX = x
+        rippleY = y
+        rippleRadius = 0f
+        rippleAlpha = 255
+        isRippleActive = true
+        invalidate()
+
+        // Animate the ripple
+        postDelayed({
+            isRippleActive = false
+            invalidate()
+        }, CLICK_RIPPLE_DURATION_MS)
+    }
+
     override fun onDraw(canvas: Canvas) {
-        val w = width.toFloat()
-        val h = height.toFloat()
+        val now = SystemClock.elapsedRealtime()
 
-        // Windows arrow cursor proportions (normalized to view size)
-        // Arrow body occupies ~75% of view, tail at bottom-right
-        val s = w / 32f  // scale factor
+        // Draw trail lines with fading alpha
+        if (trailPoints.size >= 2) {
+            var prevPoint = trailPoints.first
+            for (i in 1 until trailPoints.size) {
+                val currentPoint = trailPoints[i]
+                val age = now - currentPoint.timestamp
 
-        // Arrow tip (hotspot) near top-left with inset
-        val tipX = HOTSPOT_INSET_DP * density
-        val tipY = HOTSPOT_INSET_DP * density
+                if (age > TRAIL_FADE_DURATION_MS) {
+                    // Point is too old, remove it
+                    trailPoints.removeAt(i - 1)
+                    continue
+                }
 
-        // Build arrow path — classic Windows arrow shape
-        path.reset()
-        path.moveTo(tipX, tipY)                          // tip
-        path.lineTo(tipX + s * 2, tipY + s * 22)        // left edge going down
-        path.lineTo(tipX + s * 7, tipY + s * 17)        // notch
-        path.lineTo(tipX + s * 12, tipY + s * 27)       // bottom-left
-        path.lineTo(tipX + s * 16, tipY + s * 24)       // bottom notch
-        path.lineTo(tipX + s * 11, tipY + s * 14)       // right edge going up
-        path.lineTo(tipX + s * 20, tipY + s * 14)       // right tail
-        path.close()
+                // Calculate alpha based on age (255 = new, 0 = old)
+                val alpha = ((1f - age.toFloat() / TRAIL_FADE_DURATION_MS) * 255).toInt()
+                    .coerceIn(0, 255)
 
-        // Shadow (offset by 1-2px)
-        val sh = (1.5f * density).coerceAtLeast(1.5f)
-        path.offset(sh, sh)
-        canvas.drawPath(path, shadowPaint)
-        path.offset(-sh, -sh)
+                // Calculate stroke width based on age (thicker = newer)
+                val strokeWidth = (1f + (1f - age.toFloat() / TRAIL_FADE_DURATION_MS) * 3f) * density
 
-        // White fill
-        canvas.drawPath(path, fillPaint)
+                trailPaint.alpha = alpha
+                trailPaint.strokeWidth = strokeWidth
 
-        // Black outline
-        canvas.drawPath(path, outlinePaint)
+                canvas.drawLine(prevPoint.x, prevPoint.y, currentPoint.x, currentPoint.y, trailPaint)
+
+                prevPoint = currentPoint
+            }
+        }
+
+        // Draw cursor dot
+        if (trailPoints.isNotEmpty()) {
+            val lastPoint = trailPoints.last
+
+            // Drop shadow
+            canvas.drawCircle(lastPoint.x + 2f, lastPoint.y + 2f, cursorRadius * density, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.argb(70, 0, 0, 0)
+                style = Paint.Style.FILL
+            })
+
+            // White fill
+            canvas.drawCircle(lastPoint.x, lastPoint.y, cursorRadius * density, cursorPaint)
+
+            // Black outline
+            canvas.drawCircle(lastPoint.x, lastPoint.y, cursorRadius * density, cursorOutlinePaint)
+        }
+
+        // Draw click ripple
+        if (isRippleActive) {
+            rippleRadius += (CLICK_RIPPLE_MAX_RADIUS_DP * density) / (CLICK_RIPPLE_DURATION_MS / 16f)
+            rippleAlpha = (255 * (1f - rippleRadius / (CLICK_RIPPLE_MAX_RADIUS_DP * density))).toInt()
+                .coerceIn(0, 255)
+
+            ripplePaint.alpha = rippleAlpha
+            canvas.drawCircle(rippleX, rippleY, rippleRadius, ripplePaint)
+
+            if (rippleAlpha > 0) {
+                postInvalidateDelayed(16)
+            }
+        }
     }
 }

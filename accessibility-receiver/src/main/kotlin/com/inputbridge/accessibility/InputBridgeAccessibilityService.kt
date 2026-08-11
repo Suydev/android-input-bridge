@@ -53,7 +53,14 @@ class InputBridgeAccessibilityService : AccessibilityService() {
 
         const val TAP_DURATION_MS = 50L
         const val LONG_PRESS_DURATION_MS = 600L
+        const val CONTINUOUS_STROKE_DURATION_MS = 60_000L // 60s max for continuous gesture
+        const val MAX_STROKES_PER_GESTURE = 20 // Android limit
     }
+
+    // ── Continuous gesture state (for mouse drag) ───────────────────────────
+    private var currentStrokePath: Path? = null
+    private var currentStrokeStartTime: Long = 0L
+    private var strokeCount: Int = 0
 
     // ── Service lifecycle ─────────────────────────────────────────────────────
 
@@ -155,6 +162,51 @@ class InputBridgeAccessibilityService : AccessibilityService() {
             .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs))
             .build()
         dispatchGesture(gesture, null, null)
+    }
+
+    /**
+     * Start or continue a continuous stroke for mouse drag operations.
+     * Uses willContinue=true to keep the gesture alive for subsequent updates.
+     * Only one active gesture at a time — new call cancels in-progress gesture.
+     */
+    fun continueStroke(startX: Float, startY: Float, endX: Float, endY: Float, willContinue: Boolean) {
+        val now = android.os.SystemClock.elapsedRealtime()
+
+        if (currentStrokePath == null || !willContinue) {
+            // Start new stroke
+            currentStrokePath = Path().apply { moveTo(startX, startY) }
+            currentStrokeStartTime = now
+            strokeCount = 0
+        }
+
+        currentStrokePath?.lineTo(endX, endY)
+        strokeCount++
+
+        // Android limit: max 20 strokes per gesture, max 60s duration
+        val duration = (now - currentStrokeStartTime).coerceAtMost(CONTINUOUS_STROKE_DURATION_MS)
+        val strokeDuration = if (willContinue) duration else TAP_DURATION_MS
+
+        val stroke = GestureDescription.StrokeDescription(
+            currentStrokePath!!,
+            0,
+            strokeDuration,
+            willContinue
+        )
+
+        val gesture = GestureDescription.Builder()
+            .addStroke(stroke)
+            .build()
+
+        dispatchGesture(gesture, null, null)
+    }
+
+    /**
+     * End the current continuous stroke.
+     */
+    fun endStroke() {
+        currentStrokePath = null
+        currentStrokeStartTime = 0L
+        strokeCount = 0
     }
 
     // ── Navigation actions ────────────────────────────────────────────────────
@@ -310,6 +362,38 @@ class InputBridgeAccessibilityService : AccessibilityService() {
                 )
             }
 
+            // F1-F12 keys — try performAction on focused node, fallback to global action
+            in KeyEvent.KEYCODE_F1..KeyEvent.KEYCODE_F12 -> {
+                val focused = getFocused()
+                if (focused != null) {
+                    // Try clicking the focused node (many apps handle F-keys via click)
+                    focused.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                }
+            }
+
+            // Numpad keys — map to their base equivalents
+            KeyEvent.KEYCODE_NUMPAD_0 -> injectPrintableChar(modifiers, '0')
+            KeyEvent.KEYCODE_NUMPAD_1 -> injectPrintableChar(modifiers, '1')
+            KeyEvent.KEYCODE_NUMPAD_2 -> injectPrintableChar(modifiers, '2')
+            KeyEvent.KEYCODE_NUMPAD_3 -> injectPrintableChar(modifiers, '3')
+            KeyEvent.KEYCODE_NUMPAD_4 -> injectPrintableChar(modifiers, '4')
+            KeyEvent.KEYCODE_NUMPAD_5 -> injectPrintableChar(modifiers, '5')
+            KeyEvent.KEYCODE_NUMPAD_6 -> injectPrintableChar(modifiers, '6')
+            KeyEvent.KEYCODE_NUMPAD_7 -> injectPrintableChar(modifiers, '7')
+            KeyEvent.KEYCODE_NUMPAD_8 -> injectPrintableChar(modifiers, '8')
+            KeyEvent.KEYCODE_NUMPAD_9 -> injectPrintableChar(modifiers, '9')
+            KeyEvent.KEYCODE_NUMPAD_DOT -> injectPrintableChar(modifiers, '.')
+            KeyEvent.KEYCODE_NUMPAD_ADD -> injectPrintableChar(modifiers, '+')
+            KeyEvent.KEYCODE_NUMPAD_SUBTRACT -> injectPrintableChar(modifiers, '-')
+            KeyEvent.KEYCODE_NUMPAD_MULTIPLY -> injectPrintableChar(modifiers, '*')
+            KeyEvent.KEYCODE_NUMPAD_DIVIDE -> injectPrintableChar(modifiers, '/')
+
+            // Media keys — perform global actions
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> performGlobalAction(GLOBAL_ACTION_BACK)
+            KeyEvent.KEYCODE_MEDIA_STOP -> performGlobalAction(GLOBAL_ACTION_HOME)
+            KeyEvent.KEYCODE_MEDIA_NEXT -> performGlobalAction(GLOBAL_ACTION_RECENTS)
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS -> performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
+
             else -> {
                 // Attempt to resolve a printable Unicode character from the keyCode
                 val metaState = buildMetaState(modifiers)
@@ -326,6 +410,41 @@ class InputBridgeAccessibilityService : AccessibilityService() {
                     BridgeLogger.d(TAG, "No printable char for keyCode=$keyCode")
                 }
             }
+        }
+    }
+
+    /**
+     * Helper to inject a printable character with comprehensive fallback chain:
+     * 1. ACTION_SET_TEXT (primary)
+     * 2. Clipboard paste (fallback)
+     * 3. performAction (last resort)
+     */
+    private fun injectPrintableChar(modifiers: ModifierState, ch: Char) {
+        val effectiveChar = if (modifiers.shift || modifiers.capsLock) ch.uppercaseChar() else ch
+        val focused = getFocused()
+        if (focused != null) {
+            // Strategy 1: Try ACTION_SET_TEXT
+            val currentText = focused.text?.toString() ?: ""
+            val selStart = focused.textSelectionStart.coerceIn(0, currentText.length)
+            val newText = currentText.substring(0, selStart) + effectiveChar + currentText.substring(selStart)
+            val bundle = Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, newText)
+            }
+            val didSetText = focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, bundle)
+            if (didSetText) return
+
+            // Strategy 2: Clipboard paste
+            try {
+                val clip = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                clip.setPrimaryClip(android.content.ClipData.newPlainText("InputBridge", effectiveChar.toString()))
+                focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+                return
+            } catch (e: Exception) {
+                BridgeLogger.d(TAG, "Clipboard paste failed for char '$effectiveChar'")
+            }
+
+            // Strategy 3: performAction (last resort)
+            focused.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         }
     }
 
@@ -350,8 +469,14 @@ class InputBridgeAccessibilityService : AccessibilityService() {
     }
 
     private fun injectTextInternal(text: String) {
+        // Comprehensive fallback chain for text injection:
+        // 1. ACTION_SET_TEXT on focused node
+        // 2. Clipboard paste
+        // 3. Character-by-character injection via commitText
+
         val focused = getFocused()
         if (focused != null) {
+            // Strategy 1: Try ACTION_SET_TEXT (most reliable for standard EditText)
             val current = focused.text?.toString() ?: ""
             val selStart = focused.textSelectionStart.coerceIn(0, current.length)
             val selEnd = focused.textSelectionEnd.coerceIn(selStart, current.length)
@@ -363,16 +488,75 @@ class InputBridgeAccessibilityService : AccessibilityService() {
             )
             val set = focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, bundle)
             if (set) return
+
+            // Strategy 2: Clipboard paste (works on many non-standard text fields)
+            try {
+                val clip = getSystemService(Context.CLIPBOARD_SERVICE)
+                    as android.content.ClipboardManager
+                clip.setPrimaryClip(android.content.ClipData.newPlainText("InputBridge", text))
+                val didPaste = focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+                if (didPaste) return
+            } catch (e: Exception) {
+                BridgeLogger.d(TAG, "Clipboard paste failed: ${e.message}")
+            }
+
+            // Strategy 3: Character-by-character injection
+            // Some apps don't support ACTION_SET_TEXT — inject one char at a time
+            try {
+                for (ch in text) {
+                    val charCurrent = focused.text?.toString() ?: ""
+                    val charSelStart = focused.textSelectionStart.coerceIn(0, charCurrent.length)
+                    val charNewText = charCurrent.substring(0, charSelStart) + ch + charCurrent.substring(charSelStart)
+                    val charBundle = Bundle().apply {
+                        putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, charNewText)
+                    }
+                    focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, charBundle)
+                }
+                BridgeLogger.d(TAG, "Character-by-character injection succeeded for ${text.length} chars")
+                return
+            } catch (e: Exception) {
+                BridgeLogger.d(TAG, "Character-by-character injection failed: ${e.message}")
+            }
         }
-        // Fallback: clipboard paste
-        try {
-            val clip = getSystemService(Context.CLIPBOARD_SERVICE)
-                as android.content.ClipboardManager
-            clip.setPrimaryClip(android.content.ClipData.newPlainText("InputBridge", text))
-            focused?.performAction(AccessibilityNodeInfo.ACTION_PASTE)
-                ?: BridgeLogger.w(TAG, "No focused node for clipboard paste")
-        } catch (e: Exception) {
-            BridgeLogger.w(TAG, "Text injection (clipboard fallback) failed", e)
+
+        // Final fallback: try to find any editable node and inject there
+        val root = rootInActiveWindow
+        if (root != null) {
+            val editableNodes = mutableListOf<AccessibilityNodeInfo>()
+            findEditableNodes(root, editableNodes)
+            for (node in editableNodes) {
+                try {
+                    val current = node.text?.toString() ?: ""
+                    val bundle = Bundle().apply {
+                        putCharSequence(
+                            AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+                            current + text
+                        )
+                    }
+                    val didSet = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, bundle)
+                    if (didSet) {
+                        BridgeLogger.d(TAG, "Text injected via fallback editable node")
+                        return
+                    }
+                } catch (e: Exception) {
+                    // Continue to next node
+                }
+            }
+        }
+
+        BridgeLogger.w(TAG, "All text injection strategies failed")
+    }
+
+    /**
+     * Recursively find all editable nodes in the accessibility tree.
+     */
+    private fun findEditableNodes(node: AccessibilityNodeInfo, result: MutableList<AccessibilityNodeInfo>) {
+        if (node.isEditable) {
+            result.add(node)
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            findEditableNodes(child, result)
         }
     }
 

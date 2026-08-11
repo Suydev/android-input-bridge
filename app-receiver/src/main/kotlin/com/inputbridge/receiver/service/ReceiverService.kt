@@ -7,6 +7,7 @@ import android.os.*
 import androidx.core.app.NotificationCompat
 import com.inputbridge.accessibility.AccessibilityCommandBus
 import com.inputbridge.core.config.TransportConfig
+import com.inputbridge.core.discovery.AutoDiscovery
 import com.inputbridge.core.logging.BridgeLogger
 import com.inputbridge.diagnostics.DiagnosticsManager
 import com.inputbridge.protocol.EventPacketFactory
@@ -67,6 +68,7 @@ class ReceiverService : Service() {
         Dispatchers.IO + SupervisorJob() + serviceExceptionHandler
     )
     private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
 
     // BUG-075 FIX: use Koin singleton instead of creating a fresh instance with the Service context.
     private val prefs: ReceiverPreferences by inject()
@@ -127,6 +129,7 @@ class ReceiverService : Service() {
             startForeground(NOTIFICATION_ID, buildNotification("Starting…"))
         }
         acquireWakeLock()
+        acquireWifiLock()
         DiagnosticsManager.update { copy(receiverServiceRunning = true) }
         BridgeLogger.i(TAG, "ReceiverService created")
     }
@@ -211,6 +214,7 @@ class ReceiverService : Service() {
         // 3. Cancel scope
         serviceScope.cancel()
         listenerStarted.set(false)
+        releaseWifiLock()
         releaseWakeLock()
 
         // Phase 7: tear down cursor overlay
@@ -264,6 +268,12 @@ class ReceiverService : Service() {
 
         // Phase 7: start cursor overlay now that the transport is live
         startCursorOverlayIfNeeded()
+
+        // BUG-107: start UDP broadcast auto-discovery so the bridge can find this receiver
+        // automatically without manually entering the IP address.
+        serviceScope.launch {
+            runCatching { AutoDiscovery.startBroadcasting(port) }
+        }
 
         // Periodic diagnostics flush (includes sequence drop count)
         counterFlushJob = serviceScope.launch {
@@ -492,6 +502,22 @@ class ReceiverService : Service() {
     private fun releaseWakeLock() {
         runCatching { wakeLock?.let { if (it.isHeld) it.release() } }
         wakeLock = null
+    }
+
+    private fun acquireWifiLock() {
+        runCatching {
+            val wifiManager = getSystemService(WIFI_SERVICE) as? android.net.wifi.WifiManager ?: return
+            wifiLock = wifiManager.createWifiLock(
+                android.net.wifi.WifiManager.WIFI_MODE_FULL_LOW_LATENCY,
+                "InputBridge::LowLatency",
+            ).also { it.acquire() }
+            BridgeLogger.i(TAG, "WifiLock acquired (WIFI_MODE_FULL_LOW_LATENCY)")
+        }
+    }
+
+    private fun releaseWifiLock() {
+        runCatching { wifiLock?.let { if (it.isHeld) it.release() } }
+        wifiLock = null
     }
 
     companion object {

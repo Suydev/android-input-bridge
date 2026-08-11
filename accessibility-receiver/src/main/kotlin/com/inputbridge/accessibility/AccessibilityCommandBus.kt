@@ -76,6 +76,9 @@ object AccessibilityCommandBus {
 
     @Volatile private var cursorX = 0f
     @Volatile private var cursorY = 0f
+    @Volatile private var lastCursorX = 0f
+    @Volatile private var lastCursorY = 0f
+    @Volatile private var isDragging = false
 
     /**
      * BUG-070 FIX — @Volatile on screen dimensions.
@@ -168,15 +171,22 @@ object AccessibilityCommandBus {
      */
     fun post(event: InputEvent) {
         if (event is InputEvent.MouseMove) {
-            cursorX = (cursorX + event.dx).coerceIn(0f, screenWidth - 1f)
-            cursorY = (cursorY + event.dy).coerceIn(0f, screenHeight - 1f)
+            val newX = (cursorX + event.dx).coerceIn(0f, screenWidth - 1f)
+            val newY = (cursorY + event.dy).coerceIn(0f, screenHeight - 1f)
+
+            // If dragging, send continueStroke to keep the gesture alive
+            if (isDragging) {
+                scope.launch(Dispatchers.Main) {
+                    service?.continueStroke(lastCursorX, lastCursorY, newX, newY, true)
+                }
+                lastCursorX = newX
+                lastCursorY = newY
+            }
+
+            cursorX = newX
+            cursorY = newY
             _cursorPosition.value = Pair(cursorX, cursorY)
         } else {
-            // BUG-071 FIX: check the return value.
-            // tryEmit() returns false when the 256-slot buffer is full — e.g. the
-            // accessibility service is blocked on a long gesture and events pile up.
-            // Without this check, keyboard/click events are silently discarded with
-            // no trace in logs or diagnostics, making them impossible to debug.
             if (!commandFlow.tryEmit(event)) {
                 BridgeLogger.w(TAG, "CommandFlow full — dropped ${event::class.simpleName}")
                 DiagnosticsManager.update {
@@ -226,8 +236,13 @@ object AccessibilityCommandBus {
             is InputEvent.MouseButtonDown -> {
                 BridgeLogger.d(TAG, "Tap/longPress at (${cursorX.toInt()}, ${cursorY.toInt()}) " +
                     "button=${event.button}")
+                lastCursorX = cursorX
+                lastCursorY = cursorY
                 when (event.button) {
-                    MouseButton.LEFT    -> svc.tap(cursorX, cursorY)
+                    MouseButton.LEFT    -> {
+                        svc.tap(cursorX, cursorY)
+                        isDragging = true
+                    }
                     MouseButton.RIGHT   -> svc.longPress(cursorX, cursorY)
                     MouseButton.MIDDLE  -> Unit // no accessibility equivalent
                     MouseButton.BACK    -> svc.goBack()
@@ -235,8 +250,13 @@ object AccessibilityCommandBus {
                 }
             }
 
-            // MouseButtonUp: gesture is complete on DOWN — no separate action needed.
-            is InputEvent.MouseButtonUp -> Unit
+            // MouseButtonUp: end any active drag gesture.
+            is InputEvent.MouseButtonUp -> {
+                if (isDragging && event.button == MouseButton.LEFT) {
+                    isDragging = false
+                    svc.endStroke()
+                }
+            }
 
             // ── Scroll ────────────────────────────────────────────────────────
             is InputEvent.Scroll -> {
