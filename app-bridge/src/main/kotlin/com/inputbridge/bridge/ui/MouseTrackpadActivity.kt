@@ -411,8 +411,8 @@ class MouseTrackpadActivity : ComponentActivity() {
 
         cs.createHorizontalChain(
             ConstraintSet.PARENT_ID, ConstraintSet.START,
+            ConstraintSet.PARENT_ID, ConstraintSet.END,
             intArrayOf(leftClickBtn.id, rightClickBtn.id),
-            intArrayOf(ConstraintSet.END, ConstraintSet.END),
             null,
             ConstraintSet.CHAIN_SPREAD
         )
@@ -482,7 +482,7 @@ class MouseTrackpadActivity : ComponentActivity() {
     @SuppressLint("ClickableViewAccessibility")
     private fun onScrollZoneTouch(v: View, event: MotionEvent): Boolean {
         if (!ensureConnected()) return true
-        when (event.actionMasked) {
+        return when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 scrollLastRawY = event.rawY
                 v.setBackgroundColor(0x50FFFFFF.toInt())
