@@ -683,7 +683,7 @@ class MouseTrackpadActivity : ComponentActivity() {
         val transport = udpTransport ?: return
         scope.launch {
             runCatching { transport.send(packet) }
-                .onFailure { BridgeLogger.e(TAG, "sendScroll failed: ${e.message}") }
+                .onFailure { BridgeLogger.e(TAG, "sendScroll failed: ${it.message}") }
         }
     }
 
