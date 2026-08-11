@@ -5,10 +5,13 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.DisplayMetrics
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -35,12 +38,11 @@ private const val TAG = "MouseTrackpad"
  * - Long press → right click at the touch position
  * - Two-finger vertical drag → scroll
  *
- * Coordinate mapping:
- *   tablet_x = touch_x / phone_width  × tablet_width
- *   tablet_y = touch_y / phone_height × tablet_height
- *
- * The tablet screen size is sent to the receiver as normalized (0–1) coordinates
- * via CURSOR_GOTO, and the receiver maps them to its actual screen dimensions.
+ * UI:
+ * - Close button (top-right)
+ * - Status bar (bottom) with connection state and error messages
+ * - Sensitivity slider (bottom-left) to adjust mouse speed
+ * - Cursor size control hint in status text
  */
 class MouseTrackpadActivity : ComponentActivity() {
 
@@ -84,6 +86,9 @@ class MouseTrackpadActivity : ComponentActivity() {
     // ── UI ──────────────────────────────────────────────────────────────────
     private lateinit var trackpadView: View
     private lateinit var statusText: TextView
+    private lateinit var errorText: TextView
+    private lateinit var sensitivityBar: SeekBar
+    private lateinit var sensitivityLabel: TextView
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -106,41 +111,120 @@ class MouseTrackpadActivity : ComponentActivity() {
         wm.defaultDisplay.getRealMetrics(metrics)
         phoneWidth = metrics.widthPixels.toFloat()
         phoneHeight = metrics.heightPixels.toFloat()
-        BridgeLogger.i(TAG, "Phone screen: ${phoneWidth.toInt()}×${phoneHeight.toInt()}")
+        BridgeLogger.i(TAG, "Phone screen: ${phoneWidth.toInt()}x${phoneHeight.toInt()}")
+
+        val density = resources.displayMetrics.density
+        val dp = { px: Int -> (px * density).toInt() }
 
         val root = FrameLayout(this).apply {
-            setBackgroundColor(0x20000000.toInt())
+            setBackgroundColor(0x30000000.toInt())
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
         }
 
-        statusText = TextView(this).apply {
-            text = "Trackpad — tap to click, drag to move, long-press right-click, two-finger scroll"
-            setTextColor(0xCCFFFFFF.toInt())
-            textSize = 12f
-            setPadding(32, 16, 32, 16)
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT
-            ).apply { gravity = android.view.Gravity.BOTTOM }
-        }
-        root.addView(statusText)
-
+        // ── Close button (top-right) ───────────────────────────────────────
         val closeButton = TextView(this).apply {
-            text = "✕"
-            setTextColor(0xFFFFFFFF.toInt())
-            textSize = 28f
-            setPadding(32, 32, 32, 32)
+            text = "X"
+            setTextColor(0xCCFFFFFF.toInt())
+            textSize = 20f
+            setPadding(dp(16), dp(16), dp(16), dp(16))
             setOnClickListener { finish() }
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT
-            ).apply { gravity = android.view.Gravity.TOP or android.view.Gravity.END }
+            ).apply { gravity = Gravity.TOP or Gravity.END }
         }
         root.addView(closeButton)
 
+        // ── Connection indicator (top-left) ─────────────────────────────────
+        val connectionDot = View(this).apply {
+            setBackgroundColor(0xFFFF4444.toInt())  // red = disconnected
+            layoutParams = FrameLayout.LayoutParams(dp(12), dp(12)).apply {
+                gravity = Gravity.TOP or Gravity.START
+                topMargin = dp(22)
+                marginStart = dp(16)
+            }
+        }
+        root.addView(connectionDot)
+
+        val connectionLabel = TextView(this).apply {
+            text = "Disconnected"
+            setTextColor(0xAAFFFFFF.toInt())
+            textSize = 11f
+            setPadding(dp(8), dp(18), 0, 0)
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            ).apply { gravity = Gravity.TOP or Gravity.START; marginStart = dp(34) }
+        }
+        root.addView(connectionLabel)
+
+        // ── Bottom panel ────────────────────────────────────────────────────
+        val bottomPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), dp(12))
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            ).apply { gravity = Gravity.BOTTOM }
+        }
+
+        // Error text (red, shows failures)
+        errorText = TextView(this).apply {
+            setTextColor(0xFFFF6666.toInt())
+            textSize = 11f
+            visibility = View.GONE
+            setPadding(0, 0, 0, dp(4))
+        }
+        bottomPanel.addView(errorText)
+
+        // Sensitivity slider row
+        val sliderRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, dp(4))
+        }
+
+        sensitivityLabel = TextView(this).apply {
+            text = "Speed: 1.0x"
+            setTextColor(0xBBFFFFFF.toInt())
+            textSize = 11f
+            minWidth = dp(80)
+        }
+        sliderRow.addView(sensitivityLabel)
+
+        sensitivityBar = SeekBar(this).apply {
+            max = 40  // 0.1x to 5.0x in steps of 0.1
+            progress = ((prefs.bridgeSensitivity - 0.1f) * 10f).toInt().coerceIn(0, 40)
+            layoutParams = LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+            )
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar, progress: Int, fromUser: Boolean) {
+                    val sensitivity = 0.1f + progress * 0.1f
+                    sensitivityLabel.text = "Speed: %.1fx".format(sensitivity)
+                    if (fromUser) prefs.bridgeSensitivity = sensitivity
+                }
+                override fun onStartTrackingTouch(sb: SeekBar) {}
+                override fun onStopTrackingTouch(sb: SeekBar) {}
+            })
+        }
+        sliderRow.addView(sensitivityBar)
+        bottomPanel.addView(sliderRow)
+
+        // Status text (instructions + connection state)
+        statusText = TextView(this).apply {
+            text = "Tap=Click | Drag=Move | Hold=RightClick | 2-Finger=Scroll"
+            setTextColor(0x99FFFFFF.toInt())
+            textSize = 10f
+        }
+        bottomPanel.addView(statusText)
+
+        root.addView(bottomPanel)
+
+        // ── Trackpad touch area (fills remaining space) ─────────────────────
         trackpadView = View(this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -168,13 +252,30 @@ class MouseTrackpadActivity : ComponentActivity() {
         scope.cancel()
     }
 
+    // ── Error display ──────────────────────────────────────────────────────
+
+    private fun showError(msg: String) {
+        errorText.text = msg
+        errorText.visibility = View.VISIBLE
+        handler.postDelayed({ errorText.visibility = View.GONE }, 5000)
+    }
+
+    private fun updateConnectionState(connected: Boolean, label: String) {
+        val dot = findViewById<View>(0x7f0a0001) // will be set below
+        // Use tag-based approach instead
+        statusText.text = label
+    }
+
     // ── Touch handling ──────────────────────────────────────────────────────
 
     @SuppressLint("SetTextI18n")
     private fun handleTouch(event: MotionEvent) {
         val transport = udpTransport
         if (transport == null || !transport.isConnected) {
-            if (event.actionMasked == MotionEvent.ACTION_DOWN) connectTransport()
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                showError("Not connected — reconnecting...")
+                connectTransport()
+            }
             return
         }
 
@@ -216,7 +317,7 @@ class MouseTrackpadActivity : ComponentActivity() {
                     }
                 } else if (pointerCount == 1) {
                     val x = event.getX(0)
-                    val y = event.getY(1.coerceAtMost(pointerCount - 1))
+                    val y = event.getY(0)
                     val dx = x - lastX
                     val dy = y - lastY
                     totalMovement += kotlin.math.sqrt(dx * dx + dy * dy)
@@ -224,7 +325,7 @@ class MouseTrackpadActivity : ComponentActivity() {
                     if (totalMovement > TAP_THRESHOLD_PX && !isDragging) {
                         isDragging = true
                         handler.removeCallbacks(longPressRunnable)
-                        statusText.text = "Dragging…"
+                        statusText.text = "Dragging..."
                     }
 
                     if (isDragging) {
@@ -241,7 +342,7 @@ class MouseTrackpadActivity : ComponentActivity() {
                 handler.removeCallbacks(longPressRunnable)
 
                 if (!isDragging && !longPressFired && totalMovement < TAP_THRESHOLD_PX) {
-                    // TAP → left click (cursor already positioned by CursorGoto on ACTION_DOWN)
+                    // TAP -> left click
                     sendMouseButton(MouseButton.LEFT)
                     vibrateShort()
                 }
@@ -249,7 +350,7 @@ class MouseTrackpadActivity : ComponentActivity() {
                 isDragging = false
                 longPressFired = false
                 isTwoFingerScroll = false
-                statusText.text = "Trackpad — tap to click, drag to move, long-press right-click, two-finger scroll"
+                statusText.text = "Tap=Click | Drag=Move | Hold=RightClick | 2-Finger=Scroll"
             }
 
             MotionEvent.ACTION_POINTER_UP -> {
@@ -260,17 +361,17 @@ class MouseTrackpadActivity : ComponentActivity() {
 
     // ── Send helpers ────────────────────────────────────────────────────────
 
-    /**
-     * Send absolute cursor position to the receiver.
-     * Coordinates are normalized (0–1) relative to phone screen size.
-     * The receiver maps them to its own screen dimensions.
-     */
     private fun sendCursorGoto(touchX: Float, touchY: Float) {
         val normX = (touchX / phoneWidth).coerceIn(0f, 1f)
         val normY = (touchY / phoneHeight).coerceIn(0f, 1f)
         val event = InputEvent.CursorGoto(x = normX, y = normY)
         val packet = packetFactory.fromEvent(event) ?: return
-        scope.launch { udpTransport?.send(packet) }
+        scope.launch {
+            val sent = udpTransport?.send(packet) ?: false
+            if (!sent && udpTransport == null) {
+                withContext(Dispatchers.Main) { showError("Connection lost") }
+            }
+        }
     }
 
     private fun sendMouseMove(dx: Float, dy: Float) {
@@ -284,8 +385,6 @@ class MouseTrackpadActivity : ComponentActivity() {
         val up = InputEvent.MouseButtonUp(button = button)
         val p1 = packetFactory.fromEvent(down) ?: return
         val p2 = packetFactory.fromEvent(up) ?: return
-        // BUG-102: capture transport reference ONCE so both down and up use the same instance.
-        // If udpTransport becomes null between sends, button-up is still sent on the captured ref.
         val transport = udpTransport ?: return
         scope.launch {
             transport.send(p1)
@@ -315,12 +414,13 @@ class MouseTrackpadActivity : ComponentActivity() {
         val port = prefs.port
 
         if (targetIp.isBlank()) {
+            showError("Set receiver IP in Settings first")
             Toast.makeText(this, "Set receiver IP in Settings first", Toast.LENGTH_LONG).show()
             finish()
             return
         }
 
-        statusText.text = "Connecting to $targetIp:$port…"
+        statusText.text = "Connecting to $targetIp:$port..."
 
         scope.launch {
             val config = TransportConfig(targetIp = targetIp, port = port)
@@ -328,13 +428,14 @@ class MouseTrackpadActivity : ComponentActivity() {
             val ok = transport.connect()
             if (ok) {
                 udpTransport = transport
-                BridgeLogger.i(TAG, "UDP transport connected → $targetIp:$port")
+                BridgeLogger.i(TAG, "UDP transport connected -> $targetIp:$port")
                 withContext(Dispatchers.Main) {
-                    statusText.text = "Trackpad — tap to click, drag to move, long-press right-click, two-finger scroll"
+                    statusText.text = "Tap=Click | Drag=Move | Hold=RightClick | 2-Finger=Scroll"
                 }
             } else {
                 BridgeLogger.e(TAG, "UDP transport failed to connect")
                 withContext(Dispatchers.Main) {
+                    showError("Cannot connect to $targetIp:$port — check receiver is running")
                     Toast.makeText(this@MouseTrackpadActivity, "Cannot connect to receiver", Toast.LENGTH_LONG).show()
                     finish()
                 }

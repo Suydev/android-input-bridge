@@ -156,78 +156,77 @@ class CursorOverlayService : Service() {
 }
 
 /**
- * Custom View that draws a clean crosshair cursor overlay.
+ * Custom View that draws a Windows-style arrow cursor overlay.
  *
- * Design: a + shaped crosshair with:
- *   - Two thin lines crossing at center (the hotspot)
- *   - Small gap at center for precision
+ * Design: classic top-left arrow pointer with:
+ *   - White fill with black outline (like Windows default)
+ *   - Semi-transparent for less visual obstruction
  *   - Drop shadow for visibility on any background
- *
- * Much more visible than a tiny arrow on high-DPI tablet screens.
+ *   - Hotspot at the arrow tip (top-left corner)
  */
 private class CursorArrowView(context: android.content.Context) : View(context) {
 
     companion object {
-        /** Inset from canvas edge to the crosshair center. */
+        /** Inset from canvas edge to the arrow tip (hotspot). */
         const val HOTSPOT_INSET_DP = 2
     }
 
-    private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        style = Paint.Style.STROKE
-        strokeWidth = 2f
-        strokeCap = Paint.Cap.ROUND
+    private val path = android.graphics.Path()
+    private val density = resources.displayMetrics.density
+
+    // Semi-transparent white fill (alpha 200/255 ≈ 78%)
+    private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(200, 255, 255, 255)
+        style = Paint.Style.FILL
     }
+
+    // Black outline
     private val outlinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.BLACK
+        color = Color.argb(230, 0, 0, 0)
         style = Paint.Style.STROKE
-        strokeWidth = 3.5f
-        strokeCap = Paint.Cap.ROUND
+        strokeWidth = (1.2f * density).coerceAtLeast(1f)
+        strokeJoin = Paint.Join.ROUND
     }
+
+    // Drop shadow
     private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(120, 0, 0, 0)
-        style = Paint.Style.STROKE
-        strokeWidth = 4f
-        strokeCap = Paint.Cap.ROUND
-    }
-    private val centerDotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.RED
+        color = Color.argb(80, 0, 0, 0)
         style = Paint.Style.FILL
     }
 
     override fun onDraw(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
-        val cx = w / 2f
-        val cy = h / 2f
-        val arm = w * 0.42f  // arm length from center
-        val gap = w * 0.06f  // gap at center
 
-        val density = resources.displayMetrics.density
-        linePaint.strokeWidth = (1.5f * density).coerceAtLeast(1.5f)
-        outlinePaint.strokeWidth = (2.5f * density).coerceAtLeast(2.5f)
-        shadowPaint.strokeWidth = (3f * density).coerceAtLeast(3f)
+        // Windows arrow cursor proportions (normalized to view size)
+        // Arrow body occupies ~75% of view, tail at bottom-right
+        val s = w / 32f  // scale factor
 
-        // Shadow (offset)
-        val shD = density
-        canvas.drawLine(cx - arm + shD, cy + shD, cx - gap + shD, cy + shD, shadowPaint)
-        canvas.drawLine(cx + gap + shD, cy + shD, cx + arm + shD, cy + shD, shadowPaint)
-        canvas.drawLine(cx + shD, cy - arm + shD, cx + shD, cy - gap + shD, shadowPaint)
-        canvas.drawLine(cx + shD, cy + gap + shD, cx + shD, cy + arm + shD, shadowPaint)
+        // Arrow tip (hotspot) near top-left with inset
+        val tipX = HOTSPOT_INSET_DP * density
+        val tipY = HOTSPOT_INSET_DP * density
 
-        // Black outline
-        canvas.drawLine(cx - arm, cy, cx - gap, cy, outlinePaint)
-        canvas.drawLine(cx + gap, cy, cx + arm, cy, outlinePaint)
-        canvas.drawLine(cx, cy - arm, cx, cy - gap, outlinePaint)
-        canvas.drawLine(cx, cy + gap, cx, cy + arm, outlinePaint)
+        // Build arrow path — classic Windows arrow shape
+        path.reset()
+        path.moveTo(tipX, tipY)                          // tip
+        path.lineTo(tipX + s * 2, tipY + s * 22)        // left edge going down
+        path.lineTo(tipX + s * 7, tipY + s * 17)        // notch
+        path.lineTo(tipX + s * 12, tipY + s * 27)       // bottom-left
+        path.lineTo(tipX + s * 16, tipY + s * 24)       // bottom notch
+        path.lineTo(tipX + s * 11, tipY + s * 14)       // right edge going up
+        path.lineTo(tipX + s * 20, tipY + s * 14)       // right tail
+        path.close()
+
+        // Shadow (offset by 1-2px)
+        val sh = (1.5f * density).coerceAtLeast(1.5f)
+        path.offset(sh, sh)
+        canvas.drawPath(path, shadowPaint)
+        path.offset(-sh, -sh)
 
         // White fill
-        canvas.drawLine(cx - arm, cy, cx - gap, cy, linePaint)
-        canvas.drawLine(cx + gap, cy, cx + arm, cy, linePaint)
-        canvas.drawLine(cx, cy - arm, cx, cy - gap, linePaint)
-        canvas.drawLine(cx, cy + gap, cx, cy + arm, linePaint)
+        canvas.drawPath(path, fillPaint)
 
-        // Center dot for precision
-        canvas.drawCircle(cx, cy, (1.5f * density).coerceAtLeast(1.5f), centerDotPaint)
+        // Black outline
+        canvas.drawPath(path, outlinePaint)
     }
 }
