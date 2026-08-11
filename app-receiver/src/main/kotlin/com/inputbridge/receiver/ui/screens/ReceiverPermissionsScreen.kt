@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
+import android.view.accessibility.AccessibilityServiceInfo
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -71,7 +72,7 @@ fun ReceiverPermissionsScreen(onBack: () -> Unit) {
         // Check if our accessibility service is enabled
         val am = context.getSystemService(AccessibilityManager::class.java)
         a11yEnabled = am?.getEnabledAccessibilityServiceList(
-            AccessibilityManager.FEEDBACK_GENERIC
+            AccessibilityServiceInfo.FEEDBACK_GENERIC
         )?.any { it.resolveInfo.serviceInfo?.name == "com.inputbridge.accessibility.InputBridgeAccessibilityService" } == true
     }
 
