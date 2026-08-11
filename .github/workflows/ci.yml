@@ -93,7 +93,7 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
 
-  # ── Release APKs (only on main) ─────────────────────────────────────────────
+  # ── Release APKs with GitHub Release (only on main) ────────────────────────
   release:
     name: Build Signed Release + GitHub Release
     runs-on: ubuntu-latest
@@ -119,20 +119,10 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
-      # ── Signing: use secrets if available, otherwise generate temp keystore ──
-      - name: Decode Keystore (if secrets exist)
-        if: ${{ env.HAS_SIGNING_SECRETS == 'true' }}
-        env:
-          HAS_SIGNING_SECRETS: ${{ secrets.SIGNING_KEYSTORE_BASE64 != '' }}
-        run: echo "$SIGNING_KEYSTORE_BASE64" | base64 --decode > release.jks
-
-      - name: Generate Temp Keystore (if no secrets)
-        if: ${{ env.HAS_SIGNING_SECRETS != 'true' }}
-        env:
-          HAS_SIGNING_SECRETS: ${{ secrets.SIGNING_KEYSTORE_BASE64 != '' }}
+      - name: Generate Signing Keystore
         run: |
           keytool -genkeypair -v \
-            -keystore release.jks \
+            -keystore ${{ github.workspace }}/release.jks \
             -alias inputbridge \
             -keyalg RSA -keysize 2048 \
             -validity 10000 \
@@ -143,16 +133,12 @@ jobs:
       - name: Build Release APKs
         env:
           SIGNING_KEYSTORE_PATH: ${{ github.workspace }}/release.jks
-          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS || 'inputbridge' }}
-          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD || 'inputbridge123' }}
-          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD || 'inputbridge123' }}
+          SIGNING_KEY_ALIAS: inputbridge
+          SIGNING_KEY_PASSWORD: inputbridge123
+          SIGNING_STORE_PASSWORD: inputbridge123
         run: ./gradlew :app-bridge:assembleRelease :app-receiver:assembleRelease --stacktrace
 
-      # ── Zipalign + APK Sign v2 (for temp keystore path) ─────────────────────
-      - name: Zipalign and Sign APKs (temp keystore)
-        if: ${{ env.HAS_SIGNING_SECRETS != 'true' }}
-        env:
-          HAS_SIGNING_SECRETS: ${{ secrets.SIGNING_KEYSTORE_BASE64 != '' }}
+      - name: Zipalign and APK Sign v2
         run: |
           BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/*/ | sort -V | tail -1)
           ZIPALIGN="$BUILD_TOOLS/zipalign"
@@ -164,9 +150,10 @@ jobs:
             ALIGNED="${BASENAME}-aligned.apk"
             SIGNED="${BASENAME}.apk"
 
+            echo "Signing: $APK -> $SIGNED"
             $ZIPALIGN -f 4 "$APK" "$ALIGNED"
             $APKSIGNER sign \
-              --ks release.jks \
+              --ks ${{ github.workspace }}/release.jks \
               --ks-key-alias inputbridge \
               --ks-pass pass:inputbridge123 \
               --key-pass pass:inputbridge123 \
@@ -174,6 +161,7 @@ jobs:
               "$ALIGNED"
             $APKSIGNER verify "$SIGNED"
             rm -f "$ALIGNED"
+            echo "Done: $SIGNED ($(du -h "$SIGNED" | cut -f1))"
           done
 
       - name: Upload Release APKs
@@ -184,37 +172,25 @@ jobs:
             app-bridge/build/outputs/apk/release/app-bridge-release.apk
             app-receiver/build/outputs/apk/release/app-receiver-release.apk
           retention-days: 90
-          if-no-files-found: warn
-
-      # ── Create GitHub Release with APKs attached ─────────────────────────────
-      - name: Get version
-        id: version
-        run: echo "tag=v$(date +'%Y.%m.%d')-${{ github.run_number }}" >> $GITHUB_OUTPUT
+          if-no-files-found: error
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: "InputBridge ${{ steps.version.outputs.tag }}"
+          tag_name: build-${{ github.run_number }}
+          name: "InputBridge build-${{ github.run_number }}"
           body: |
-            ## InputBridge ${{ steps.version.outputs.tag }}
+            ## InputBridge build-${{ github.run_number }}
 
             ### Downloads
-            - **app-bridge-release.apk** — Bridge app (install on the phone with USB keyboard/mouse)
-            - **app-receiver-release.apk** — Receiver app (install on the tablet)
-
-            ### What's New
-            - Windows-style arrow cursor overlay (semi-transparent)
-            - Trackpad UI with sensitivity slider and error messages
-            - 32-bit ARM support (Redmi 9, etc.)
-            - Crash fixes: VIBRATE permission, thread safety, ANR prevention
-            - Broken reconnect state fix
+            - **app-bridge-release.apk** — Bridge app (phone with USB keyboard/mouse)
+            - **app-receiver-release.apk** — Receiver app (tablet)
 
             ### Setup
             1. Install both APKs
             2. Enable accessibility service for both apps
-            3. Set receiver IP in bridge app settings
-            4. Open MOUSE button in bridge app to start trackpad
+            3. Set receiver IP in bridge app Settings
+            4. Open MOUSE button in bridge app for trackpad
           files: |
             app-bridge/build/outputs/apk/release/app-bridge-release.apk
             app-receiver/build/outputs/apk/release/app-receiver-release.apk
