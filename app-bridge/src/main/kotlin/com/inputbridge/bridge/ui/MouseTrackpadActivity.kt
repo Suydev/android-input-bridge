@@ -633,10 +633,15 @@ class MouseTrackpadActivity : ComponentActivity() {
         val normY = (touchY / phoneHeight).coerceIn(0f, 1f)
         val event = InputEvent.CursorGoto(x = normX, y = normY)
         val packet = packetFactory.fromEvent(event) ?: return
+        val transport = udpTransport ?: return
         scope.launch {
-            val sent = udpTransport?.send(packet) ?: false
-            if (!sent && udpTransport == null) {
-                withContext(Dispatchers.Main) { showError("Connection lost") }
+            runCatching {
+                val sent = transport.send(packet)
+                if (!sent) {
+                    withContext(Dispatchers.Main) { showError("Connection lost") }
+                }
+            }.onFailure { e ->
+                BridgeLogger.e(TAG, "sendCursorGoto failed: ${e.message}")
             }
         }
     }
@@ -662,15 +667,24 @@ class MouseTrackpadActivity : ComponentActivity() {
         val p2 = packetFactory.fromEvent(up) ?: return
         val transport = udpTransport ?: return
         scope.launch {
-            transport.send(p1)
-            transport.send(p2)
+            runCatching {
+                transport.send(p1)
+                transport.send(p2)
+            }.onFailure { e ->
+                BridgeLogger.e(TAG, "sendMouseButton failed: ${e.message}")
+                withContext(Dispatchers.Main) { showError("Send failed: ${e.message}") }
+            }
         }
     }
 
     private fun sendScroll(dy: Float) {
         val event = InputEvent.Scroll(dx = 0f, dy = dy)
         val packet = packetFactory.fromEvent(event) ?: return
-        scope.launch { udpTransport?.send(packet) }
+        val transport = udpTransport ?: return
+        scope.launch {
+            runCatching { transport.send(packet) }
+                .onFailure { BridgeLogger.e(TAG, "sendScroll failed: ${e.message}") }
+        }
     }
 
     private fun vibrateShort() {
