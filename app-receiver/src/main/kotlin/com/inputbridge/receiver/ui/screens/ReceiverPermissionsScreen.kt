@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import android.view.accessibility.AccessibilityManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -52,6 +53,7 @@ fun ReceiverPermissionsScreen(onBack: () -> Unit) {
     var batteryOptIgnored by remember { mutableStateOf(false) }
     var notifGranted      by remember { mutableStateOf(false) }
     var overlayGranted    by remember { mutableStateOf(false) }
+    var a11yEnabled       by remember { mutableStateOf(false) }
 
     fun refreshPermissions() {
         val pm = context.getSystemService(PowerManager::class.java)
@@ -65,6 +67,12 @@ fun ReceiverPermissionsScreen(onBack: () -> Unit) {
         }
 
         overlayGranted = Settings.canDrawOverlays(context)
+
+        // Check if our accessibility service is enabled
+        val am = context.getSystemService(AccessibilityManager::class.java)
+        a11yEnabled = am?.getEnabledAccessibilityServiceList(
+            AccessibilityManager.FEEDBACK_GENERIC
+        )?.any { it.resolveInfo.serviceInfo?.name == "com.inputbridge.accessibility.InputBridgeAccessibilityService" } == true
     }
 
     // Re-check on every resume so the UI reflects changes made in system settings.
@@ -117,7 +125,7 @@ fun ReceiverPermissionsScreen(onBack: () -> Unit) {
                 description = "REQUIRED. Allows the receiver to inject keyboard and mouse " +
                         "events into any app. Without this, nothing works.\n\n" +
                         "Tap below → find 'InputBridge Input Controller' → enable it.",
-                granted     = false, // Always show the button — can't detect state here.
+                granted     = a11yEnabled,
                 alwaysShowAction = true,
                 action = {
                     context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
