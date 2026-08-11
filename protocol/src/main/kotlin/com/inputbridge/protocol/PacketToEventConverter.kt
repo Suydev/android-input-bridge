@@ -58,6 +58,10 @@ object PacketToEventConverter {
             val action = PacketSerializer.parseNavActionPayload(packet.payload) ?: return null
             InputEvent.NavigationAction(action)
         }
+        PacketType.CURSOR_GOTO -> {
+            val (x, y) = PacketSerializer.parseCursorGotoPayload(packet.payload) ?: return null
+            InputEvent.CursorGoto(x, y)
+        }
         // Control packets — carry no input event data
         PacketType.PING,
         PacketType.PONG,

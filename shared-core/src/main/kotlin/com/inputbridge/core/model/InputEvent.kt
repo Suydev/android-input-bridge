@@ -66,6 +66,13 @@ sealed class InputEvent {
         val action: AndroidNavAction,
         val timestampNs: Long = System.nanoTime()
     ) : InputEvent()
+
+    /** Absolute cursor position — touch-to-cursor mapping for trackpad mode. */
+    data class CursorGoto(
+        val x: Float,
+        val y: Float,
+        val timestampNs: Long = System.nanoTime()
+    ) : InputEvent()
 }
 
 /**

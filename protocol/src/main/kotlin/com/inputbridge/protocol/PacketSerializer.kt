@@ -92,6 +92,12 @@ object PacketSerializer {
     fun buildNavActionPayload(action: AndroidNavAction): ByteArray =
         byteArrayOf(action.id)
 
+    fun buildCursorGotoPayload(x: Float, y: Float): ByteArray =
+        ByteBuffer.allocate(8).order(BYTE_ORDER)
+            .putFloat(x)
+            .putFloat(y)
+            .array()
+
     // ── Payload parsers (payload bytes → typed values) ────────────────────────
 
     fun parseKeyPayload(payload: ByteArray): Triple<Int, Int, ModifierState>? {
@@ -127,6 +133,12 @@ object PacketSerializer {
     fun parseNavActionPayload(payload: ByteArray): AndroidNavAction? {
         if (payload.isEmpty()) return null
         return AndroidNavAction.fromId(payload[0])
+    }
+
+    fun parseCursorGotoPayload(payload: ByteArray): Pair<Float, Float>? {
+        if (payload.size < 8) return null
+        val buf = ByteBuffer.wrap(payload).order(BYTE_ORDER)
+        return Pair(buf.float, buf.float)
     }
 
     // ── Pairing payloads ──────────────────────────────────────────────────────

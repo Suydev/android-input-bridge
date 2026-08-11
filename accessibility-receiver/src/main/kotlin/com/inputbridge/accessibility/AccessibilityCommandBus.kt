@@ -288,6 +288,15 @@ object AccessibilityCommandBus {
             // Modifier state change: modifiers are embedded in subsequent KeyDown events.
             is InputEvent.ModifierStateChanged -> Unit
 
+            // Absolute cursor positioning — sets cursor to exact screen coordinates.
+            // Used by trackpad mode: touch position on phone maps to tablet screen position.
+            // Coordinates are normalized (0–1); receiver maps to its own screen dimensions.
+            is InputEvent.CursorGoto -> {
+                cursorX = (event.x * screenWidth).coerceIn(0f, screenWidth - 1f)
+                cursorY = (event.y * screenHeight).coerceIn(0f, screenHeight - 1f)
+                _cursorPosition.value = Pair(cursorX, cursorY)
+            }
+
             // BUG-046 fix: removed dead `else` branch.
             // The `when` above is exhaustive over the sealed InputEvent hierarchy (all 9 subtypes
             // are listed). Keeping `else` here would suppress Kotlin's compile-time exhaustiveness

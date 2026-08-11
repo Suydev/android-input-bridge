@@ -37,7 +37,8 @@ enum class PacketType(val id: Byte) {
     SCROLL(0x25),
     TEXT_INPUT(0x26),
     MODIFIER_STATE(0x27),
-    SPECIAL_ACTION(0x28);
+    SPECIAL_ACTION(0x28),
+    CURSOR_GOTO(0x29);
 
     companion object {
         private val byId = entries.associateBy { it.id }

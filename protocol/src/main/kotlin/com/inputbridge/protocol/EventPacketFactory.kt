@@ -91,6 +91,12 @@ class EventPacketFactory {
             timestampMs = nowMs(),
             payload = PacketSerializer.buildNavActionPayload(event.action)
         )
+        is InputEvent.CursorGoto -> Packet(
+            type = PacketType.CURSOR_GOTO,
+            sequenceNo = nextInputSeq(),
+            timestampMs = nowMs(),
+            payload = PacketSerializer.buildCursorGotoPayload(event.x, event.y)
+        )
     }
 
     fun makePing(): Packet = Packet(

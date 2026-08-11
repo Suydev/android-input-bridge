@@ -418,7 +418,8 @@ class ReceiverService : Service() {
                     PacketType.SCROLL,
                     PacketType.TEXT_INPUT,
                     PacketType.MODIFIER_STATE,
-                    PacketType.SPECIAL_ACTION -> {
+                    PacketType.SPECIAL_ACTION,
+                    PacketType.CURSOR_GOTO -> {
                         // Packet loss detection via sequence-number gaps
                         val seq = packet.sequenceNo
                         if (lastInputSeqNo >= 0 && seq > lastInputSeqNo + 1) {

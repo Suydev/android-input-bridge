@@ -490,7 +490,8 @@ class BridgeService : Service() {
                     PacketType.SCROLL,
                     PacketType.TEXT_INPUT,
                     PacketType.MODIFIER_STATE,
-                    PacketType.SPECIAL_ACTION -> Unit
+                    PacketType.SPECIAL_ACTION,
+                    PacketType.CURSOR_GOTO -> Unit
                 }
             }
         }
