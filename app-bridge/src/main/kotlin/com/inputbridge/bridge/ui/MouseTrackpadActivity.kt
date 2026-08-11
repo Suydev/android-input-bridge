@@ -297,9 +297,11 @@ class MouseTrackpadActivity : ComponentActivity() {
     }
 
     private fun vibrateShort() {
-        @Suppress("DEPRECATION")
-        val vibrator = getSystemService(VIBRATOR_SERVICE) as? android.os.Vibrator
-        vibrator?.vibrate(android.os.VibrationEffect.createOneShot(20, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+        try {
+            @Suppress("DEPRECATION")
+            val vibrator = getSystemService(VIBRATOR_SERVICE) as? android.os.Vibrator
+            vibrator?.vibrate(android.os.VibrationEffect.createOneShot(20, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+        } catch (_: SecurityException) { }
     }
 
     // ── Transport ───────────────────────────────────────────────────────────
