@@ -8,7 +8,7 @@ import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
-import android.view.accessibility.AccessibilityServiceInfo
+import android.accessibilityservice.AccessibilityServiceInfo
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
