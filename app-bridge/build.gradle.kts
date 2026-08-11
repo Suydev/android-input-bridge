@@ -8,6 +8,10 @@ android {
 
     defaultConfig {
         applicationId = "com.inputbridge.bridge"
+        // BUG-105: include 32-bit ARM so APK installs on 32-bit devices like Redmi 9 (Android 10)
+        ndk {
+            abiFilters += setOf("armeabi-v7a", "arm64-v8a")
+        }
     }
 }
 

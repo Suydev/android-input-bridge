@@ -8,6 +8,9 @@ android {
 
     defaultConfig {
         applicationId = "com.inputbridge.receiver"
+        ndk {
+            abiFilters += setOf("armeabi-v7a", "arm64-v8a")
+        }
     }
 }
 
