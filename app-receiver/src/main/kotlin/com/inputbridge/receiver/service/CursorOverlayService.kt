@@ -5,7 +5,6 @@ import android.content.Intent
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Path
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
@@ -157,104 +156,78 @@ class CursorOverlayService : Service() {
 }
 
 /**
- * Custom View that draws a classic Windows-style arrow cursor.
+ * Custom View that draws a clean crosshair cursor overlay.
  *
- * Shape (hotspot at the inset tip, all coordinates in canvas pixels):
+ * Design: a + shaped crosshair with:
+ *   - Two thin lines crossing at center (the hotspot)
+ *   - Small gap at center for precision
+ *   - Drop shadow for visibility on any background
  *
- *   Tip at the inset — overlay placement compensates so this remains the logical cursor hotspot.
- *   Arrow goes:
- *     • Down the left edge (0 → tailTop)
- *     • Cuts inward to form the left side of the tail
- *     • Down the left tail wall to the bottom
- *     • Across the tail bottom
- *     • Up the right tail wall to the notch
- *     • Across to the right point of the arrow head
- *     • Diagonal back to tip (the characteristic arrow diagonal)
- *
- * The entire shape is drawn twice:
- *   1. Shadow pass: the path is drawn slightly larger in dark colour, offset 1dp
- *   2. Fill pass: white fill
- *   3. Stroke pass: thin black outline for sharpness on any background
- *
- * View is sized by receiver preference so the arrow fits the target display.
+ * Much more visible than a tiny arrow on high-DPI tablet screens.
  */
 private class CursorArrowView(context: android.content.Context) : View(context) {
 
     companion object {
-        /** Inset from canvas edge to the pointer tip; also the hotspot offset. */
+        /** Inset from canvas edge to the crosshair center. */
         const val HOTSPOT_INSET_DP = 2
     }
 
-    private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
-        style = Paint.Style.FILL
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+        strokeCap = Paint.Cap.ROUND
     }
-    private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val outlinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.BLACK
         style = Paint.Style.STROKE
+        strokeWidth = 3.5f
+        strokeCap = Paint.Cap.ROUND
     }
     private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(90, 0, 0, 0)
+        color = Color.argb(120, 0, 0, 0)
+        style = Paint.Style.STROKE
+        strokeWidth = 4f
+        strokeCap = Paint.Cap.ROUND
+    }
+    private val centerDotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.RED
         style = Paint.Style.FILL
-    }
-
-    private val arrowPath   = Path()
-    private val shadowPath  = Path()
-
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        super.onSizeChanged(w, h, oldw, oldh)
-        buildPaths(w.toFloat(), h.toFloat())
-    }
-
-    /**
-     * Build the arrow and shadow paths for the given canvas size.
-     *
-     * Normalized shape (width W, height H = same value since view is square):
-     * The shape is inset on every side so the stroke and shadow are never clipped.
-     *   Close → back to tip (diagonal edge)
-     *
-     * The shadow path is the same shape offset by (shadowDx, shadowDy) to give
-     * the impression of depth.
-     */
-    private fun buildPaths(W: Float, H: Float) {
-        // BUG-085 FIX: reserve a real margin around the shape. The previous path
-        // touched 0 and H, clipping the pointer border, shadow, and handle.
-        val strokeW = (resources.displayMetrics.density * 1.5f).coerceAtLeast(1.5f)
-        strokePaint.strokeWidth = strokeW
-        val inset = (HOTSPOT_INSET_DP * resources.displayMetrics.density).coerceAtLeast(strokeW)
-        val shadowOffset = strokeW
-        val usableW = W - inset * 2f - shadowOffset
-        val usableH = H - inset * 2f - shadowOffset
-        val x = inset
-        val y = inset
-
-        // Arrow path (hotspot tip at inset,inset; overlay placement compensates).
-        arrowPath.reset()
-        arrowPath.moveTo(x,                    y)
-        arrowPath.lineTo(x,                    y + usableH * 0.70f)
-        arrowPath.lineTo(x + usableW * 0.22f,  y + usableH * 0.55f)
-        arrowPath.lineTo(x + usableW * 0.22f,  y + usableH)
-        arrowPath.lineTo(x + usableW * 0.40f,  y + usableH)
-        arrowPath.lineTo(x + usableW * 0.40f,  y + usableH * 0.55f)
-        arrowPath.lineTo(x + usableW * 0.75f,  y + usableH * 0.72f)
-        arrowPath.close()
-
-        // Shadow path: the complete arrow shifted right/down inside the canvas.
-        shadowPath.reset()
-        shadowPath.moveTo(x + shadowOffset,                   y + shadowOffset)
-        shadowPath.lineTo(x + shadowOffset,                   y + shadowOffset + usableH * 0.70f)
-        shadowPath.lineTo(x + shadowOffset + usableW * 0.22f, y + shadowOffset + usableH * 0.55f)
-        shadowPath.lineTo(x + shadowOffset + usableW * 0.22f, y + shadowOffset + usableH)
-        shadowPath.lineTo(x + shadowOffset + usableW * 0.40f, y + shadowOffset + usableH)
-        shadowPath.lineTo(x + shadowOffset + usableW * 0.40f, y + shadowOffset + usableH * 0.55f)
-        shadowPath.lineTo(x + shadowOffset + usableW * 0.75f, y + shadowOffset + usableH * 0.72f)
-        shadowPath.close()
     }
 
     override fun onDraw(canvas: Canvas) {
-        if (arrowPath.isEmpty) return
-        canvas.drawPath(shadowPath, shadowPaint)  // shadow first (behind fill)
-        canvas.drawPath(arrowPath,  fillPaint)    // white fill
-        canvas.drawPath(arrowPath,  strokePaint)  // black outline
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val cx = w / 2f
+        val cy = h / 2f
+        val arm = w * 0.42f  // arm length from center
+        val gap = w * 0.06f  // gap at center
+
+        val density = resources.displayMetrics.density
+        linePaint.strokeWidth = (1.5f * density).coerceAtLeast(1.5f)
+        outlinePaint.strokeWidth = (2.5f * density).coerceAtLeast(2.5f)
+        shadowPaint.strokeWidth = (3f * density).coerceAtLeast(3f)
+
+        // Shadow (offset)
+        val shD = density
+        canvas.drawLine(cx - arm + shD, cy + shD, cx - gap + shD, cy + shD, shadowPaint)
+        canvas.drawLine(cx + gap + shD, cy + shD, cx + arm + shD, cy + shD, shadowPaint)
+        canvas.drawLine(cx + shD, cy - arm + shD, cx + shD, cy - gap + shD, shadowPaint)
+        canvas.drawLine(cx + shD, cy + gap + shD, cx + shD, cy + arm + shD, shadowPaint)
+
+        // Black outline
+        canvas.drawLine(cx - arm, cy, cx - gap, cy, outlinePaint)
+        canvas.drawLine(cx + gap, cy, cx + arm, cy, outlinePaint)
+        canvas.drawLine(cx, cy - arm, cx, cy - gap, outlinePaint)
+        canvas.drawLine(cx, cy + gap, cx, cy + arm, outlinePaint)
+
+        // White fill
+        canvas.drawLine(cx - arm, cy, cx - gap, cy, linePaint)
+        canvas.drawLine(cx + gap, cy, cx + arm, cy, linePaint)
+        canvas.drawLine(cx, cy - arm, cx, cy - gap, linePaint)
+        canvas.drawLine(cx, cy + gap, cx, cy + arm, linePaint)
+
+        // Center dot for precision
+        canvas.drawCircle(cx, cy, (1.5f * density).coerceAtLeast(1.5f), centerDotPaint)
     }
 }

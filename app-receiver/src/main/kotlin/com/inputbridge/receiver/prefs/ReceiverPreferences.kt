@@ -64,7 +64,7 @@ class ReceiverPreferences(context: Context) {
      * Requires canDrawOverlays() permission — guided by the Settings screen.
      */
     var showCursorOverlay: Boolean
-        get() = prefs.getBoolean(KEY_SHOW_CURSOR_OVERLAY, false)
+        get() = prefs.getBoolean(KEY_SHOW_CURSOR_OVERLAY, true)
         set(value) = prefs.edit().putBoolean(KEY_SHOW_CURSOR_OVERLAY, value).apply()
 
     // BUG-098 fix: persist a tablet-appropriate cursor size instead of hardcoding 40dp.
