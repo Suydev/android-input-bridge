@@ -143,12 +143,15 @@ jobs:
           BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/*/ | sort -V | tail -1)
           ZIPALIGN="$BUILD_TOOLS/zipalign"
           APKSIGNER="$BUILD_TOOLS/apksigner"
+          RELEASE_DIR="app-bridge/build/outputs/apk/release"
+          RELEASE_DIR2="app-receiver/build/outputs/apk/release"
 
-          for APK in app-bridge/build/outputs/apk/release/app-bridge-release-unsigned.apk \
-                      app-receiver/build/outputs/apk/release/app-receiver-release-unsigned.apk; do
+          for APK in "$RELEASE_DIR/app-bridge-release-unsigned.apk" \
+                      "$RELEASE_DIR2/app-receiver-release-unsigned.apk"; do
+            DIR=$(dirname "$APK")
             BASENAME=$(basename "$APK" -unsigned.apk)
-            ALIGNED="${BASENAME}-aligned.apk"
-            SIGNED="${BASENAME}.apk"
+            ALIGNED="$DIR/${BASENAME}-aligned.apk"
+            SIGNED="$DIR/${BASENAME}.apk"
 
             echo "Signing: $APK -> $SIGNED"
             $ZIPALIGN -f 4 "$APK" "$ALIGNED"
