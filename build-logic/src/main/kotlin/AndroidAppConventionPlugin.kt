@@ -35,19 +35,32 @@ class AndroidAppConventionPlugin : Plugin<Project> {
                     targetCompatibility = org.gradle.api.JavaVersion.VERSION_17
                 }
 
-                buildTypes {
-                    release {
-                        isMinifyEnabled = true
-                        proguardFiles(
-                            getDefaultProguardFile("proguard-android-optimize.txt"),
-                            "proguard-rules.pro"
-                        )
-                    }
-                    debug {
-                        isDebuggable = true
-                        applicationIdSuffix = ".debug"
+            buildTypes {
+                release {
+                    isMinifyEnabled = true
+                    proguardFiles(
+                        getDefaultProguardFile("proguard-android-optimize.txt"),
+                        "proguard-rules.pro"
+                    )
+                    // Signing configuration is provided via environment variables set by CI
+                    val storePath = System.getenv("SIGNING_KEYSTORE_PATH")
+                    val keyAlias = System.getenv("SIGNING_KEY_ALIAS")
+                    val keyPassword = System.getenv("SIGNING_KEY_PASSWORD")
+                    val storePassword = System.getenv("SIGNING_STORE_PASSWORD")
+                    if (storePath != null && keyAlias != null && keyPassword != null && storePassword != null) {
+                        signingConfig {
+                            storeFile = file(storePath)
+                            storePassword = storePassword
+                            keyAlias = keyAlias
+                            keyPassword = keyPassword
+                        }
                     }
                 }
+                debug {
+                    isDebuggable = true
+                    applicationIdSuffix = ".debug"
+                }
+            }
             }
 
             // Align Kotlin JVM target with Java target

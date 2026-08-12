@@ -287,24 +287,27 @@ class UsbInputCapture(
             val buttons = buf[0].toInt() and 0x07   // bits 0–2: left, right, middle
             val dx      = buf[1].toByte().toFloat()  // signed relative X
             val dy      = buf[2].toByte().toFloat()  // signed relative Y
-            // Wheel (byte 3) present in 4-byte and 5-byte reports
-            val wheel   = if (transferred >= 4) buf[3].toByte().toFloat() else 0f
+             // Wheel (byte 3) present in 4-byte and 5-byte reports
+             val wheel   = if (transferred >= 4) buf[3].toByte().toFloat() else 0f
+             // Ac_pan (byte 4) present in 5-byte reports for tilt wheel/panning
+             val acPan   = if (transferred >= 5) buf[4].toByte().toFloat() else 0f
 
-            if (reportCount <= 3L || reportCount % 500L == 0L) {
-                BridgeLogger.d(TAG, "Mouse report #$reportCount: dx=$dx dy=$dy " +
-                    "wheel=$wheel buttons=$buttons bytes=$transferred")
-            }
+             if (reportCount <= 3L || reportCount % 500L == 0L) {
+                 BridgeLogger.d(TAG, "Mouse report #$reportCount: dx=$dx dy=$dy " +
+                     "wheel=$wheel acPan=$acPan buttons=$buttons bytes=$transferred")
+             }
 
-            // Mouse movement — emit if either axis has a delta
-            if (dx != 0f || dy != 0f) {
-                _events.emit(InputEvent.MouseMove(dx, dy))
-            }
+             // Mouse movement — emit if either axis has a delta
+             if (dx != 0f || dy != 0f) {
+                 _events.emit(InputEvent.MouseMove(dx, dy))
+             }
 
-            // Scroll wheel — invert so physical wheel-down scrolls content up
-            // (positive wheel from USB = scroll up; InputBridge Scroll.dy > 0 = content moves up)
-            if (wheel != 0f) {
-                _events.emit(InputEvent.Scroll(0f, -wheel))
-            }
+             // Scroll wheel — invert so physical wheel-down scrolls content up
+             // (positive wheel from USB = scroll up; InputBridge Scroll.dy > 0 = content moves up)
+             // Ac_pan for horizontal scroll/tilt (positive acPan from USB = scroll right)
+             if (wheel != 0f || acPan != 0f) {
+                 _events.emit(InputEvent.Scroll(dx = acPan, dy = -wheel))
+             }
 
             // Button state changes (bits 0=left, 1=right, 2=middle)
             for (bit in 0..2) {
