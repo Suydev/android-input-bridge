@@ -2,6 +2,32 @@
 
 ---
 
+## Session 027 — Fix MouseTrackpadActivity crash + CursorOverlayService concurrent modification (BUG-099, BUG-100)
+**Date:** 2026-08-12
+**Agent:** opencode
+**Status:** 🔄 In Progress — CI pending
+
+### Goals
+- Diagnose the crash reported when pressing the mouse button on the bridge app (Redmi 9).
+- Fix the root cause and any adjacent bugs found.
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|---|---|---|---|
+| BUG-099 | Critical | `MouseTrackpadActivity.onCreate()` crashes with "Left to start undefined" — redundant `connect()` calls before `createHorizontalChain`. | Fixed. |
+| BUG-100 | High | `CursorOverlayService.onDraw()` modifies `trailPoints` list during indexed iteration — `IndexOutOfBoundsException`. | Fixed. |
+
+### What Was Changed
+- `MouseTrackpadActivity.kt:405-423`: Removed redundant explicit START/END `connect()` calls before `createHorizontalChain()`.
+- `CursorOverlayService.kt:288-318`: Replaced in-loop list mutation with a `while` loop that removes stale points before the indexed draw iteration.
+
+### Diagnosis Method
+- Connected to bridge device via ADB at `10.171.170.148:34583`.
+- Extracted `FATAL EXCEPTION` from `logcat -d`.
+- Root cause was a ConstraintLayout chain conflict, not a mouse button handling bug.
+
+---
+
 ## Session 022 — Harden UDP reconnect lifecycle (BUG-087 → BUG-092)
 **Date:** 2026-07-27
 **Agent:** Codex

@@ -402,14 +402,10 @@ class MouseTrackpadActivity : ComponentActivity() {
         cs.constrainHeight(bottomPanel.id, WRAP_CONTENT)
 
         val btnH = dp(BUTTON_HEIGHT_DP)
-        cs.connect(leftClickBtn.id, ConstraintSet.START, ConstraintSet.PARENT_ID, ConstraintSet.START)
-        cs.connect(leftClickBtn.id, ConstraintSet.END, rightClickBtn.id, ConstraintSet.START)
         cs.connect(leftClickBtn.id, ConstraintSet.BOTTOM, bottomPanel.id, ConstraintSet.TOP)
         cs.constrainWidth(leftClickBtn.id, 0)
         cs.constrainHeight(leftClickBtn.id, btnH)
 
-        cs.connect(rightClickBtn.id, ConstraintSet.START, leftClickBtn.id, ConstraintSet.END)
-        cs.connect(rightClickBtn.id, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END)
         cs.connect(rightClickBtn.id, ConstraintSet.BOTTOM, bottomPanel.id, ConstraintSet.TOP)
         cs.constrainWidth(rightClickBtn.id, 0)
         cs.constrainHeight(rightClickBtn.id, btnH)

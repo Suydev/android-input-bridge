@@ -1884,3 +1884,31 @@ and `init {}` block).
 **Priority**: Medium
 **Status**: 🔴 OPEN
 **Fix**:
+
+---
+
+## BUG-099 — MouseTrackpadActivity crashes on launch with "Left to start undefined"
+
+**Description**: `MouseTrackpadActivity.onCreate()` calls `cs.connect()` to set explicit START/END constraints on `leftClickBtn` and `rightClickBtn`, then immediately calls `cs.createHorizontalChain()` with the same views. ConstraintLayout's `createHorizontalChain` internally tries to establish the same START/END connections and throws `IllegalArgumentException: Left to start undefined` because the constraints already exist.
+**Steps to reproduce**: Launch `MouseTrackpadActivity` on the bridge app (Redmi 9).
+**Expected behavior**: Activity starts normally and shows the trackpad UI.
+**Actual behavior**: Activity crashes immediately with `IllegalArgumentException`.
+**Suspected cause**: Redundant `connect()` calls before `createHorizontalChain`.
+**Files involved**: `app-bridge/src/main/kotlin/com/inputbridge/bridge/ui/MouseTrackpadActivity.kt:405-423`.
+**Priority**: Critical (activity crash — blocks trackpad feature entirely)
+**Status**: ✅ FIXED
+**Fix**: Removed the explicit `cs.connect(leftClickBtn.id, START, ...)` / `cs.connect(leftClickBtn.id, END, rightClickBtn.id, START)` / `cs.connect(rightClickBtn.id, START, leftClickBtn.id, END)` / `cs.connect(rightClickBtn.id, END, ...)` calls before `createHorizontalChain`. The chain method now exclusively owns the horizontal constraints.
+
+---
+
+## BUG-100 — CursorOverlayService.onDraw modifies trailPoints list during indexed iteration
+
+**Description**: `CursorTrailView.onDraw()` iterates `trailPoints` with an indexed `for` loop and calls `trailPoints.removeAt(i - 1)` inside the loop when a point is too old. Because the `for (i in 1 until trailPoints.size)` range is pre-computed, removing elements causes the index to exceed the new list size on subsequent iterations, throwing `IndexOutOfBoundsException`. This crashes the overlay and makes the cursor vanish.
+**Steps to reproduce**: Move the mouse on the bridge for >500ms (generating trail points), then stop moving. After 500ms the cleanup triggers and the next `onDraw` tries to remove old points during iteration.
+**Expected behavior**: Old trail points are safely removed; cursor overlay continues rendering.
+**Actual behavior**: `IndexOutOfBoundsException` in `onDraw`, cursor overlay disappears.
+**Suspected cause**: List mutation during indexed iteration with a pre-computed range.
+**Files involved**: `app-receiver/src/main/kotlin/com/inputbridge/receiver/service/CursorOverlayService.kt:288-318`.
+**Priority**: High (crashes cursor overlay)
+**Status**: ✅ FIXED
+**Fix**: Replaced in-loop removal with a `while` loop that removes stale points from the front of the list before the indexed draw iteration begins.

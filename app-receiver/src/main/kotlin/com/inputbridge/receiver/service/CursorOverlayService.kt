@@ -288,18 +288,17 @@ private class CursorTrailView(context: android.content.Context) : View(context) 
     override fun onDraw(canvas: Canvas) {
         val now = SystemClock.elapsedRealtime()
 
+        // Remove old points before iterating to avoid concurrent modification
+        while (trailPoints.isNotEmpty() && now - trailPoints.first.timestamp > TRAIL_FADE_DURATION_MS) {
+            trailPoints.removeFirst()
+        }
+
         // Draw trail lines with fading alpha
         if (trailPoints.size >= 2) {
             var prevPoint = trailPoints.first
             for (i in 1 until trailPoints.size) {
                 val currentPoint = trailPoints[i]
                 val age = now - currentPoint.timestamp
-
-                if (age > TRAIL_FADE_DURATION_MS) {
-                    // Point is too old, remove it
-                    trailPoints.removeAt(i - 1)
-                    continue
-                }
 
                 // Calculate alpha based on age (255 = new, 0 = old)
                 val alpha = ((1f - age.toFloat() / TRAIL_FADE_DURATION_MS) * 255).toInt()
