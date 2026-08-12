@@ -479,20 +479,20 @@ class ReceiverService : Service() {
     }
 
     private fun updateNotification(status: String) {
-        val mgr = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        val mgr = getSystemService(NOTIFICATION_SERVICE) as? NotificationManager ?: return
         mgr.notify(NOTIFICATION_ID, buildNotification(status))
     }
 
     private fun createNotificationChannel() {
         val ch = NotificationChannel(CHANNEL_ID, "Receiver Service", NotificationManager.IMPORTANCE_LOW)
             .apply { setShowBadge(false) }
-        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(ch)
+        (getSystemService(NOTIFICATION_SERVICE) as? NotificationManager)?.createNotificationChannel(ch)
     }
 
     // ── WakeLock ──────────────────────────────────────────────────────────────
 
     private fun acquireWakeLock() {
-        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        val pm = getSystemService(POWER_SERVICE) as? PowerManager ?: return
         wakeLock = pm.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "InputBridge::ReceiverWakeLock",

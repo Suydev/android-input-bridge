@@ -67,7 +67,12 @@ class UsbInputCapture(
         BridgeLogger.i(TAG, "start() called for ${device.deviceName} " +
             "(class=${device.deviceClass}, interfaces=${device.interfaceCount})")
 
-        val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
+        val usbManager = context.getSystemService(Context.USB_SERVICE) as? UsbManager
+        if (usbManager == null) {
+            BridgeLogger.e(TAG, "USB service unavailable")
+            _status.value = CaptureStatus.Error("USB service unavailable", recoverable = false)
+            return false
+        }
         val conn = usbManager.openDevice(device) ?: run {
             BridgeLogger.e(TAG, "Failed to open USB device: ${device.deviceName} — " +
                 "check if another app holds the device or USB permission is missing")
@@ -355,7 +360,8 @@ class UsbInputCapture(
 
         /** Check if any known HID devices are accessible on this USB Manager. */
         fun findHidDevices(context: Context): List<UsbDevice> {
-            val mgr = context.getSystemService(Context.USB_SERVICE) as UsbManager
+            val mgr = context.getSystemService(Context.USB_SERVICE) as? UsbManager
+                ?: return emptyList()
             return mgr.deviceList.values.filter { device ->
                 (0 until device.interfaceCount).any { i ->
                     device.getInterface(i).interfaceClass == UsbConstants.USB_CLASS_HID

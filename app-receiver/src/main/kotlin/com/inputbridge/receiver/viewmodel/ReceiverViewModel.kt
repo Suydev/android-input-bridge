@@ -149,8 +149,8 @@ class ReceiverViewModel(
         _config.update { it.copy(display = it.display.copy(cursorSizeDp = constrained)) }
         prefs.cursorSizeDp = constrained
         if (prefs.showCursorOverlay) {
-            context.stopService(Intent(context, CursorOverlayService::class.java))
-            context.startService(Intent(context, CursorOverlayService::class.java))
+            runCatching { context.stopService(Intent(context, CursorOverlayService::class.java)) }
+            runCatching { context.startService(Intent(context, CursorOverlayService::class.java)) }
         }
     }
 

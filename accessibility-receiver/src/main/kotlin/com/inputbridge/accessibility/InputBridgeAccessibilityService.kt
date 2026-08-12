@@ -182,12 +182,13 @@ class InputBridgeAccessibilityService : AccessibilityService() {
         currentStrokePath?.lineTo(endX, endY)
         strokeCount++
 
+        val path = currentStrokePath ?: return
         // Android limit: max 20 strokes per gesture, max 60s duration
         val duration = (now - currentStrokeStartTime).coerceAtMost(CONTINUOUS_STROKE_DURATION_MS)
         val strokeDuration = if (willContinue) duration else TAP_DURATION_MS
 
         val stroke = GestureDescription.StrokeDescription(
-            currentStrokePath!!,
+            path,
             0,
             strokeDuration,
             willContinue
@@ -211,10 +212,10 @@ class InputBridgeAccessibilityService : AccessibilityService() {
 
     // ── Navigation actions ────────────────────────────────────────────────────
 
-    fun goBack() = performGlobalAction(GLOBAL_ACTION_BACK)
-    fun goHome() = performGlobalAction(GLOBAL_ACTION_HOME)
-    fun goRecents() = performGlobalAction(GLOBAL_ACTION_RECENTS)
-    fun openNotifications() = performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
+    fun goBack() = runCatching { performGlobalAction(GLOBAL_ACTION_BACK) }
+    fun goHome() = runCatching { performGlobalAction(GLOBAL_ACTION_HOME) }
+    fun goRecents() = runCatching { performGlobalAction(GLOBAL_ACTION_RECENTS) }
+    fun openNotifications() = runCatching { performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS) }
 
     // ── Keyboard injection ────────────────────────────────────────────────────
 

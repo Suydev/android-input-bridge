@@ -50,7 +50,11 @@ class MouseTrackpadActivity : ComponentActivity() {
     private val packetFactory = EventPacketFactory()
 
     @Volatile private var udpTransport: UdpTransport? = null
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob() + CoroutineExceptionHandler { _, t ->
+        if (t !is CancellationException) {
+            BridgeLogger.e(TAG, "Uncaught exception in MouseTrackpadActivity", t)
+        }
+    })
 
     // ── Screen dimensions ──────────────────────────────────────────────────
     private var phoneWidth = 1080f
@@ -229,7 +233,8 @@ class MouseTrackpadActivity : ComponentActivity() {
             window.setDecorFitsSystemWindows(false)
         }
 
-        val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+        val wm = getSystemService(WINDOW_SERVICE) as? WindowManager
+            ?: throw IllegalStateException("WindowManager unavailable")
         @Suppress("DEPRECATION")
         val metrics = DisplayMetrics()
         @Suppress("DEPRECATION")

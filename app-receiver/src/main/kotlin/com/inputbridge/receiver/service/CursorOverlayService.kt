@@ -54,7 +54,11 @@ class CursorOverlayService : Service() {
     private var overlaySizePx = 0
     private val prefs: ReceiverPreferences by inject()
 
-    private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob() + kotlinx.coroutines.CoroutineExceptionHandler { _, t ->
+        if (t !is kotlinx.coroutines.CancellationException) {
+            BridgeLogger.e(TAG, "Uncaught exception in CursorOverlayService", t)
+        }
+    })
     private var trailCleanupJob: Job? = null
 
     override fun onCreate() {
@@ -65,7 +69,11 @@ class CursorOverlayService : Service() {
             return
         }
 
-        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        windowManager = (getSystemService(WINDOW_SERVICE) as? WindowManager) ?: run {
+            BridgeLogger.e(TAG, "WindowManager unavailable")
+            stopSelf()
+            return
+        }
 
         // Arrow size is user-configurable and persisted for tablet displays.
         val density = resources.displayMetrics.density

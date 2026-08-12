@@ -46,7 +46,11 @@ class BridgeAccessibilityService : AccessibilityService() {
 
     private val packetFactory = EventPacketFactory()
     @Volatile private var udpTransport: UdpTransport? = null
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob() + CoroutineExceptionHandler { _, t ->
+        if (t !is CancellationException) {
+            BridgeLogger.e(TAG, "Uncaught exception in BridgeAccessibilityService", t)
+        }
+    })
     private val prefs: BridgePreferences by lazy {
         BridgePreferences(applicationContext)
     }

@@ -157,7 +157,8 @@ class BridgeService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        usbManager = getSystemService(USB_SERVICE) as UsbManager
+        usbManager = (getSystemService(USB_SERVICE) as? UsbManager)
+            ?: throw IllegalStateException("USB service unavailable")
         createNotificationChannel()
         // BUG-063 FIX: Android 14 (API 34) throws MissingForegroundServiceTypeException when
         // the manifest declares android:foregroundServiceType but startForeground() omits the
@@ -933,7 +934,7 @@ class BridgeService : Service() {
     }
 
     private fun updateNotification(status: String) {
-        val mgr = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        val mgr = getSystemService(NOTIFICATION_SERVICE) as? NotificationManager ?: return
         mgr.notify(NOTIFICATION_ID, buildNotification(status))
     }
 
@@ -943,13 +944,13 @@ class BridgeService : Service() {
                 description = "Keeps the USB input bridge alive"
                 setShowBadge(false)
             }
-        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(ch)
+        (getSystemService(NOTIFICATION_SERVICE) as? NotificationManager)?.createNotificationChannel(ch)
     }
 
     // ── WakeLock ──────────────────────────────────────────────────────────────
 
     private fun acquireWakeLock() {
-        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        val pm = getSystemService(POWER_SERVICE) as? PowerManager ?: return
         wakeLock = pm.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "InputBridge::BridgeWakeLock",

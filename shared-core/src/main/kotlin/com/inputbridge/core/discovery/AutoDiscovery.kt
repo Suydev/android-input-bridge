@@ -1,11 +1,10 @@
 package com.inputbridge.core.discovery
 
-import android.content.Context
-import android.net.wifi.WifiManager
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import com.inputbridge.core.logging.BridgeLogger
 
 /**
  * UDP broadcast-based auto-discovery for finding the receiver on the local network.
@@ -18,6 +17,7 @@ import java.net.InetSocketAddress
  */
 object AutoDiscovery {
 
+    private const val TAG = "AutoDiscovery"
     const val DISCOVERY_PORT = 54322
     const val BROADCAST_MSG = "INPUTBRIDGE_RECEIVER"
     private const val BROADCAST_INTERVAL_MS = 3000L
@@ -27,22 +27,31 @@ object AutoDiscovery {
      * Call from a coroutine on Dispatchers.IO. Loops until the coroutine is cancelled.
      */
     suspend fun startBroadcasting(listenPort: Int) {
-        val socket = DatagramSocket(null)
-        socket.reuseAddress = true
-        socket.broadcast = true
+        var socket: DatagramSocket? = null
+        try {
+            socket = DatagramSocket(null)
+            socket.reuseAddress = true
+            socket.broadcast = true
 
-        val message = "$BROADCAST_MSG:$listenPort".toByteArray()
-        val broadcastAddr = getBroadcastAddress(socket)
+            val message = "$BROADCAST_MSG:$listenPort".toByteArray(Charsets.UTF_8)
+            val broadcastAddr = getBroadcastAddress(socket)
 
-        while (true) {
-            try {
-                val packet = DatagramPacket(
-                    message, message.size,
-                    broadcastAddr, DISCOVERY_PORT
-                )
-                socket.send(packet)
-            } catch (_: Exception) { }
-            kotlinx.coroutines.delay(BROADCAST_INTERVAL_MS)
+            while (true) {
+                try {
+                    val packet = DatagramPacket(
+                        message, message.size,
+                        broadcastAddr, DISCOVERY_PORT
+                    )
+                    socket.send(packet)
+                } catch (e: Exception) {
+                    BridgeLogger.w(TAG, "Broadcast send failed: ${e.message}")
+                }
+                kotlinx.coroutines.delay(BROADCAST_INTERVAL_MS)
+            }
+        } catch (e: Exception) {
+            BridgeLogger.e(TAG, "startBroadcasting failed: ${e.message}")
+        } finally {
+            socket?.close()
         }
     }
 
@@ -51,28 +60,36 @@ object AutoDiscovery {
      * Call from a coroutine on Dispatchers.IO.
      */
     fun listenForReceiver(onFound: (ip: String, port: Int) -> Unit) {
-        val socket = DatagramSocket(null)
-        socket.reuseAddress = true
-        socket.soTimeout = 10000 // 10s timeout for retry
-        socket.bind(InetSocketAddress(DISCOVERY_PORT))
-
-        val buffer = ByteArray(256)
+        var socket: DatagramSocket? = null
         try {
+            socket = DatagramSocket(null)
+            socket.reuseAddress = true
+            socket.soTimeout = 10000 // 10s timeout for retry
+            socket.bind(InetSocketAddress(DISCOVERY_PORT))
+
+            val buffer = ByteArray(256)
             while (true) {
                 val packet = DatagramPacket(buffer, buffer.size)
                 try {
                     socket.receive(packet)
-                    val msg = String(packet.data, 0, packet.length).trim()
+                    val msg = String(packet.data, 0, packet.length, Charsets.UTF_8).trim()
                     if (msg.startsWith(BROADCAST_MSG)) {
                         val parts = msg.split(":")
                         val port = if (parts.size > 1) parts[1].toIntOrNull() ?: 54321 else 54321
-                        val senderIp = packet.address.hostAddress ?: continue
+                        val senderIp = packet.address?.hostAddress ?: continue
                         onFound(senderIp, port)
                     }
-                } catch (_: java.net.SocketTimeoutException) { }
+                } catch (_: java.net.SocketTimeoutException) {
+                    // Normal timeout, continue listening
+                } catch (e: Exception) {
+                    BridgeLogger.w(TAG, "Socket receive failed: ${e.message}")
+                    break
+                }
             }
+        } catch (e: Exception) {
+            BridgeLogger.e(TAG, "listenForReceiver failed: ${e.message}")
         } finally {
-            socket.close()
+            socket?.close()
         }
     }
 
