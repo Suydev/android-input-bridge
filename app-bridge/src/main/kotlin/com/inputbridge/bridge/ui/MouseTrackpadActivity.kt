@@ -410,6 +410,10 @@ class MouseTrackpadActivity : ComponentActivity() {
         cs.constrainWidth(rightClickBtn.id, 0)
         cs.constrainHeight(rightClickBtn.id, btnH)
 
+        // Add horizontal constraints before creating the chain
+        cs.connect(leftClickBtn.id, ConstraintSet.START, ConstraintSet.PARENT_ID, ConstraintSet.START)
+        cs.connect(rightClickBtn.id, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END)
+
         cs.createHorizontalChain(
             ConstraintSet.PARENT_ID, ConstraintSet.START,
             ConstraintSet.PARENT_ID, ConstraintSet.END,
