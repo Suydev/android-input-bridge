@@ -1912,3 +1912,33 @@ and `init {}` block).
 **Priority**: High (crashes cursor overlay)
 **Status**: ✅ FIXED
 **Fix**: Replaced in-loop removal with a `while` loop that removes stale points from the front of the list before the indexed draw iteration begins.
+
+---
+
+## BUG-101 — MOUSE and START buttons overlap on the bridge screen while service is connecting
+
+**Description**: On `BridgeScreen`, the MOUSE button renders whenever `isBridgeActive || diagnostics.bridgeServiceRunning` and the START button renders whenever `!isBridgeActive`. Because `isBridgeActive = bridgeServiceRunning && transportConnected`, in the "service running, not yet connected" state (`bridgeServiceRunning = true`, `transportConnected = false`) both conditions are true and both buttons are placed at `Alignment.BottomCenter` with `padding(bottom = 80.dp)` — they paint on top of each other.
+**Steps to reproduce**: Press START on the bridge app. During the brief window between service start and the first successful PING/PONG (or any time the service is running but the transport is not connected, e.g. after a connection drop while the service stays up), both the START and MOUSE buttons appear stacked at the same position.
+**Expected behavior**: Only one of START or MOUSE is ever visible; MOUSE should only appear once the bridge is fully active and the trackpad is usable.
+**Actual behavior**: START and MOUSE overlap at the bottom center of the screen during the connecting/reconnecting window.
+**Suspected cause**: The MOUSE button's visibility condition `isBridgeActive || diagnostics.bridgeServiceRunning` is too permissive — it widens the button set to the service-running state where `isBridgeActive` is already false, and both then share the identical `bottom = 80.dp` anchor.
+**Files involved**: `app-bridge/src/main/kotlin/com/inputbridge/bridge/ui/screens/BridgeScreen.kt:165-221`.
+**Priority**: Medium (UI layout defect during a transient connection state)
+**Status**: ✅ FIXED (Session 030)
+**Fix**: Change the MOUSE button condition from `isBridgeActive || diagnostics.bridgeServiceRunning` to `isBridgeActive`, so MOUSE never coexists with START.
+
+---
+
+## BUG-102 — build-logic signingConfig block breaks :build-logic:compileKotlin, blocks all CI
+
+**Description**: Commit `97fbaee` added a `signingConfig { ... }` block directly inside `buildTypes.release` in `AndroidAppConventionPlugin.kt`. `signingConfig` is not a callable DSL function on the release build-type receiver (it is a readable/writable property only), so the Kotlin DSL compiler fails with "Unresolved reference — receiver type mismatch", "Unresolved reference: storeFile", and three "Val cannot be reassigned" errors (the lambda silently captured the outer `storePassword`/`keyAlias`/`keyPassword` vals). Because `:build-logic:compileKotlin` fails, every downstream module task fails.
+**Steps to reproduce**: Run any Gradle build for `:app-bridge:assembleDebug` or `:app-receiver:assembleDebug` (GitHub Actions "Android CI" — custom.yml — also reproduces).
+**Expected behavior**: The convention plugin compiles; signing config is applied only when `SIGNING_*` env vars are present.
+**Actual behavior**: `> Task :build-logic:compileKotlin FAILED` immediately, both "Build Debug APKs" and "Unit Tests" jobs red on every run since `97fbaee`.
+**Suspected cause**: Misuse of the AGP Kotlin DSL: signing configs must be declared in the `signingConfigs { create("release") { ... } }` container and referenced via `signingConfig = signingConfigs.getByName("release")` inside the build type.
+**Files involved**: `build-logic/src/main/kotlin/AndroidAppConventionPlugin.kt:51-56` (as of `97fbaee`/`200c714`).
+**Priority**: Critical (blocks CI build entirely)
+**Status**: ✅ FIXED (Session 030)
+**Fix**: Moved signing config definition into `signingConfigs { create("release") { ... } }` (locals renamed to avoid capture-shadowing), and set `release { signingConfig = signingConfigs.getByName("release") }` guarded by a check for `SIGNING_KEYSTORE_PATH`.
+
+---

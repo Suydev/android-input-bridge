@@ -197,8 +197,11 @@ fun BridgeScreen(
             }
         }
 
-        // MOUSE button — launches trackpad overlay (shown when bridge is active)
-        if (isBridgeActive || diagnostics.bridgeServiceRunning) {
+        // MOUSE button — launches trackpad overlay (shown when bridge is active).
+        // BUG-101 FIX: gate on isBridgeActive (service running AND connected) only, so it
+        // never renders at the same position as START during the "service running, not
+        // connected" window.
+        if (isBridgeActive) {
             val context = LocalView.current.context
             OutlinedButton(
                 onClick = {

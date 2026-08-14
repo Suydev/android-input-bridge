@@ -35,6 +35,23 @@ class AndroidAppConventionPlugin : Plugin<Project> {
                     targetCompatibility = org.gradle.api.JavaVersion.VERSION_17
                 }
 
+            signingConfigs {
+                create("release") {
+                    val storePath = System.getenv("SIGNING_KEYSTORE_PATH")
+                    val storePass = System.getenv("SIGNING_STORE_PASSWORD")
+                    val alias = System.getenv("SIGNING_KEY_ALIAS")
+                    val keyPass = System.getenv("SIGNING_KEY_PASSWORD")
+                    if (!storePath.isNullOrEmpty() && !storePass.isNullOrEmpty() &&
+                        !alias.isNullOrEmpty() && !keyPass.isNullOrEmpty()
+                    ) {
+                        storeFile = file(storePath)
+                        storePassword = storePass
+                        keyAlias = alias
+                        keyPassword = keyPass
+                    }
+                }
+            }
+
             buildTypes {
                 release {
                     isMinifyEnabled = true
@@ -42,18 +59,9 @@ class AndroidAppConventionPlugin : Plugin<Project> {
                         getDefaultProguardFile("proguard-android-optimize.txt"),
                         "proguard-rules.pro"
                     )
-                    // Signing configuration is provided via environment variables set by CI
-                    val storePath = System.getenv("SIGNING_KEYSTORE_PATH")
-                    val keyAlias = System.getenv("SIGNING_KEY_ALIAS")
-                    val keyPassword = System.getenv("SIGNING_KEY_PASSWORD")
-                    val storePassword = System.getenv("SIGNING_STORE_PASSWORD")
-                    if (storePath != null && keyAlias != null && keyPassword != null && storePassword != null) {
-                        signingConfig {
-                            storeFile = file(storePath)
-                            storePassword = storePassword
-                            keyAlias = keyAlias
-                            keyPassword = keyPassword
-                        }
+                    // Signing credentials come from CI env vars; debug builds never use this.
+                    if (!System.getenv("SIGNING_KEYSTORE_PATH").isNullOrEmpty()) {
+                        signingConfig = signingConfigs.getByName("release")
                     }
                 }
                 debug {

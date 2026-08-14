@@ -4,6 +4,12 @@ Complete checklist of all project tasks. Never delete completed tasks. Always ap
 
 ---
 
+## Session 030 — MOUSE/START overlap fix
+
+- [x] Diagnose and fix MOUSE/START button overlap on BridgeScreen (BUG-101)
+- [x] Fix CI-blocking build-logic signingConfig DSL (BUG-102)
+- [ ] Verify green CI on pushed commit (BUILD trigger)
+
 ## Session 022 — UDP lifecycle hardening
 
 - [x] Repair reconnect queue reuse, lifecycle visibility, early target validation, and false UDP-connected state (BUG-087→090)

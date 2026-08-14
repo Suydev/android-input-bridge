@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 022 — UDP session lifecycle hardening BUG-087→092 (2026-07-27)
+> **Last updated:** Session 030 — MOUSE/START overlap + CI-blocking build-logic fix BUG-101→102 (2026-08-14)
 
 ---
 

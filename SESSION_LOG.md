@@ -2,6 +2,35 @@
 
 ---
 
+## Session 030 — Fix MOUSE/START overlap + CI-blocking build-logic signing DSL (BUG-101, BUG-102)
+**Date:** 2026-08-14
+**Agent:** opencode
+**Status:** ✅ Complete — CI pending
+
+### Goals
+- Investigate why the MOUSE and START buttons overlap on the bridge screen.
+- Check whether both apps actually build (CI was red); fix the build-blocking defect too.
+- Document and fix both bugs per project protocol.
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|---|---|---|---|
+| BUG-101 | Medium | MOUSE and START buttons share `bottom = 80.dp` and coexist during the "service running, not connected" window (`bridgeServiceRunning=true`, `transportConnected=false`), painting on top of each other. | Fixed. |
+| BUG-102 | Critical | `signingConfig { ... }` inside `buildTypes.release` is invalid AGP Kotlin DSL → `:build-logic:compileKotlin` FAILED → all CI jobs red since `97fbaee`. | Fixed. |
+
+### What Was Changed
+- `app-bridge/.../ui/screens/BridgeScreen.kt:200-224`: MOUSE button visibility gated on `isBridgeActive` (service running AND transport connected) instead of `isBridgeActive || diagnostics.bridgeServiceRunning`.
+- `build-logic/.../AndroidAppConventionPlugin.kt`: replaced the invalid in-build-type `signingConfig {}` block with `signingConfigs { create("release") { ... } }` + `release { signingConfig = signingConfigs.getByName("release") }`, guarded by `SIGNING_KEYSTORE_PATH` presence. Api values were captured.
+- `BUGS.md`: BUG-101 and BUG-102 added, both marked FIXED (Session 030).
+
+### Root Cause (BUG-101)
+`isBridgeActive = bridgeServiceRunning && transportConnected`. START renders when `!isBridgeActive`, MOUSE rendered when `isBridgeActive || bridgeServiceRunning`. In the connecting/reconnecting state both conditions were true and both buttons used `Alignment.BottomCenter` + `padding(bottom = 80.dp)`, so they stacked at the same spot.
+
+### Root Cause (BUG-102)
+Commit `97fbaee` (Session 027, "mouse scroll tilt") also rewrote the convention plugin's `buildTypes` block to add CI signing directly inside `release {}`. `signingConfig` is not callable there, so `storePassword = storePassword` etc. captured the outer `val`s → "Val cannot be reassigned" and the plugin never compiled. Every CI run since (current HEAD `200c714` included) failed before compiling any app module.
+
+---
+
 ## Session 027 — Fix MouseTrackpadActivity crash + CursorOverlayService concurrent modification (BUG-099, BUG-100)
 **Date:** 2026-08-12
 **Agent:** opencode
