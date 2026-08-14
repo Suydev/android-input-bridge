@@ -170,18 +170,19 @@ object AccessibilityCommandBus {
      * with respect to clicks, scrolls, and key events is preserved.
      */
     fun post(event: InputEvent) {
-        if (event is InputEvent.MouseMove || event is InputEvent.CursorGoto) {
-            // BUG-104 FIX: CursorGoto treated exactly like MouseMove — inline, no
-            // coroutine dispatch. Trackpad ACTION_DOWN sends a CursorGoto; hopping it
-            // through commandFlow added one Main-thread dispatch hop to the initial
-            // positioning latency. It only updates two floats + a thread-safe StateFlow.
-            if (event is InputEvent.CursorGoto) {
+        // BUG-104 FIX: CursorGoto treated exactly like MouseMove — inline, no
+        // coroutine dispatch. Trackpad ACTION_DOWN sends a CursorGoto; hopping it
+        // through commandFlow added one Main-thread dispatch hop to the initial
+        // positioning latency. It only updates two floats + a thread-safe StateFlow.
+        when (event) {
+            is InputEvent.CursorGoto -> {
                 val newX = (event.x * screenWidth).coerceIn(0f, screenWidth - 1f)
                 val newY = (event.y * screenHeight).coerceIn(0f, screenHeight - 1f)
                 cursorX = newX
                 cursorY = newY
                 _cursorPosition.value = Pair(cursorX, cursorY)
-            } else {
+            }
+            is InputEvent.MouseMove -> {
                 val newX = (cursorX + event.dx).coerceIn(0f, screenWidth - 1f)
                 val newY = (cursorY + event.dy).coerceIn(0f, screenHeight - 1f)
 
@@ -198,11 +199,23 @@ object AccessibilityCommandBus {
                 cursorY = newY
                 _cursorPosition.value = Pair(cursorX, cursorY)
             }
-        } else {
-            if (!commandFlow.tryEmit(event)) {
-                BridgeLogger.w(TAG, "CommandFlow full — dropped ${event::class.simpleName}")
-                DiagnosticsManager.update {
-                    copy(lastInjectionError = "Event buffer full — dropped ${event::class.simpleName}")
+            // All other events (KeyDown/KeyUp, buttons, scroll, text, nav, modifiers)
+            // go through the coroutine queue to preserve ordering with clicks/scrolls.
+            // Explicit branches — no `else ->` so Kotlin enforces exhaustiveness if a
+            // new InputEvent subtype is added (AGENTS.md §4.2).
+            is InputEvent.KeyDown,
+            is InputEvent.KeyUp,
+            is InputEvent.MouseButtonDown,
+            is InputEvent.MouseButtonUp,
+            is InputEvent.Scroll,
+            is InputEvent.TextInput,
+            is InputEvent.ModifierStateChanged,
+            is InputEvent.NavigationAction -> {
+                if (!commandFlow.tryEmit(event)) {
+                    BridgeLogger.w(TAG, "CommandFlow full — dropped ${event::class.simpleName}")
+                    DiagnosticsManager.update {
+                        copy(lastInjectionError = "Event buffer full — dropped ${event::class.simpleName}")
+                    }
                 }
             }
         }
