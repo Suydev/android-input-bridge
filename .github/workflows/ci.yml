@@ -138,35 +138,6 @@ jobs:
           SIGNING_STORE_PASSWORD: inputbridge123
         run: ./gradlew :app-bridge:assembleRelease :app-receiver:assembleRelease --stacktrace
 
-      - name: Zipalign and APK Sign v2
-        run: |
-          BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/*/ | sort -V | tail -1)
-          ZIPALIGN="$BUILD_TOOLS/zipalign"
-          APKSIGNER="$BUILD_TOOLS/apksigner"
-          RELEASE_DIR="app-bridge/build/outputs/apk/release"
-          RELEASE_DIR2="app-receiver/build/outputs/apk/release"
-
-          for APK in "$RELEASE_DIR/app-bridge-release-unsigned.apk" \
-                      "$RELEASE_DIR2/app-receiver-release-unsigned.apk"; do
-            DIR=$(dirname "$APK")
-            BASENAME=$(basename "$APK" -unsigned.apk)
-            ALIGNED="$DIR/${BASENAME}-aligned.apk"
-            SIGNED="$DIR/${BASENAME}.apk"
-
-            echo "Signing: $APK -> $SIGNED"
-            $ZIPALIGN -f 4 "$APK" "$ALIGNED"
-            $APKSIGNER sign \
-              --ks ${{ github.workspace }}/release.jks \
-              --ks-key-alias inputbridge \
-              --ks-pass pass:inputbridge123 \
-              --key-pass pass:inputbridge123 \
-              --out "$SIGNED" \
-              "$ALIGNED"
-            $APKSIGNER verify "$SIGNED"
-            rm -f "$ALIGNED"
-            echo "Done: $SIGNED ($(du -h "$SIGNED" | cut -f1))"
-          done
-
       - name: Upload Release APKs
         uses: actions/upload-artifact@v4
         with:

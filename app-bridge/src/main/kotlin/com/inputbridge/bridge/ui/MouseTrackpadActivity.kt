@@ -535,11 +535,14 @@ class MouseTrackpadActivity : ComponentActivity() {
                 velocityX = 0f; velocityY = 0f
                 filterPrevTimeNs = 0L
 
-                val location = IntArray(2)
-                trackpadView.getLocationOnScreen(location)
-                val screenX = location[0] + x
-                val screenY = location[1] + y
-                sendCursorGoto(screenX, screenY)
+                // BUG-103 FIX: normalize against the trackpad view's own bounds, not the
+                // full phone screen. The trackpad excludes the top status row, the bottom
+                // L/R button + slider panel, and the right scroll zone, so using phone
+                // dimensions capped the tablet cursor short of the OnePlus Pad Go edges.
+                // Touch coords (x, y) are already relative to trackpadView.
+                val tw = trackpadView.width.coerceAtLeast(1)
+                val th = trackpadView.height.coerceAtLeast(1)
+                sendCursorGoto(x / tw, y / th)
 
                 handler.postDelayed(longPressRunnable, LONG_PRESS_DURATION_MS)
             }
@@ -633,21 +636,15 @@ class MouseTrackpadActivity : ComponentActivity() {
     // Send helpers
     // ═══════════════════════════════════════════════════════════════════════
 
-    private fun sendCursorGoto(touchX: Float, touchY: Float) {
-        val normX = (touchX / phoneWidth).coerceIn(0f, 1f)
-        val normY = (touchY / phoneHeight).coerceIn(0f, 1f)
+    private fun sendCursorGoto(normX: Float, normY: Float) {
         val event = InputEvent.CursorGoto(x = normX, y = normY)
         val packet = packetFactory.fromEvent(event) ?: return
         val transport = udpTransport ?: return
-        scope.launch {
-            runCatching {
-                val sent = transport.send(packet)
-                if (!sent) {
-                    withContext(Dispatchers.Main) { showError("Connection lost") }
-                }
-            }.onFailure { e ->
-                BridgeLogger.e(TAG, "sendCursorGoto failed: ${e.message}")
-            }
+        // BUG-104: absolute lowest-latency send — serializes and calls socket.send()
+        // synchronously on this (Main) thread, no channel + send-loop dispatch hop.
+        val sent = runCatching { transport.sendDirect(packet) }.getOrDefault(false)
+        if (!sent) {
+            showError("Connection lost")
         }
     }
 
@@ -659,10 +656,8 @@ class MouseTrackpadActivity : ComponentActivity() {
         val event = InputEvent.MouseMove(dx = dx, dy = dy)
         val packet = packetFactory.fromEvent(event) ?: return
         val transport = udpTransport ?: return
-        // Direct send on IO thread — avoids scope.launch dispatch overhead (~1-2ms)
-        scope.launch(Dispatchers.IO) {
-            runCatching { transport.send(packet) }
-        }
+        // BUG-104: socket.send() straight from the touch thread — no channel hop.
+        runCatching { transport.sendDirect(packet) }
     }
 
     private fun sendMouseButton(button: MouseButton) {

@@ -4,11 +4,20 @@ Complete checklist of all project tasks. Never delete completed tasks. Always ap
 
 ---
 
+## Session 031 — Full-screen trackpad + latency + MOUSE removal
+
+- [x] Fix trackpad CursorGoto normalization to use trackpad view bounds, not phone screen (BUG-103)
+- [x] Remove MOUSE button from BridgeScreen (per user request)
+- [x] Add non-suspend `sendNow()` to UdpTransport for latency-critical traffic
+- [x] Eliminate per-receive `buf.copyOf()`, shrink socket buffers to 64KB, add `sendDirect()` fast path, boost thread priority, inline CursorGoto on receiver (BUG-104)
+- [x] Remove redundant manual zipalign/apksigner step from CI release job (Gradle signs now)
+- [ ] Verify green CI on pushed commit (BUILD + RELEASE trigger)
+
 ## Session 030 — MOUSE/START overlap fix
 
 - [x] Diagnose and fix MOUSE/START button overlap on BridgeScreen (BUG-101)
 - [x] Fix CI-blocking build-logic signingConfig DSL (BUG-102)
-- [ ] Verify green CI on pushed commit (BUILD trigger)
+- [x] Verify green CI on pushed commit (BUILD trigger)
 
 ## Session 022 — UDP lifecycle hardening
 

@@ -2,6 +2,38 @@
 
 ---
 
+## Session 031 — Full-screen trackpad mapping + lowest-latency sends + MOUSE button removal (BUG-103, BUG-104)
+**Date:** 2026-08-14
+**Agent:** opencode
+**Status:** 🔄 In Progress — CI pending
+
+### Goals
+- Make the mouse cursor reach the full OnePlus Pad Go screen (currently trapped in the phone's aspect mapping).
+- Reduce input latency to the minimum (remove per-packet coroutine dispatch).
+- Hide/remove the MOUSE button from the bridge home screen per user request.
+- Fix the remaining CI release-job failure (manual zipalign/apksigner step against Gradle-signed APKs).
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|---|---|---|---|
+| BUG-103 | High | Trackpad CursorGoto normalized by full phone `phoneWidth`/`phoneHeight` instead of `trackpadView` bounds → tablet cursor clamps short of screen edges. | Fixed. |
+| BUG-104 | Medium | Leftover mouse-pipeline latency: per-receive `buf.copyOf()`, 256 KB socket bufferbloat, channel→send-loop dispatch hop, default thread priority, `CursorGoto` via command queue. | Fixed. |
+
+### What Was Changed
+- `app-bridge/.../ui/MouseTrackpadActivity.kt:538-546`: `handleTrackpadTouch()` ACTION_DOWN now sends `sendCursorGoto(x / tw, y / th)` where `tw/th` are `trackpadView` bounds (touch coords are already view-relative), replacing `getLocationOnScreen()` + phone-screen normalization.
+- `app-bridge/.../ui/MouseTrackpadActivity.kt:639-661`: `sendCursorGoto`/`sendMouseMove` now call the new `transport.sendDirect(packet)` — `socket.send()` synchronously on the touch thread, skipping the channel and send-loop coroutine entirely (BUG-104).
+- `transport-wifi/.../UdpTransport.kt`: added `sendDirect()` (BUG-104) + `fixedTargetAddress` cached at connect; socket buffers 256 KB → 64 KB (bufferbloat); send/receive loops boosted to `THREAD_PRIORITY_URGENT_AUDIO`; receive loop uses `PacketSerializer.deserialize(buf, dp.length)` (no `copyOf`).
+- `protocol/.../PacketSerializer.kt`: added `deserialize(data, length)` overload to avoid per-packet `copyOf()` (BUG-104).
+- `accessibility-receiver/.../AccessibilityCommandBus.kt:172-205`: `CursorGoto` handled inline in `post()` exactly like `MouseMove` (no command-queue hop).
+- `app-bridge/.../ui/screens/BridgeScreen.kt`: removed the MOUSE `OutlinedButton` (and its now-unused `Intent`/`MouseTrackpadActivity` imports) per user request.
+- `.github/workflows/ci.yml`: removed the "Zipalign and APK Sign v2" step — Gradle already signs during `assembleRelease` (build-logic BUG-102 fix), so the manual step failed on missing `*-unsigned.apk`. Release artifacts upload via `app-bridge-release.apk` / `app-receiver-release.apk`.
+- `BUGS.md`: BUG-103 and BUG-104 marked ✅ FIXED (Session 031).
+
+### Notes
+- Fn keys: `KeyMap` maps F1–F12 (HID 0x3A–0x45); Android `KeyEvent` has no KEYCODE_F13–F24, and a physical keyboard Fn layer is consumed by the keyboard itself and never sent over USB HID, so a true Fn key cannot be represented in this capture path.
+
+---
+
 ## Session 030 — Fix MOUSE/START overlap + CI-blocking build-logic signing DSL (BUG-101, BUG-102)
 **Date:** 2026-08-14
 **Agent:** opencode

@@ -1942,3 +1942,37 @@ and `init {}` block).
 **Fix**: Moved signing config definition into `signingConfigs { create("release") { ... } }` (locals renamed to avoid capture-shadowing), and set `release { signingConfig = signingConfigs.getByName("release") }` guarded by a check for `SIGNING_KEYSTORE_PATH`.
 
 ---
+
+## BUG-103 — Trackpad CursorGoto is normalized to full phone screen, not the trackpad area — tablet edges unreachable
+
+**Description**: `MouseTrackpadActivity.handleTrackpadTouch()` computes the touch screen position as `location[0] + x` (phone screen coords) and `sendCursorGoto()` divides by the full phone `phoneWidth`/`phoneHeight`. But the trackpad view is smaller than the phone screen (top status row, bottom L/R button + slider panel, and the right scroll zone are excluded). The normalized X/Y then never reach 1.0, so on the receiver the cursor clamps well short of the tablet edges. On a Redmi 9 (1080×~2400) driving an OnePlus Pad Go (2800×2000) the horizontal and vertical margins of the tablet screen become physically unreachable.
+**Steps to reproduce**: Start bridge → MOUSE → single-touch the far-right and far-bottom edges of the trackpad; observe the tablet cursor stops ~8–11% short of the tablet screen edge.
+**Expected behavior**: The whole trackpad area maps linearly to the whole tablet screen, so the cursor reaches 100% of the tablet width/height.
+**Actual behavior**: Cursor is trapped in the phone's aspect-resolution mapping; tablet edges are unreachable.
+**Suspected cause**: Normalization uses the enclosing phone display dimensions instead of the `trackpadView` bounds; the view's own width/height should be the normalization base.
+**Files involved**: `app-bridge/src/main/kotlin/com/inputbridge/bridge/ui/MouseTrackpadActivity.kt:542-543, 636-652`.
+**Priority**: High (trackpad cannot reach full tablet screen — the core use-case)
+**Status**: ✅ FIXED (Session 031)
+**Fix**: Normalize the touch position by `trackpadView.width`/`trackpadView.height` and pass the normalized values straight to `CursorGoto`, so the trackpad surface maps 1:1 onto the tablet screen.
+
+---
+
+## BUG-104 — Leftover latency in the mouse pipeline: per-packet allocs, buffer-bloat sockets, and coroutine hops
+
+**Description**: Even after removing the per-packet `scope.launch`, several latency costs remained in the hot path: (1) the UDP receive loop copied `buf.copyOf(dp.length)` for every datagram — a ~1ms allocation + GC pressure per mouse-move; (2) socket buffers were 256 KB, which causes bufferbloat that adds latency to a real-time stream; (3) mouse-move and cursor-goto packets still took a channel → send-loop coroutine dispatch hop before `socket.send()`; (4) send/receive loops ran at default scheduler priority; (5) the receiver handled `CursorGoto` through the coroutine command queue instead of inline like `MouseMove`.
+
+**Steps to reproduce**: Measure end-to-end latency on the OnePlus Pad Go while moving the mouse; observe several ms of avoidable overhead per event.
+
+**Expected behavior**: Mouse-move and cursor-position packets reach the receiver with the fewest possible processing hops and allocations.
+
+**Actual behavior**: Extra `copyOf` per packet, a channel dispatch hop, 256 KB socket buffering, and default thread priority all add to total latency.
+
+**Suspected cause**: `PacketSerializer.deserialize(data)` required the full array; `sendNow` still enqueued into a channel read by a separate `sendLoop` coroutine; socket buffers were sized for burst absorption rather than real-time delivery.
+
+**Files involved**: `UdpTransport.kt` (receive loop, socket buffers, send loop, `sendDirect`), `PacketSerializer.kt` (`deserialize(data, length)` overload), `MouseTrackpadActivity.kt:639-661` (sendDirect on hot path), `AccessibilityCommandBus.kt:172-205` (inline CursorGoto).
+
+**Priority**: Medium (per-event microseconds-to-low-ms; compounding)
+**Status**: ✅ FIXED (Session 031)
+**Fix**: Added `PacketSerializer.deserialize(data, length)` so the receive loop stops copying; shrank socket buffers to 64 KB; added `UdpTransport.sendDirect()` that calls `socket.send()` synchronously on the touch thread (no channel hop) and used it for mouse-move + cursor-goto; boosted send/receive loop threads to `THREAD_PRIORITY_URGENT_AUDIO`; handled `CursorGoto` inline in `AccessibilityCommandBus.post()` exactly like `MouseMove`.
+
+---

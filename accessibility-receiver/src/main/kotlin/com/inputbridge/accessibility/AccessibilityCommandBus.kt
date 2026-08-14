@@ -170,22 +170,34 @@ object AccessibilityCommandBus {
      * with respect to clicks, scrolls, and key events is preserved.
      */
     fun post(event: InputEvent) {
-        if (event is InputEvent.MouseMove) {
-            val newX = (cursorX + event.dx).coerceIn(0f, screenWidth - 1f)
-            val newY = (cursorY + event.dy).coerceIn(0f, screenHeight - 1f)
+        if (event is InputEvent.MouseMove || event is InputEvent.CursorGoto) {
+            // BUG-104 FIX: CursorGoto treated exactly like MouseMove — inline, no
+            // coroutine dispatch. Trackpad ACTION_DOWN sends a CursorGoto; hopping it
+            // through commandFlow added one Main-thread dispatch hop to the initial
+            // positioning latency. It only updates two floats + a thread-safe StateFlow.
+            if (event is InputEvent.CursorGoto) {
+                val newX = (event.x * screenWidth).coerceIn(0f, screenWidth - 1f)
+                val newY = (event.y * screenHeight).coerceIn(0f, screenHeight - 1f)
+                cursorX = newX
+                cursorY = newY
+                _cursorPosition.value = Pair(cursorX, cursorY)
+            } else {
+                val newX = (cursorX + event.dx).coerceIn(0f, screenWidth - 1f)
+                val newY = (cursorY + event.dy).coerceIn(0f, screenHeight - 1f)
 
-            // If dragging, send continueStroke to keep the gesture alive
-            if (isDragging) {
-                scope.launch(Dispatchers.Main) {
-                    service?.continueStroke(lastCursorX, lastCursorY, newX, newY, true)
+                // If dragging, send continueStroke to keep the gesture alive
+                if (isDragging) {
+                    scope.launch(Dispatchers.Main) {
+                        service?.continueStroke(lastCursorX, lastCursorY, newX, newY, true)
+                    }
+                    lastCursorX = newX
+                    lastCursorY = newY
                 }
-                lastCursorX = newX
-                lastCursorY = newY
-            }
 
-            cursorX = newX
-            cursorY = newY
-            _cursorPosition.value = Pair(cursorX, cursorY)
+                cursorX = newX
+                cursorY = newY
+                _cursorPosition.value = Pair(cursorX, cursorY)
+            }
         } else {
             if (!commandFlow.tryEmit(event)) {
                 BridgeLogger.w(TAG, "CommandFlow full — dropped ${event::class.simpleName}")

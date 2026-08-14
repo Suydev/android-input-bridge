@@ -41,9 +41,15 @@ object PacketSerializer {
      * Deserialize raw bytes to a [Packet].
      * Returns null if the data is malformed or the protocol version is unsupported.
      */
-    fun deserialize(data: ByteArray): Packet? {
-        if (data.size < Packet.HEADER_SIZE) return null
-        val buf = ByteBuffer.wrap(data).order(BYTE_ORDER)
+    fun deserialize(data: ByteArray): Packet? = deserialize(data, data.size)
+
+    /**
+     * Deserialize only the first [length] bytes of [data] to a [Packet].
+     * Lets the UDP receive hot path avoid a `copyOf()` allocation per datagram.
+     */
+    fun deserialize(data: ByteArray, length: Int): Packet? {
+        if (length < Packet.HEADER_SIZE) return null
+        val buf = ByteBuffer.wrap(data, 0, length).order(BYTE_ORDER)
 
         val version = buf.get()
         if (version != Packet.PROTOCOL_VERSION) return null
@@ -53,7 +59,7 @@ object PacketSerializer {
         val seqNo = buf.int
         val timestampMs = buf.long
 
-        val payloadSize = data.size - Packet.HEADER_SIZE
+        val payloadSize = length - Packet.HEADER_SIZE
         val payload = ByteArray(payloadSize)
         if (payloadSize > 0) buf.get(payload)
 

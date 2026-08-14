@@ -26,8 +26,9 @@ private const val INPUT_QUEUE_CAPACITY = 64
  */
 private const val CRITICAL_QUEUE_CAPACITY = Channel.UNLIMITED
 
-/** Socket send/receive buffer (256 KB). Reduces kernel drop under burst traffic. */
-private const val SOCKET_BUFFER_BYTES = 256 * 1024
+/** Socket send/receive buffer (64 KB). Small buffers for interactive traffic — large
+ *  256 KB buffers cause bufferbloat that adds latency to a real-time mouse stream. */
+private const val SOCKET_BUFFER_BYTES = 64 * 1024
 
 /** IP DSCP EF (0x28) — expedited forwarding; falls back silently if the socket ignores it. */
 private const val TRAFFIC_CLASS_LOWDELAY = 0x28
@@ -93,6 +94,9 @@ class UdpTransport(
     private var sendJob: Job? = null
     private var receiveJob: Job? = null
 
+    /** Cached destination for sender-mode direct sends (BUG-104). Set in connect(). */
+    private var fixedTargetAddress: InetSocketAddress? = null
+
     /**
      * In receiver mode: the address of the most recently seen sender.
      * Used to send PONG and other control replies back to the bridge.
@@ -114,6 +118,11 @@ class UdpTransport(
             // BUG-089 FIX: resolve before announcing success. A malformed address must
             // fail connect(), not kill the asynchronous send coroutine after the UI is live.
             val fixedTarget = if (isSender) InetAddress.getByName(config.targetIp) else null
+            fixedTargetAddress = if (fixedTarget != null) {
+                InetSocketAddress(fixedTarget, config.port)
+            } else {
+                null
+            }
             val sock = if (isSender) {
                 DatagramSocket().also { it.soTimeout = 0 }
             } else {
@@ -185,6 +194,52 @@ class UdpTransport(
     }
 
     /**
+     * Non-suspend fast path for latency-critical traffic (mouse moves, cursor
+     * positioning). [send] never actually suspends — it only serializes and
+     * trySends into a channel — but being declared `suspend` forces callers to
+     * hop onto a coroutine dispatcher for every packet. This method lets the
+     * trackpad hot path enqueue synchronously on the calling thread.
+     */
+    fun sendNow(packet: Packet): Boolean {
+        if (!isConnected) return false
+        val bytes = PacketSerializer.serialize(packet)
+        return if (packet.type.isCritical()) {
+            criticalChannel.trySend(bytes).isSuccess
+        } else {
+            inputChannel.trySend(bytes).isSuccess
+        }
+    }
+
+    /**
+     * BUG-104 FIX — absolute lowest-latency send used by the trackpad hot path.
+     *
+     * [sendNow] enqueues into a channel that the send-loop coroutine must then wake
+     * up and drain before the DatagramSocket.send() call happens — one coroutine
+     * dispatch hop per packet (~0.1–1ms on Dispatchers.IO). For a real-time mouse
+     * stream that hop is pure overhead.
+     *
+     * [sendDirect] skips the channel entirely: it serializes and calls
+     * `socket.send()` synchronously on the calling thread (the trackpad touch
+     * handler on Main). DatagramSocket.send() is thread-safe and the datagram is
+     * handed to the kernel immediately, so concurrent sends from the send-loop and
+     * this method cannot corrupt each other. Control packets still go through
+     * [send]/[sendNow] to preserve ordering against the watchdog.
+     */
+    fun sendDirect(packet: Packet): Boolean {
+        if (!isConnected) return false
+        val sock = socket ?: return false
+        val fixedTarget = fixedTargetAddress ?: return false
+        return try {
+            val bytes = PacketSerializer.serialize(packet)
+            sock.send(DatagramPacket(bytes, bytes.size, fixedTarget))
+            true
+        } catch (e: Exception) {
+            if (isConnected) BridgeLogger.w(TAG, "Direct send error", e)
+            false
+        }
+    }
+
+    /**
      * True for packets that must never be silently dropped by a busy mouse pipeline.
      * Control traffic is at most ~1 packet/second, so the UNLIMITED critical channel
      * cannot grow unbounded in practice.
@@ -203,6 +258,10 @@ class UdpTransport(
         inputQueue: Channel<ByteArray>,
     ) {
         sendJob = scope.launch {
+            // BUG-104 FIX: boost scheduling priority. DatagramSocket.send() and the
+            // channel reads run on Dispatchers.IO; without this the kernel/ART scheduler
+            // can delay a mouse-move packet by a few ms behind unrelated IO work.
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
             /**
              * Priority send: drain criticalChannel first (non-blocking try), then fall
              * back to a coroutine select on both channels. This ensures PING/PONG/PAIR/
@@ -259,6 +318,9 @@ class UdpTransport(
 
     private fun startReceiveLoop(sock: DatagramSocket) {
         receiveJob = scope.launch {
+            // BUG-104 FIX: same scheduling-priority boost as the send loop — a delayed
+            // receive dispatch adds directly to end-to-end mouse latency.
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
             val buf = ByteArray(MAX_PACKET_SIZE)
             val dp = DatagramPacket(buf, buf.size)
             // BUG-091 FIX: isConnected is reused for the next session. Also honour this
@@ -269,7 +331,7 @@ class UdpTransport(
                     sock.receive(dp)
                     // Track the sender address for receiver-mode replies (PONG etc.)
                     (dp.socketAddress as? InetSocketAddress)?.let { lastSenderAddress = it }
-                    val packet = PacketSerializer.deserialize(buf.copyOf(dp.length)) ?: continue
+                    val packet = PacketSerializer.deserialize(buf, dp.length) ?: continue
                     _incomingPackets.emit(packet)
                 } catch (e: Exception) {
                     if (isConnected) BridgeLogger.w(TAG, "Receive error", e)

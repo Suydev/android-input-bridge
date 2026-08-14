@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 030 — MOUSE/START overlap + CI-blocking build-logic fix BUG-101→102 (2026-08-14)
+> **Last updated:** Session 031 — Full-screen trackpad mapping, minimum-latency sends, MOUSE button removal (BUG-103, BUG-104) (2026-08-14)
 
 ---
 
