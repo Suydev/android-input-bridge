@@ -36,6 +36,8 @@ data class DiagnosticsData(
     // ── Accessibility (receiver) ──────────────────────────────────────────────
     val accessibilityEnabled: Boolean = false,
     val accessibilityMode: String = "None", // "Accessibility" | "HID"
+    /** Injection method: "Shizuku/InputManager" (1-5ms) or "Accessibility/dispatchGesture" (10-30ms). */
+    val injectionMode: String = "Accessibility/dispatchGesture",
 
     // ── Permissions ───────────────────────────────────────────────────────────
     val usbPermissionGranted: Boolean = false,

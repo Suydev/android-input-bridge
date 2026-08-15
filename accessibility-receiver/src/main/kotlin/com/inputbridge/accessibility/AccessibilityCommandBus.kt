@@ -3,6 +3,9 @@ package com.inputbridge.accessibility
 import android.os.Build
 import android.view.KeyEvent
 import androidx.annotation.RequiresApi
+import android.os.SystemClock
+import android.view.KeyEvent
+import android.view.MotionEvent
 import com.inputbridge.core.logging.BridgeLogger
 import com.inputbridge.core.model.*
 import com.inputbridge.diagnostics.DiagnosticsManager
@@ -125,11 +128,33 @@ object AccessibilityCommandBus {
     fun setService(svc: InputBridgeAccessibilityService) {
         service = svc
         BridgeLogger.i(TAG, "Service attached")
+
+        // Initialize Shizuku input injection if available
+        try {
+            ShizukuInputInjector.init()
+            if (ShizukuInputInjector.isAvailable) {
+                BridgeLogger.i(TAG, "Shizuku input injection available — using InputManager (1-5ms)")
+                DiagnosticsManager.update {
+                    copy(injectionMode = "Shizuku/InputManager")
+                }
+            } else {
+                BridgeLogger.i(TAG, "Shizuku not available — using AccessibilityService dispatchGesture (10-30ms)")
+                DiagnosticsManager.update {
+                    copy(injectionMode = "Accessibility/dispatchGesture")
+                }
+            }
+        } catch (t: Throwable) {
+            BridgeLogger.e(TAG, "Failed to initialize Shizuku", t)
+            DiagnosticsManager.update {
+                copy(injectionMode = "Accessibility/dispatchGesture")
+            }
+        }
     }
 
     fun clearService() {
         service = null
-        BridgeLogger.i(TAG, "Service detached")
+        ShizukuInputInjector.destroy()
+        BridgeLogger.i(TAG, "Service detached, Shizuku cleaned up")
     }
 
     /** Check whether the accessibility service is currently connected. */
@@ -265,10 +290,20 @@ object AccessibilityCommandBus {
                 lastCursorY = cursorY
                 when (event.button) {
                     MouseButton.LEFT    -> {
-                        svc.tap(cursorX, cursorY)
+                        if (ShizukuInputInjector.checkAvailability()) {
+                            ShizukuInputInjector.tap(cursorX, cursorY)
+                        } else {
+                            svc.tap(cursorX, cursorY)
+                        }
                         isDragging = true
                     }
-                    MouseButton.RIGHT   -> svc.longPress(cursorX, cursorY)
+                    MouseButton.RIGHT   -> {
+                        if (ShizukuInputInjector.checkAvailability()) {
+                            ShizukuInputInjector.longPress(cursorX, cursorY)
+                        } else {
+                            svc.longPress(cursorX, cursorY)
+                        }
+                    }
                     MouseButton.MIDDLE  -> Unit // no accessibility equivalent
                     MouseButton.BACK    -> svc.goBack()
                     MouseButton.FORWARD -> Unit
@@ -290,20 +325,37 @@ object AccessibilityCommandBus {
                 BridgeLogger.d(TAG, "Scroll: dx=${event.dx} dy=${event.dy} " +
                     "→ swipe(${cursorX.toInt()},${cursorY.toInt()} → " +
                     "${(cursorX - scrollDx).toInt()},${(cursorY - scrollDy).toInt()})")
-                svc.swipe(
-                    x1 = cursorX,
-                    y1 = cursorY,
-                    x2 = (cursorX - scrollDx).coerceIn(0f, screenWidth - 1f),
-                    y2 = (cursorY - scrollDy).coerceIn(0f, screenHeight - 1f),
-                    durationMs = SCROLL_DURATION_MS,
-                )
+                if (ShizukuInputInjector.checkAvailability()) {
+                    ShizukuInputInjector.swipe(
+                        x1 = cursorX,
+                        y1 = cursorY,
+                        x2 = (cursorX - scrollDx).coerceIn(0f, screenWidth - 1f),
+                        y2 = (cursorY - scrollDy).coerceIn(0f, screenHeight - 1f),
+                        durationMs = SCROLL_DURATION_MS,
+                    )
+                } else {
+                    svc.swipe(
+                        x1 = cursorX,
+                        y1 = cursorY,
+                        x2 = (cursorX - scrollDx).coerceIn(0f, screenWidth - 1f),
+                        y2 = (cursorY - scrollDy).coerceIn(0f, screenHeight - 1f),
+                        durationMs = SCROLL_DURATION_MS,
+                    )
+                }
             }
 
             // ── Keyboard ──────────────────────────────────────────────────────
             is InputEvent.KeyDown -> {
                 BridgeLogger.d(TAG, "KeyDown: keyCode=${event.keyCode} " +
                     "(${KeyEvent.keyCodeToString(event.keyCode)})")
-                svc.injectKeyCode(event.keyCode, event.modifiers)
+                if (ShizukuInputInjector.checkAvailability()) {
+                    val metaState = buildMetaState(event.modifiers)
+                    val now = SystemClock.uptimeMillis()
+                    val keyDown = KeyEvent(now, now, KeyEvent.ACTION_DOWN, event.keyCode, 0, metaState)
+                    ShizukuInputInjector.injectKeyEvent(keyDown)
+                } else {
+                    svc.injectKeyCode(event.keyCode, event.modifiers)
+                }
             }
 
             // KeyUp: no action needed — injection is complete on KeyDown.
@@ -357,4 +409,19 @@ object AccessibilityCommandBus {
 
     /** Duration of simulated scroll swipe in ms. Shorter = faster/snappier. */
     private const val SCROLL_DURATION_MS = 80L
+
+    /**
+     * Build an Android meta-state integer from our [ModifierState].
+     * Used to create KeyEvent with proper modifiers for Shizuku injection.
+     */
+    private fun buildMetaState(modifiers: ModifierState): Int {
+        var meta = 0
+        if (modifiers.shift || modifiers.capsLock) {
+            meta = meta or KeyEvent.META_SHIFT_ON or KeyEvent.META_SHIFT_LEFT_ON
+        }
+        if (modifiers.ctrl)  meta = meta or KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
+        if (modifiers.alt)   meta = meta or KeyEvent.META_ALT_ON  or KeyEvent.META_ALT_LEFT_ON
+        if (modifiers.meta)  meta = meta or KeyEvent.META_META_ON
+        return meta
+    }
 }

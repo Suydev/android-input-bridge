@@ -18,6 +18,7 @@ koin = "3.5.6"
 koinCompose = "3.5.6"
 mockk = "1.13.11"
 material = "1.12.0"
+shizuku = "13.1.5"
 
 [libraries]
 # AndroidX Core
@@ -68,6 +69,11 @@ androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "j
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
 mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
 kotlinx-coroutines-test-lib = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
+
+# Shizuku (privileged input injection without root)
+shizuku-api = { group = "dev.rikka.shizuku", name = "api", version.ref = "shizuku" }
+shizuku-processor = { group = "dev.rikka.shizuku", name = "processor", version.ref = "shizuku" }
+shizuku-provider = { group = "dev.rikka.shizuku", name = "provider", version.ref = "shizuku" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
