@@ -73,10 +73,6 @@ androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-co
 mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
 kotlinx-coroutines-test-lib = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
 
-# Shizuku (privileged input injection without root)
-shizuku-api = { group = "com.github.rikkaapps.shizuku", name = "api", version.ref = "shizuku" }
-shizuku-provider = { group = "com.github.rikkaapps.shizuku", name = "provider", version.ref = "shizuku" }
-
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }

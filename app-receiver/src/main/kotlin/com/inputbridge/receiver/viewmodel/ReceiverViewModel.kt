@@ -2,7 +2,6 @@ package com.inputbridge.receiver.viewmodel
 
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.PowerManager
@@ -21,7 +20,6 @@ import com.inputbridge.core.logging.BridgeLogger
 import com.inputbridge.transport.wifi.UdpTransport
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import rikka.shizuku.Shizuku
 
 class ReceiverViewModel(
     private val context: Context,
@@ -47,19 +45,6 @@ class ReceiverViewModel(
     val isAccessibilityEnabled: StateFlow<Boolean> = diagnostics
         .map { it.accessibilityEnabled }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
-
-    // ── Shizuku status ────────────────────────────────────────────────────────
-
-    private val _shizukuAvailable = MutableStateFlow(false)
-    val shizukuAvailable: StateFlow<Boolean> = _shizukuAvailable.asStateFlow()
-
-    private val _shizukuPermissionGranted = MutableStateFlow(false)
-    val shizukuPermissionGranted: StateFlow<Boolean> = _shizukuPermissionGranted.asStateFlow()
-
-    /** The injection mode: "Shizuku/InputManager" (1-5ms) or "Accessibility/dispatchGesture" (10-30ms). */
-    val injectionMode: StateFlow<String> = diagnostics
-        .map { it.injectionMode }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, "Accessibility/dispatchGesture")
 
     /** The session PIN displayed to the bridge user for pairing entry. */
     val sessionPin: StateFlow<String> = diagnostics
@@ -102,7 +87,6 @@ class ReceiverViewModel(
             )
         }
         refreshStatus()
-        refreshShizukuStatus()
     }
 
     /**
@@ -118,48 +102,6 @@ class ReceiverViewModel(
         val pm = context.getSystemService(PowerManager::class.java)
         val battOpt = pm?.isIgnoringBatteryOptimizations(context.packageName) == true
         DiagnosticsManager.update { copy(batteryOptimizationIgnored = battOpt) }
-    }
-
-    /**
-     * Refresh Shizuku availability and permission status.
-     * Called on init and when the user returns from Shizuku permission dialog.
-     */
-    fun refreshShizukuStatus() {
-        try {
-            val available = Shizuku.pingBinder()
-            _shizukuAvailable.value = available
-            if (available) {
-                val granted = Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
-                _shizukuPermissionGranted.value = granted
-                BridgeLogger.i(TAG, "Shizuku available, permission=$granted")
-            } else {
-                _shizukuPermissionGranted.value = false
-                BridgeLogger.i(TAG, "Shizuku not running")
-            }
-        } catch (t: Throwable) {
-            _shizukuAvailable.value = false
-            _shizukuPermissionGranted.value = false
-            BridgeLogger.e(TAG, "Shizuku check failed", t)
-        }
-    }
-
-    /**
-     * Request Shizuku permission from the user.
-     * Shows the Shizuku permission dialog.
-     */
-    fun requestShizukuPermission() {
-        try {
-            if (Shizuku.isPreV11()) {
-                BridgeLogger.w(TAG, "Shizuku pre-v11 does not support permission API")
-                return
-            }
-            if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-                Shizuku.requestPermission(SHIZUKU_PERMISSION_REQUEST_CODE)
-                BridgeLogger.i(TAG, "Shizuku permission requested")
-            }
-        } catch (t: Throwable) {
-            BridgeLogger.e(TAG, "Failed to request Shizuku permission", t)
-        }
     }
 
     private fun checkNetworkAvailable(): Boolean {
@@ -314,6 +256,5 @@ class ReceiverViewModel(
 
     private companion object {
         private const val TAG = "ReceiverViewModel"
-        private const val SHIZUKU_PERMISSION_REQUEST_CODE = 1001
     }
 }

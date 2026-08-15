@@ -14,10 +14,6 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.timber)
 
-    // Shizuku: privileged input injection via InputManager (1-5ms vs 10-30ms dispatchGesture)
-    implementation(libs.shizuku.api)
-    implementation(libs.shizuku.provider)
-
     testImplementation(libs.junit)
     testImplementation(libs.mockk)
 }
