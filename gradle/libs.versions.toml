@@ -72,7 +72,6 @@ kotlinx-coroutines-test-lib = { group = "org.jetbrains.kotlinx", name = "kotlinx
 
 # Shizuku (privileged input injection without root)
 shizuku-api = { group = "dev.rikka.shizuku", name = "api", version.ref = "shizuku" }
-shizuku-processor = { group = "dev.rikka.shizuku", name = "processor", version.ref = "shizuku" }
 shizuku-provider = { group = "dev.rikka.shizuku", name = "provider", version.ref = "shizuku" }
 
 [plugins]

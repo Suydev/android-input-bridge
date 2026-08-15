@@ -16,7 +16,6 @@ dependencies {
 
     // Shizuku: privileged input injection via InputManager (1-5ms vs 10-30ms dispatchGesture)
     implementation(libs.shizuku.api)
-    compileOnly(libs.shizuku.processor)
     implementation(libs.shizuku.provider)
 
     testImplementation(libs.junit)
