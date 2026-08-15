@@ -17,7 +17,6 @@ import com.inputbridge.receiver.prefs.ReceiverPreferences
 import com.inputbridge.receiver.service.CursorOverlayService
 import com.inputbridge.receiver.service.ReceiverService
 import com.inputbridge.core.logging.BridgeLogger
-import com.inputbridge.transport.wifi.UdpTransport
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -60,17 +59,6 @@ class ReceiverViewModel(
 
     private val _isNetworkAvailable = MutableStateFlow(checkNetworkAvailable())
     val isNetworkAvailable: StateFlow<Boolean> = _isNetworkAvailable.asStateFlow()
-
-    // ── Trackpad transport (reverse direction: receiver → bridge) ──────────────
-
-    /**
-     * UDP transport for sending trackpad input events back to the bridge.
-     * Lazily initialized when the trackpad screen is opened.
-     * Connects to the paired bridge IP on the same port the receiver listens on.
-     */
-    @Volatile
-    var trackpadTransport: UdpTransport? = null
-        private set
 
     init {
         // BUG-080 FIX: this must follow _isNetworkAvailable's construction. Kotlin runs
@@ -183,45 +171,6 @@ class ReceiverViewModel(
         DiagnosticsManager.update { copy(sessionPin = pin, isPaired = false, pairedPeerIp = "") }
     }
 
-    // ── Trackpad transport management ─────────────────────────────────────────
-
-    /**
-     * Connect a UDP transport to the paired bridge for sending trackpad events.
-     * The bridge's IP is stored in prefs.pairedBridgeIp after pairing.
-     * Uses the same port the receiver listens on (the bridge sends to that port).
-     */
-    fun connectTrackpadTransport() {
-        val bridgeIp = prefs.pairedBridgeIp
-        if (bridgeIp.isEmpty()) {
-            BridgeLogger.w(TAG, "No paired bridge IP — cannot start trackpad")
-            DiagnosticsManager.update { copy(lastError = "Pair with bridge first") }
-            return
-        }
-        if (trackpadTransport?.isConnected == true) return
-
-        viewModelScope.launch {
-            val config = TransportConfig(targetIp = bridgeIp, port = prefs.port)
-            val transport = UdpTransport(config, isSender = true)
-            val ok = transport.connect()
-            if (ok) {
-                trackpadTransport = transport
-                BridgeLogger.i(TAG, "Trackpad transport connected → $bridgeIp:${prefs.port}")
-            } else {
-                BridgeLogger.e(TAG, "Trackpad transport failed to connect to $bridgeIp")
-                DiagnosticsManager.update { copy(lastError = "Trackpad: cannot reach bridge") }
-            }
-        }
-    }
-
-    fun disconnectTrackpadTransport() {
-        trackpadTransport?.let { t ->
-            viewModelScope.launch {
-                runCatching { t.disconnect() }
-            }
-        }
-        trackpadTransport = null
-    }
-
     // ── Service control ───────────────────────────────────────────────────────
 
     fun startReceiver() {
@@ -251,7 +200,6 @@ class ReceiverViewModel(
 
     override fun onCleared() {
         super.onCleared()
-        disconnectTrackpadTransport()
     }
 
     private companion object {

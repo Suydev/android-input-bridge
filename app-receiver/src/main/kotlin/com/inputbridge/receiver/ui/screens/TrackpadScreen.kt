@@ -3,9 +3,7 @@ package com.inputbridge.receiver.ui.screens
 import android.app.Activity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -29,13 +27,11 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.inputbridge.accessibility.AccessibilityCommandBus
 import com.inputbridge.core.model.InputEvent
 import com.inputbridge.core.model.MouseButton
 import com.inputbridge.receiver.ui.theme.*
 import com.inputbridge.receiver.viewmodel.ReceiverViewModel
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 private const val TAP_THRESHOLD_PX = 10f
@@ -61,7 +57,6 @@ fun TrackpadScreen(
 ) {
     val diagnostics by viewModel.diagnostics.collectAsStateWithLifecycle()
     val view = LocalView.current
-    val transportState = rememberUpdatedState(viewModel.trackpadTransport)
 
     // Hide system bars for true full-screen (edge-to-edge)
     DisposableEffect(view) {
@@ -98,7 +93,6 @@ fun TrackpadScreen(
                 .onSizeChanged { boxSize = it }
                 .pointerInput(Unit) {
                     awaitTrackpadGestureScope(
-                        transportState,
                         { cursorX }, { cursorY },
                         { cursorX = it }, { cursorY = it },
                         { isTouching = it },
@@ -133,9 +127,8 @@ fun TrackpadScreen(
                 .size(48.dp)
                 .background(ReceiverSurface.copy(alpha = 0.8f), CircleShape)
                 .clickable {
-                    val transport = transportState.value
-                    sendMouseButton(transport, MouseButton.MIDDLE, down = true)
-                    sendMouseButton(transport, MouseButton.MIDDLE, down = false)
+                    AccessibilityCommandBus.post(InputEvent.MouseButtonDown(MouseButton.MIDDLE))
+                    AccessibilityCommandBus.post(InputEvent.MouseButtonUp(MouseButton.MIDDLE))
                 },
             contentAlignment = Alignment.Center,
         ) {
@@ -207,164 +200,118 @@ fun TrackpadScreen(
 }
 
 /**
- * Custom gesture detection supporting single-finger drag, tap, long-press,
- * and two-finger scroll — all in a SINGLE pointerInput block.
+ * Single-coroutine gesture detection for the trackpad.
+ *
+ * State machine (no concurrent detectors):
+ *   IDLE → pointer-down → COOLDOWN
+ *   COOLDOWN + move > TAP_THRESHOLD → DRAGGING
+ *   COOLDOWN + hold ≥ 500ms (no movement) → LONG_PRESS → COOLDOWN
+ *   COOLDOWN + pointer-up (no movement) → TAP → IDLE
+ *   DRAGGING + pointer-up → IDLE
+ *   SCROLLING + all-pointers-up → IDLE
  */
 private suspend fun PointerInputScope.awaitTrackpadGestureScope(
-    transportState: State<com.inputbridge.transport.wifi.UdpTransport?>,
     getCursorX: () -> Float,
     getCursorY: () -> Float,
     setCursorX: (Float) -> Unit,
     setCursorY: (Float) -> Unit,
     setTouching: (Boolean) -> Unit,
 ) {
-    coroutineScope {
-        // Single-finger drag → cursor movement
-        launch {
-            detectDragGestures(
-                onDragStart = { offset ->
-                    setTouching(true)
-                    val x = offset.x / size.width
-                    val y = offset.y / size.height
-                    setCursorX(x)
-                    setCursorY(y)
-                    val transport = transportState.value
-                    sendCursorGoto(transport, x, y)
-                },
-                onDrag = { change, dragAmount ->
-                    change.consume()
-                    val dx = dragAmount.x / size.width
-                    val dy = dragAmount.y / size.height
-                    val transport = transportState.value
-                    sendMouseMove(transport, dx, dy)
+    while (true) {
+        // ── Wait for pointer-down ────────────────────────────────────────────
+        val down = awaitFirstDown(requireUnconsumed = false)
+        setTouching(true)
+        val downX = down.position.x
+        val downY = down.position.y
+        var lastX = downX
+        var lastY = downY
+        val downTime = System.currentTimeMillis()
+        var totalMovement = 0f
+        var longPressFired = false
+        var isTwoFinger = false
+        var lastTwoFingerY = 0f
+
+        // ── Pointer-down: set cursor to touch position ───────────────────────
+        val cx = (downX / size.width).coerceIn(0f, 1f)
+        val cy = (downY / size.height).coerceIn(0f, 1f)
+        setCursorX(cx)
+        setCursorY(cy)
+        AccessibilityCommandBus.post(InputEvent.CursorGoto(cx, cy))
+
+        // ── Process events until all pointers lift ────────────────────────────
+        var waitingForUp = false
+        while (!waitingForUp) {
+            val event = awaitPointerEvent()
+            val pressed = event.changes.filter { it.pressed }
+
+            // All pointers lifted → exit loop (Bug D fix: clean break, no spin)
+            if (pressed.isEmpty()) {
+                // Tap: no movement, no long-press → left click
+                if (!longPressFired && !isTwoFinger && totalMovement < TAP_THRESHOLD_PX) {
+                    AccessibilityCommandBus.post(InputEvent.MouseButtonDown(MouseButton.LEFT))
+                    AccessibilityCommandBus.post(InputEvent.MouseButtonUp(MouseButton.LEFT))
+                }
+                waitingForUp = true
+                continue
+            }
+
+            // ── Two-finger detection ─────────────────────────────────────────
+            if (pressed.size >= 2 && !isTwoFinger) {
+                isTwoFinger = true
+                lastTwoFingerY = (pressed[0].position.y + pressed[1].position.y) / 2f
+            }
+
+            if (isTwoFinger) {
+                // One finger lifted during two-finger scroll → end scroll, treat remaining as single-finger
+                if (pressed.size < 2) {
+                    isTwoFinger = false
+                    // Reset lastX/lastY to current single finger so drag starts fresh
+                    lastX = pressed.first().position.x
+                    lastY = pressed.first().position.y
+                } else {
+                    // Two-finger scroll
+                    val avgY = (pressed[0].position.y + pressed[1].position.y) / 2f
+                    val scrollDy = (avgY - lastTwoFingerY) / size.height * SCROLL_MULTIPLIER
+                    if (abs(scrollDy) > 0.001f) {
+                        AccessibilityCommandBus.post(InputEvent.Scroll(0f, scrollDy))
+                    }
+                    lastTwoFingerY = avgY
+                    event.changes.forEach { it.consume() }
+                    continue
+                }
+            }
+
+            // ── Single-finger: track movement ────────────────────────────────
+            val change = pressed.first()
+            val movX = change.position.x - downX
+            val movY = change.position.y - downY
+            totalMovement = abs(movX) + abs(movY)
+
+            if (totalMovement >= TAP_THRESHOLD_PX && !longPressFired) {
+                // Crossed threshold → drag mode: send incremental MouseMove
+                val dx = (change.position.x - lastX) / size.width
+                val dy = (change.position.y - lastY) / size.height
+                if (dx != 0f || dy != 0f) {
+                    AccessibilityCommandBus.post(InputEvent.MouseMove(dx, dy))
                     setCursorX((getCursorX() + dx).coerceIn(0f, 1f))
                     setCursorY((getCursorY() + dy).coerceIn(0f, 1f))
-                },
-                onDragEnd = { setTouching(false) },
-                onDragCancel = { setTouching(false) },
-            )
-        }
-
-        // Custom tap / long-press / two-finger scroll detection
-        launch {
-            awaitEachGesture {
-                val down = awaitFirstDown(requireUnconsumed = false)
-                val downTime = System.currentTimeMillis()
-                val startX = down.position.x
-                val startY = down.position.y
-                var totalMovement = 0f
-                var longPressFired = false
-                var isTwoFinger = false
-                var lastTwoFingerY = 0f
-
-                while (true) {
-                    val event = awaitPointerEvent()
-                    val pointers = event.changes.filter { it.pressed }
-
-                    // Two-finger detection
-                    if (pointers.size >= 2 && !isTwoFinger) {
-                        isTwoFinger = true
-                        lastTwoFingerY = (pointers[0].position.y + pointers[1].position.y) / 2f
-                        setTouching(true)
-                    }
-
-                    if (isTwoFinger) {
-                        // Two-finger scroll
-                        val currentY = (pointers[0].position.y + pointers[1].position.y) / 2f
-                        val scrollDy = (currentY - lastTwoFingerY) / size.height * SCROLL_MULTIPLIER
-                        if (abs(scrollDy) > 0.001f) {
-                            val transport = transportState.value
-                            sendScroll(transport, 0f, scrollDy)
-                        }
-                        lastTwoFingerY = currentY
-                        event.changes.forEach { it.consume() }
-                    } else {
-                        // Single-finger: tap / long-press / drag
-                        val change = pointers.firstOrNull() ?: continue
-
-                        if (change.pressed) {
-                            val movX = change.position.x - startX
-                            val movY = change.position.y - startY
-                            totalMovement = abs(movX) + abs(movY)
-
-                            if (!longPressFired && totalMovement < TAP_THRESHOLD_PX) {
-                                val elapsed = System.currentTimeMillis() - downTime
-                                if (elapsed >= 500) {
-                                    longPressFired = true
-                                    val x = change.position.x / size.width
-                                    val y = change.position.y / size.height
-                                    setCursorX(x)
-                                    setCursorY(y)
-                                    val transport = transportState.value
-                                    sendCursorGoto(transport, x, y)
-                                    sendMouseButton(transport, MouseButton.RIGHT, down = true)
-                                    sendMouseButton(transport, MouseButton.RIGHT, down = false)
-                                }
-                            }
-                        } else {
-                            // Pointer up — fire tap if no movement and not long-press
-                            if (!longPressFired && totalMovement < TAP_THRESHOLD_PX) {
-                                val x = change.position.x / size.width
-                                val y = change.position.y / size.height
-                                setCursorX(x)
-                                setCursorY(y)
-                                val transport = transportState.value
-                                sendCursorGoto(transport, x, y)
-                                sendMouseButton(transport, MouseButton.LEFT, down = true)
-                                sendMouseButton(transport, MouseButton.LEFT, down = false)
-                            }
-                            break
-                        }
-                    }
+                }
+                lastX = change.position.x
+                lastY = change.position.y
+            } else if (!longPressFired) {
+                // Still within threshold → check for long-press
+                val elapsed = System.currentTimeMillis() - downTime
+                if (elapsed >= 500) {
+                    longPressFired = true
+                    AccessibilityCommandBus.post(InputEvent.MouseButtonDown(MouseButton.RIGHT))
+                    AccessibilityCommandBus.post(InputEvent.MouseButtonUp(MouseButton.RIGHT))
                 }
             }
         }
+
+        // ── All pointers lifted → reset ──────────────────────────────────────
+        setTouching(false)
     }
 }
 
-// ── Packet helpers ───────────────────────────────────────────────────────────
 
-private val packetFactory = com.inputbridge.protocol.EventPacketFactory()
-private val sendScope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO)
-
-private fun sendCursorGoto(
-    transport: com.inputbridge.transport.wifi.UdpTransport?,
-    x: Float, y: Float,
-) {
-    val packet = packetFactory.fromEvent(InputEvent.CursorGoto(x, y)) ?: return
-    transport?.let { t ->
-        sendScope.launch { runCatching { t.send(packet) } }
-    }
-}
-
-private fun sendMouseMove(
-    transport: com.inputbridge.transport.wifi.UdpTransport?,
-    dx: Float, dy: Float,
-) {
-    val packet = packetFactory.fromEvent(InputEvent.MouseMove(dx, dy)) ?: return
-    transport?.let { t ->
-        sendScope.launch { runCatching { t.send(packet) } }
-    }
-}
-
-private fun sendMouseButton(
-    transport: com.inputbridge.transport.wifi.UdpTransport?,
-    button: MouseButton, down: Boolean,
-) {
-    val event = if (down) InputEvent.MouseButtonDown(button)
-    else InputEvent.MouseButtonUp(button)
-    val packet = packetFactory.fromEvent(event) ?: return
-    transport?.let { t ->
-        sendScope.launch { runCatching { t.send(packet) } }
-    }
-}
-
-private fun sendScroll(
-    transport: com.inputbridge.transport.wifi.UdpTransport?,
-    dx: Float, dy: Float,
-) {
-    val packet = packetFactory.fromEvent(InputEvent.Scroll(dx, dy)) ?: return
-    transport?.let { t ->
-        sendScope.launch { runCatching { t.send(packet) } }
-    }
-}

@@ -165,10 +165,7 @@ fun ConnectionScreen(
             if (isPaired && diagnostics.transportConnected) {
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(
-                    onClick = {
-                        viewModel.connectTrackpadTransport()
-                        onTrackpad()
-                    },
+                    onClick = { onTrackpad() },
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = ReceiverPrimary),
                     border = BorderStroke(1.dp, ReceiverPrimary.copy(alpha = 0.8f)),
                 ) {
