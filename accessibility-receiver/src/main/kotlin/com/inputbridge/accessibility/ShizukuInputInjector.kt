@@ -108,7 +108,6 @@ object ShizukuInputInjector {
     /**
      * Inject a long press at the given screen coordinates.
      * Sends ACTION_DOWN, waits [durationMs], then sends ACTION_UP.
-     * Must be called from a background thread (uses Thread.sleep).
      */
     suspend fun longPress(x: Float, y: Float, durationMs: Long = 600L): Boolean {
         val now = SystemClock.uptimeMillis()
@@ -128,7 +127,6 @@ object ShizukuInputInjector {
     /**
      * Inject a swipe from (x1,y1) to (x2,y2) over [durationMs] milliseconds.
      * Sends ACTION_DOWN, multiple MOVE events, then ACTION_UP.
-     * Must be called from a background thread (uses delay).
      */
     suspend fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long = 200L): Boolean {
         val now = SystemClock.uptimeMillis()
