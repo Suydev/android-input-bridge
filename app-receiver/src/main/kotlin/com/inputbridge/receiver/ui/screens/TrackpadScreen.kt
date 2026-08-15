@@ -3,6 +3,7 @@ package com.inputbridge.receiver.ui.screens
 import android.app.Activity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -217,7 +218,7 @@ private suspend fun PointerInputScope.awaitTrackpadGestureScope(
     setCursorY: (Float) -> Unit,
     setTouching: (Boolean) -> Unit,
 ) {
-    while (true) {
+    awaitEachGesture {
         // ── Wait for pointer-down ────────────────────────────────────────────
         val down = awaitFirstDown(requireUnconsumed = false)
         setTouching(true)
@@ -239,20 +240,18 @@ private suspend fun PointerInputScope.awaitTrackpadGestureScope(
         AccessibilityCommandBus.post(InputEvent.CursorGoto(cx, cy))
 
         // ── Process events until all pointers lift ────────────────────────────
-        var waitingForUp = false
-        while (!waitingForUp) {
+        while (true) {
             val event = awaitPointerEvent()
             val pressed = event.changes.filter { it.pressed }
 
-            // All pointers lifted → exit loop (Bug D fix: clean break, no spin)
+            // All pointers lifted → exit (awaitEachGesture restarts on next touch)
             if (pressed.isEmpty()) {
                 // Tap: no movement, no long-press → left click
                 if (!longPressFired && !isTwoFinger && totalMovement < TAP_THRESHOLD_PX) {
                     AccessibilityCommandBus.post(InputEvent.MouseButtonDown(MouseButton.LEFT))
                     AccessibilityCommandBus.post(InputEvent.MouseButtonUp(MouseButton.LEFT))
                 }
-                waitingForUp = true
-                continue
+                break
             }
 
             // ── Two-finger detection ─────────────────────────────────────────
@@ -262,10 +261,9 @@ private suspend fun PointerInputScope.awaitTrackpadGestureScope(
             }
 
             if (isTwoFinger) {
-                // One finger lifted during two-finger scroll → end scroll, treat remaining as single-finger
+                // One finger lifted during two-finger scroll → end scroll
                 if (pressed.size < 2) {
                     isTwoFinger = false
-                    // Reset lastX/lastY to current single finger so drag starts fresh
                     lastX = pressed.first().position.x
                     lastY = pressed.first().position.y
                 } else {
@@ -309,7 +307,7 @@ private suspend fun PointerInputScope.awaitTrackpadGestureScope(
             }
         }
 
-        // ── All pointers lifted → reset ──────────────────────────────────────
+        // ── Gesture ended → reset ────────────────────────────────────────────
         setTouching(false)
     }
 }
