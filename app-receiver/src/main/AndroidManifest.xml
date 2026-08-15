@@ -49,15 +49,6 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.InputBridgeReceiver">
 
-        <!-- Shizuku: privileged input injection via InputManager (1-5ms vs 10-30ms dispatchGesture) -->
-        <provider
-            android:name="rikka.shizuku.ShizukuProvider"
-            android:authorities="${applicationId}.shizuku"
-            android:multiprocess="false"
-            android:enabled="true"
-            android:exported="true"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
-
         <!--
             screenOrientation removed (was "portrait") — the receiver tablet supports both orientations.
             configChanges handles rotation without restarting the activity.

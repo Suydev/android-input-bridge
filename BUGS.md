@@ -1976,3 +1976,117 @@ and `init {}` block).
 **Fix**: Added `PacketSerializer.deserialize(data, length)` so the receive loop stops copying; shrank socket buffers to 64 KB; added `UdpTransport.sendDirect()` that calls `socket.send()` synchronously on the touch thread (no channel hop) and used it for mouse-move + cursor-goto; boosted send/receive loop threads to `THREAD_PRIORITY_URGENT_AUDIO`; handled `CursorGoto` inline in `AccessibilityCommandBus.post()` exactly like `MouseMove`.
 
 ---
+
+## BUG-105 — ShizukuInputInjector uses Thread.sleep() on Main thread, freezes UI
+
+**Description**: `longPress()` calls `Thread.sleep(600ms)` and `swipe()` calls `Thread.sleep(stepDelay)` in a loop. Both are called from `AccessibilityCommandBus.handleEvent()` on `Dispatchers.Main`, freezing the UI for the full duration.
+
+**Steps to reproduce**: Right-click via Shizuku → 600ms UI freeze. Scroll via Shizuku → ~200ms freeze per scroll.
+
+**Expected behavior**: UI remains responsive during gesture injection.
+**Actual behavior**: UI thread blocked for duration of gesture.
+
+**Suspected cause**: `Thread.sleep()` blocks the calling thread. `handleEvent()` runs on `Dispatchers.Main`.
+
+**Files involved**: `accessibility-receiver/src/main/kotlin/com/inputbridge/accessibility/ShizukuInputInjector.kt`
+
+**Priority**: High
+**Status**: ✅ FIXED (Session 032)
+**Fix**: Changed `longPress()` and `swipe()` to `suspend fun` using `kotlinx.coroutines.delay()`. Call sites wrap in `scope.launch(Dispatchers.IO)` to avoid blocking Main.
+
+---
+
+## BUG-106 — ShizukuInputInjector MotionEvent UP events use wrong downTime
+
+**Description**: `longPress()` and `swipe()` create ACTION_UP events with `downTime = upTime` instead of `downTime = now` (the original DOWN event time). Android's input system requires consistent `downTime` across all events in a gesture. Apps that validate gesture consistency may not recognize the long press or swipe.
+
+**Steps to reproduce**: Long press or scroll via Shizuku on apps that check gesture downTime consistency.
+
+**Expected behavior**: UP events share the same `downTime` as the DOWN event.
+**Actual behavior**: `downTime` changes to the UP event's creation time.
+
+**Suspected cause**: Copy-paste error in `MotionEvent.obtain()` first parameter.
+
+**Files involved**: `accessibility-receiver/src/main/kotlin/com/inputbridge/accessibility/ShizukuInputInjector.kt`
+
+**Priority**: High
+**Status**: ✅ FIXED (Session 032)
+**Fix**: Changed `MotionEvent.obtain(upTime, upTime, ...)` to `MotionEvent.obtain(now, upTime, ...)` so `downTime` is consistent.
+
+---
+
+## BUG-107 — ShizukuInputInjector uses reflection redundantly when Shizuku is a compile dependency
+
+**Description**: `ShizukuInputInjector` loads all Shizuku classes via `Class.forName()` reflection, but `accessibility-receiver/build.gradle.kts` already has `implementation(libs.shizuku.api)` and `implementation(libs.shizuku.provider)`. The reflection is redundant and makes the code harder to maintain.
+
+**Steps to reproduce**: Read `ShizukuInputInjector.kt` and `build.gradle.kts`.
+
+**Expected behavior**: Direct API calls when dependency is on classpath.
+**Actual behavior**: Unnecessary reflection wrappers around every Shizuku call.
+
+**Suspected cause**: Leftover from initial attempt to avoid compile-time dependency (which was later added).
+
+**Files involved**: `accessibility-receiver/src/main/kotlin/com/inputbridge/accessibility/ShizukuInputInjector.kt`
+
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 032)
+**Fix**: Replaced reflection with direct Shizuku API calls (`ShizukuBinderWrapper(binder)`, `Shizuku.pingBinder()`, `Shizuku.checkSelfPermission()`).
+
+---
+
+## BUG-108 — ShizukuProvider declared in app-receiver manifest but dependency is in accessibility-receiver
+
+**Description**: `app-receiver/src/main/AndroidManifest.xml` declares `ShizukuProvider`, but the Shizuku dependency is in `accessibility-receiver/build.gradle.kts`. Since `accessibility-receiver` uses `implementation` (not `api`), the class is not part of its public API. Manifest merger resolves this at build time, but it's architecturally incorrect.
+
+**Steps to reproduce**: Check manifests and build files.
+
+**Expected behavior**: Provider declared in the module that owns the dependency.
+**Actual behavior**: Provider declared in the consuming module.
+
+**Suspected cause**: Original implementation put the provider in app-receiver; dependency was later moved to accessibility-receiver.
+
+**Files involved**: `app-receiver/src/main/AndroidManifest.xml`, `accessibility-receiver/src/main/AndroidManifest.xml`
+
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 032)
+**Fix**: Moved `ShizukuProvider` declaration from `app-receiver` to `accessibility-receiver/src/main/AndroidManifest.xml`. Removed duplicate from app-receiver.
+
+---
+
+## BUG-109 — destroy() does not null all mutable fields in ShizukuInputInjector
+
+**Description**: `destroy()` nulls `inputManager` and `injectMethod` but leaves `shizukuBinderWrapperClass`, `systemServiceHelperClass`, and `shizukuClass` non-null. Inconsistent cleanup.
+
+**Steps to reproduce**: Call `init()` then `destroy()`.
+
+**Expected behavior**: All mutable state reset.
+**Actual behavior**: Three class references remain from previous init.
+
+**Suspected cause**: Incomplete cleanup implementation.
+
+**Files involved**: `accessibility-receiver/src/main/kotlin/com/inputbridge/accessibility/ShizukuInputInjector.kt`
+
+**Priority**: Low
+**Status**: ✅ FIXED (Session 032)
+**Fix**: Removed reflection fields entirely (direct API usage); `destroy()` now only nulls `inputManager` and `injectMethod`.
+
+---
+
+## BUG-110 — shizuku-compiler defined in version catalog but never used
+
+**Description**: `gradle/libs.versions.toml` defines `shizuku-compiler` library entry but no `build.gradle.kts` references it. Dead metadata.
+
+**Steps to reproduce**: `grep shizuku-compiler gradle/libs.versions.toml`
+
+**Expected behavior**: Only used dependencies in catalog.
+**Actual behavior**: Unused entry clutters the TOML.
+
+**Suspected cause**: Added speculatively during Shizuku integration.
+
+**Files involved**: `gradle/libs.versions.toml`
+
+**Priority**: Low
+**Status**: ✅ FIXED (Session 032)
+**Fix**: Removed `shizuku-compiler` entry from `libs.versions.toml`.
+
+---

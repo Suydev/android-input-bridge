@@ -2,6 +2,36 @@
 
 ---
 
+## Session 032 — Shizuku integration audit + bug fixes (BUG-105 → BUG-110)
+**Date:** 2026-08-15
+**Agent:** opencode
+**Status:** ✅ Complete
+
+### Goals
+- Re-add Shizuku input injection (1-5ms) after failed previous attempts
+- Audit the integration with a bias-free subagent
+- Fix all issues found
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|---|---|---|---|
+| BUG-105 | High | Thread.sleep() on Main thread freezes UI during longPress/scroll | Fixed |
+| BUG-106 | High | MotionEvent UP events use wrong downTime, gestures may not be recognized | Fixed |
+| BUG-107 | Medium | Redundant reflection when Shizuku is already a compile dependency | Fixed |
+| BUG-108 | Medium | ShizukuProvider in app-receiver manifest but dependency in accessibility-receiver | Fixed |
+| BUG-109 | Low | destroy() doesn't null all mutable fields | Fixed |
+| BUG-110 | Low | shizuku-compiler defined in TOML but unused | Fixed |
+
+### What Was Changed
+- `ShizukuInputInjector.kt`: Rewrote to use direct Shizuku API (no reflection), `suspend fun` for longPress/swipe with `kotlinx.coroutines.delay()`, fixed MotionEvent downTime
+- `AccessibilityCommandBus.kt`: Wrapped suspend calls in `scope.launch(Dispatchers.IO)` to avoid blocking Main
+- `accessibility-receiver/src/main/AndroidManifest.xml`: Added ShizukuProvider declaration
+- `app-receiver/src/main/AndroidManifest.xml`: Removed duplicate ShizukuProvider
+- `gradle/libs.versions.toml`: Removed unused shizuku-compiler entry
+- `BUGS.md`: Added BUG-105 through BUG-110
+
+---
+
 ## Session 031 — Full-screen trackpad mapping + lowest-latency sends + MOUSE button removal (BUG-103, BUG-104)
 **Date:** 2026-08-14
 **Agent:** opencode

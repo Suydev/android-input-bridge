@@ -298,7 +298,7 @@ object AccessibilityCommandBus {
                     }
                     MouseButton.RIGHT   -> {
                         if (ShizukuInputInjector.checkAvailability()) {
-                            ShizukuInputInjector.longPress(cursorX, cursorY)
+                            scope.launch(Dispatchers.IO) { ShizukuInputInjector.longPress(cursorX, cursorY) }
                         } else {
                             svc.longPress(cursorX, cursorY)
                         }
@@ -325,13 +325,15 @@ object AccessibilityCommandBus {
                     "→ swipe(${cursorX.toInt()},${cursorY.toInt()} → " +
                     "${(cursorX - scrollDx).toInt()},${(cursorY - scrollDy).toInt()})")
                 if (ShizukuInputInjector.checkAvailability()) {
-                    ShizukuInputInjector.swipe(
-                        x1 = cursorX,
-                        y1 = cursorY,
-                        x2 = (cursorX - scrollDx).coerceIn(0f, screenWidth - 1f),
-                        y2 = (cursorY - scrollDy).coerceIn(0f, screenHeight - 1f),
-                        durationMs = SCROLL_DURATION_MS,
-                    )
+                    scope.launch(Dispatchers.IO) {
+                        ShizukuInputInjector.swipe(
+                            x1 = cursorX,
+                            y1 = cursorY,
+                            x2 = (cursorX - scrollDx).coerceIn(0f, screenWidth - 1f),
+                            y2 = (cursorY - scrollDy).coerceIn(0f, screenHeight - 1f),
+                            durationMs = SCROLL_DURATION_MS,
+                        )
+                    }
                 } else {
                     svc.swipe(
                         x1 = cursorX,
