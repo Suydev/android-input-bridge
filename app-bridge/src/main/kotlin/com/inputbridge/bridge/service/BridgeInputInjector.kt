@@ -45,7 +45,18 @@ object BridgeInputInjector {
             PacketType.SPECIAL_ACTION -> {
                 PacketToEventConverter.toInputEvent(packet)
             }
-            else -> null
+            // Control packets — not handled by the reverse-trackpad injector
+            PacketType.PING,
+            PacketType.PONG,
+            PacketType.KEEP_ALIVE,
+            PacketType.PAIR_REQUEST,
+            PacketType.PAIR_RESPONSE,
+            PacketType.PAIR_CONFIRM,
+            PacketType.MODE_SWITCH,
+            PacketType.DISCONNECT,
+            PacketType.RECONNECT,
+            PacketType.ACK,
+            PacketType.ERROR -> null
         } ?: return false
 
         BridgeAccessibilityService.instance?.injectInputEvent(event)

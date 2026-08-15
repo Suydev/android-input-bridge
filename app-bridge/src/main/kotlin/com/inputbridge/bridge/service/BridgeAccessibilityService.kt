@@ -221,7 +221,12 @@ class BridgeAccessibilityService : AccessibilityService() {
                 dispatchSwipeGesture(centerX, startY, centerX, endY, 100L)
                 BridgeLogger.d(TAG, "Scroll dy=${event.dy}")
             }
-            else -> {
+            // Unsupported reverse-trackpad events (keyboard, text, navigation)
+            is InputEvent.KeyDown,
+            is InputEvent.KeyUp,
+            is InputEvent.TextInput,
+            is InputEvent.ModifierStateChanged,
+            is InputEvent.NavigationAction -> {
                 BridgeLogger.d(TAG, "Unsupported reverse event: ${event::class.simpleName}")
             }
         }

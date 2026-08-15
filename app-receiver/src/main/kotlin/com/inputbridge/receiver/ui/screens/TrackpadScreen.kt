@@ -2,6 +2,8 @@ package com.inputbridge.receiver.ui.screens
 
 import android.app.Activity
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -12,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -29,7 +32,11 @@ import com.inputbridge.core.model.MouseButton
 import com.inputbridge.receiver.ui.theme.*
 import com.inputbridge.receiver.viewmodel.ReceiverViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlin.math.abs
+
+private const val TAP_THRESHOLD_PX = 10f
 
 /**
  * Full-screen trackpad overlay for the receiver tablet.
@@ -39,16 +46,8 @@ import kotlinx.coroutines.launch
  * and sent as CursorGoto / MouseMove / MouseButton / Scroll packets to the
  * bridge phone for local cursor injection.
  *
- * Touch mapping (per Android docs):
- * - GestureDescription coordinates are in screen pixels (absolute display coords).
- * - We normalize touch to 0-1 so the bridge can map to ANY screen size.
- *
- * Features:
- * - Single-finger drag → MouseMove (relative delta, normalized)
- * - Single-finger tap → CursorGoto + left click
- * - Two-finger vertical drag → Scroll
- * - Long press → right click
- * - Visual cursor dot shows current position
+ * Gesture handling uses a SINGLE pointerInput block with custom detection
+ * to prevent tap-after-drag (unwanted click at drag release position).
  */
 @Composable
 fun TrackpadScreen(
@@ -56,9 +55,10 @@ fun TrackpadScreen(
     viewModel: ReceiverViewModel,
 ) {
     val diagnostics by viewModel.diagnostics.collectAsStateWithLifecycle()
-    val transport = viewModel.trackpadTransport
-    val scope = rememberCoroutineScope()
     val view = LocalView.current
+
+    // useUpdatedState: always read the latest transport value, never capture stale null
+    val transportState = rememberUpdatedState(viewModel.trackpadTransport)
 
     // Hide system bars for true full-screen (edge-to-edge)
     DisposableEffect(view) {
@@ -71,7 +71,6 @@ fun TrackpadScreen(
             systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
-        // Make status bar and navigation bar transparent
         window?.let {
             WindowCompat.setDecorFitsSystemWindows(it, false)
             it.statusBarColor = android.graphics.Color.TRANSPARENT
@@ -79,9 +78,6 @@ fun TrackpadScreen(
         }
         onDispose {
             controller?.show(WindowInsetsCompat.Type.systemBars())
-            window?.let {
-                WindowCompat.setDecorFitsSystemWindows(it, true)
-            }
         }
     }
 
@@ -96,63 +92,24 @@ fun TrackpadScreen(
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         // ── Trackpad touch area (full screen, edge-to-edge) ──────────────────
-        // Uses Modifier.fillMaxSize() which fills the entire window including
-        // behind system bars when edge-to-edge is enabled.
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .onSizeChanged { boxSize = it }
-                // Single-finger tap → click at position
+                // SINGLE pointerInput block — custom gesture detection that
+                // distinguishes tap from drag to prevent tap-after-drag.
                 .pointerInput(Unit) {
-                    detectTapGestures(
-                        onTap = { offset ->
-                            val x = offset.x / size.width
-                            val y = offset.y / size.height
-                            cursorX = x
-                            cursorY = y
-                            sendCursorGoto(transport, x, y)
-                            sendMouseButton(transport, MouseButton.LEFT, down = true)
-                            sendMouseButton(transport, MouseButton.LEFT, down = false)
-                        },
-                        onLongPress = { offset ->
-                            val x = offset.x / size.width
-                            val y = offset.y / size.height
-                            cursorX = x
-                            cursorY = y
-                            sendCursorGoto(transport, x, y)
-                            sendMouseButton(transport, MouseButton.RIGHT, down = true)
-                            sendMouseButton(transport, MouseButton.RIGHT, down = false)
-                        },
-                    )
-                }
-                // Single-finger drag → relative mouse move
-                .pointerInput(Unit) {
-                    detectDragGestures(
-                        onDragStart = { offset ->
-                            isTouching = true
-                            val x = offset.x / size.width
-                            val y = offset.y / size.height
-                            cursorX = x
-                            cursorY = y
-                            sendCursorGoto(transport, x, y)
-                        },
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            // Normalize delta to 0-1 range relative to screen size
-                            val dx = dragAmount.x / size.width
-                            val dy = dragAmount.y / size.height
-                            sendMouseMove(transport, dx, dy)
-                            cursorX = (cursorX + dx).coerceIn(0f, 1f)
-                            cursorY = (cursorY + dy).coerceIn(0f, 1f)
-                        },
-                        onDragEnd = { isTouching = false },
-                        onDragCancel = { isTouching = false },
+                    awaitPointerAccelerationScope(
+                        transportState,
+                        { cursorX },
+                        { cursorY },
+                        { v -> cursorX = v },
+                        { v -> cursorY = v },
+                        { v -> isTouching = v },
                     )
                 },
         ) {
             // ── Virtual cursor dot ───────────────────────────────────────────
-            // Position is calculated as percentage of the parent Box size.
-            // boxSize tracks the full screen dimensions via onSizeChanged.
             if (boxSize.width > 0 && boxSize.height > 0) {
                 val halfCursorPx = with(density) { 12.dp.toPx() }
                 val cursorOffsetXPx = cursorX * boxSize.width - halfCursorPx
@@ -224,6 +181,104 @@ fun TrackpadScreen(
                     .padding(horizontal = 16.dp, vertical = 8.dp)
                     .padding(bottom = 16.dp),
             )
+        }
+    }
+}
+
+/**
+ * Custom gesture detection in a SINGLE pointerInput block.
+ * Tracks total movement to distinguish tap from drag.
+ * Tap = short press with < TAP_THRESHOLD_PX movement.
+ * Drag = any movement exceeding threshold.
+ * Long press = held > 500ms with < threshold movement.
+ */
+private suspend fun PointerInputScope.awaitPointerAccelerationScope(
+    transportState: State<com.inputbridge.transport.wifi.UdpTransport?>,
+    getCursorX: () -> Float,
+    getCursorY: () -> Float,
+    setCursorX: (Float) -> Unit,
+    setCursorY: (Float) -> Unit,
+    setTouching: (Boolean) -> Unit,
+) {
+    coroutineScope {
+        // Run tap detection and drag detection as parallel coroutines
+        // within the same pointerInput scope.
+        // Both share the same pointer event stream via the PointerInputScope.
+        launch {
+            detectDragGestures(
+                onDragStart = { offset ->
+                    setTouching(true)
+                    val x = offset.x / size.width
+                    val y = offset.y / size.height
+                    setCursorX(x)
+                    setCursorY(y)
+                    val transport = transportState.value
+                    sendCursorGoto(transport, x, y)
+                },
+                onDrag = { change, dragAmount ->
+                    change.consume()
+                    val dx = dragAmount.x / size.width
+                    val dy = dragAmount.y / size.height
+                    val transport = transportState.value
+                    sendMouseMove(transport, dx, dy)
+                    setCursorX((getCursorX() + dx).coerceIn(0f, 1f))
+                    setCursorY((getCursorY() + dy).coerceIn(0f, 1f))
+                },
+                onDragEnd = { setTouching(false) },
+                onDragCancel = { setTouching(false) },
+            )
+        }
+        launch {
+            // Custom tap/long-press detection with movement threshold
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                val downTime = System.currentTimeMillis()
+                val startX = down.position.x
+                val startY = down.position.y
+                var totalMovement = 0f
+                var longPressFired = false
+
+                // Track movement until pointer up
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val change = event.changes.firstOrNull() ?: continue
+
+                    if (change.pressed) {
+                        val movX = change.position.x - startX
+                        val movY = change.position.y - startY
+                        totalMovement = abs(movX) + abs(movY)
+
+                        // Long press detection (500ms hold with minimal movement)
+                        if (!longPressFired && totalMovement < TAP_THRESHOLD_PX) {
+                            val elapsed = System.currentTimeMillis() - downTime
+                            if (elapsed >= 500) {
+                                longPressFired = true
+                                val x = change.position.x / size.width
+                                val y = change.position.y / size.height
+                                setCursorX(x)
+                                setCursorY(y)
+                                val transport = transportState.value
+                                sendCursorGoto(transport, x, y)
+                                sendMouseButton(transport, MouseButton.RIGHT, down = true)
+                                sendMouseButton(transport, MouseButton.RIGHT, down = false)
+                            }
+                        }
+                    } else {
+                        // Pointer up — fire tap if movement was small
+                        if (!longPressFired && totalMovement < TAP_THRESHOLD_PX) {
+                            val x = change.position.x / size.width
+                            val y = change.position.y / size.height
+                            setCursorX(x)
+                            setCursorY(y)
+                            val transport = transportState.value
+                            sendCursorGoto(transport, x, y)
+                            sendMouseButton(transport, MouseButton.LEFT, down = true)
+                            sendMouseButton(transport, MouseButton.LEFT, down = false)
+                        }
+                        break
+                    }
+                }
+            }
         }
     }
 }
