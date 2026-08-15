@@ -25,7 +25,7 @@ private const val TAG = "ShizukuInputInjector"
 @RequiresApi(Build.VERSION_CODES.N)
 object ShizukuInputInjector {
 
-    private var inputManager: android.hardware.input.IInputManager? = null
+    private var inputManager: Any? = null
     private var injectMethod: java.lang.reflect.Method? = null
 
     @Volatile
@@ -45,7 +45,7 @@ object ShizukuInputInjector {
 
             inputManager = Class.forName("android.hardware.input.IInputManager\$Stub")
                 .getMethod("asInterface", android.os.IBinder::class.java)
-                .invoke(null, wrappedBinder) as android.hardware.input.IInputManager
+                .invoke(null, wrappedBinder)
 
             injectMethod = inputManager!!::class.java.getMethod(
                 "injectInputEvent",
