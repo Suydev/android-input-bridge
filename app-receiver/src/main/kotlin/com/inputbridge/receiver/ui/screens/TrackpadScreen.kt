@@ -23,7 +23,9 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.inputbridge.core.model.InputEvent
+import com.inputbridge.core.model.MouseButton
 import com.inputbridge.receiver.ui.theme.*
 import com.inputbridge.receiver.viewmodel.ReceiverViewModel
 import kotlinx.coroutines.Dispatchers
@@ -109,8 +111,8 @@ fun TrackpadScreen(
                             cursorX = x
                             cursorY = y
                             sendCursorGoto(transport, x, y)
-                            sendMouseButton(transport, button = 0, down = true)
-                            sendMouseButton(transport, button = 0, down = false)
+                            sendMouseButton(transport, MouseButton.LEFT, down = true)
+                            sendMouseButton(transport, MouseButton.LEFT, down = false)
                         },
                         onLongPress = { offset ->
                             val x = offset.x / size.width
@@ -118,8 +120,8 @@ fun TrackpadScreen(
                             cursorX = x
                             cursorY = y
                             sendCursorGoto(transport, x, y)
-                            sendMouseButton(transport, button = 1, down = true)
-                            sendMouseButton(transport, button = 1, down = false)
+                            sendMouseButton(transport, MouseButton.RIGHT, down = true)
+                            sendMouseButton(transport, MouseButton.RIGHT, down = false)
                         },
                     )
                 }
@@ -152,15 +154,14 @@ fun TrackpadScreen(
             // Position is calculated as percentage of the parent Box size.
             // boxSize tracks the full screen dimensions via onSizeChanged.
             if (boxSize.width > 0 && boxSize.height > 0) {
+                val halfCursorPx = with(density) { 12.dp.toPx() }
+                val cursorOffsetXPx = cursorX * boxSize.width - halfCursorPx
+                val cursorOffsetYPx = cursorY * boxSize.height - halfCursorPx
                 Box(
                     modifier = Modifier
                         .offset(
-                            x = with(density) {
-                                (cursorX * boxSize.width - 12.dp).toDp()
-                            },
-                            y = with(density) {
-                                (cursorY * boxSize.height - 12.dp).toDp()
-                            },
+                            x = with(density) { cursorOffsetXPx.toDp() },
+                            y = with(density) { cursorOffsetYPx.toDp() },
                         )
                         .size(24.dp)
                         .background(
@@ -254,7 +255,7 @@ private fun sendMouseMove(
 
 private fun sendMouseButton(
     transport: com.inputbridge.transport.wifi.UdpTransport?,
-    button: Int, down: Boolean,
+    button: MouseButton, down: Boolean,
 ) {
     val event = if (down) InputEvent.MouseButtonDown(button)
     else InputEvent.MouseButtonUp(button)

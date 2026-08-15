@@ -16,6 +16,7 @@ import com.inputbridge.core.config.TransportConfig
 import com.inputbridge.core.logging.BridgeLogger
 import com.inputbridge.core.model.InputEvent
 import com.inputbridge.core.model.ModifierState
+import com.inputbridge.core.model.MouseButton
 import com.inputbridge.protocol.EventPacketFactory
 import com.inputbridge.transport.wifi.UdpTransport
 import kotlinx.coroutines.*
@@ -202,7 +203,7 @@ class BridgeAccessibilityService : AccessibilityService() {
                 // Click at current virtual cursor position
                 val x = (cursorX * screenWidth).coerceIn(0f, screenWidth.toFloat())
                 val y = (cursorY * screenHeight).coerceIn(0f, screenHeight.toFloat())
-                if (event.button == 0) {
+                if (event.button == MouseButton.LEFT) {
                     dispatchTapGesture(x, y)
                 } else {
                     dispatchLongPressGesture(x, y)
