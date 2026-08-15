@@ -1,11 +1,10 @@
 package com.inputbridge.accessibility
 
 import android.os.Build
-import android.view.KeyEvent
-import androidx.annotation.RequiresApi
 import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.MotionEvent
+import androidx.annotation.RequiresApi
 import com.inputbridge.core.logging.BridgeLogger
 import com.inputbridge.core.model.*
 import com.inputbridge.diagnostics.DiagnosticsManager
