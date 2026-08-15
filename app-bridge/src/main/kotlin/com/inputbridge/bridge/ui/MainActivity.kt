@@ -93,7 +93,14 @@ class MainActivity : ComponentActivity() {
                         BridgeScreen(
                             onSettings    = { navController.navigate(BridgeRoute.SETTINGS) },
                             onDiagnostics = { navController.navigate(BridgeRoute.DIAGNOSTICS) },
+                            onMouse       = { navController.navigate(BridgeRoute.TRACKPAD) },
                             viewModel     = viewModel,
+                        )
+                    }
+                    composable(BridgeRoute.TRACKPAD) {
+                        BridgeTrackpadScreen(
+                            onBack = { navController.popBackStack() },
+                            prefs = prefs,
                         )
                     }
                     composable(BridgeRoute.SETTINGS) {
@@ -219,4 +226,5 @@ object BridgeRoute {
     const val DIAGNOSTICS = "diagnostics"
     const val PERMISSIONS = "permissions"
     const val ABOUT       = "about"
+    const val TRACKPAD    = "trackpad"
 }

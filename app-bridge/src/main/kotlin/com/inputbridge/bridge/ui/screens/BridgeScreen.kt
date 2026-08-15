@@ -37,6 +37,7 @@ import com.inputbridge.bridge.viewmodel.BridgeViewModel
 fun BridgeScreen(
     onDiagnostics: () -> Unit,
     onSettings: () -> Unit,
+    onMouse: () -> Unit,
     viewModel: BridgeViewModel,
 ) {
     val diagnostics    by viewModel.diagnostics.collectAsStateWithLifecycle()
@@ -159,7 +160,7 @@ fun BridgeScreen(
 
         // ── Start button (outlined, terminal-style) ───────────────────────────
         // UX FIX: replaced solid bright-green Button with OutlinedButton.
-        // The solid bright-green was visually inconsistent with the dark terminal theme.
+        // The solid bright-green button was visually inconsistent with the dark terminal theme.
         if (!isBridgeActive) {
             OutlinedButton(
                 onClick = { viewModel.startBridge() },
@@ -176,6 +177,26 @@ fun BridgeScreen(
                     letterSpacing = 3.sp,
                 )
             }
+        }
+
+        // ── MOUSE button (open trackpad when bridge is active) ──────────────
+        if (isBridgeActive) {
+            OutlinedButton(
+                onClick = onMouse,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 80.dp)
+                    .fillMaxWidth(0.5f),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = BridgePrimary),
+                border = BorderStroke(1.dp, BridgePrimary.copy(alpha = 0.8f)),
+            ) {
+                Text(
+                    "MOUSE",
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 3.sp,
+                )
+            }
+        }
         }
 
         // STOP (text button, always red, only shown when active)
