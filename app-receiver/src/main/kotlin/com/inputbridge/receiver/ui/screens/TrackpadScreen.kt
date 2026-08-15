@@ -2,7 +2,6 @@ package com.inputbridge.receiver.ui.screens
 
 import android.app.Activity
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
@@ -20,7 +19,6 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -34,22 +32,23 @@ import com.inputbridge.core.model.MouseButton
 import com.inputbridge.receiver.ui.theme.*
 import com.inputbridge.receiver.viewmodel.ReceiverViewModel
 import kotlin.math.abs
+import kotlin.math.sqrt
 
 private const val TAP_THRESHOLD_PX = 10f
 private const val SCROLL_MULTIPLIER = 3f
+private const val LONG_PRESS_MS = 500L
 
 /**
- * Full-screen trackpad overlay for the receiver tablet.
+ * Full-screen trackpad overlay — pure gesture surface, no on-screen buttons.
  *
- * Covers the ENTIRE screen (edge-to-edge, behind system bars) on any device.
- * Touch coordinates are normalized to 0-1 for cross-device compatibility.
+ * Modeled after btmouse (BLE HID mouse emulator):
+ * - Single-finger drag → relative cursor movement (MouseMove deltas)
+ * - Single-finger tap → left click
+ * - Long press (hold still) → right click
+ * - Two-finger vertical drag → scroll
  *
- * Gestures:
- * - Single-finger drag → MouseMove (cursor movement)
- * - Single-finger tap → Left click
- * - Long press → Right click
- * - Two-finger vertical drag → Scroll
- * - Middle-click button → Middle click (three-finger tap alternative)
+ * No CursorGoto — movement is purely delta-based like a physical trackpad.
+ * The AccessibilityCommandBus tracks cursor position internally.
  */
 @Composable
 fun TrackpadScreen(
@@ -120,28 +119,6 @@ fun TrackpadScreen(
             }
         }
 
-        // ── Middle-click button (floating, bottom-right) ─────────────────────
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 20.dp, bottom = 80.dp)
-                .size(48.dp)
-                .background(ReceiverSurface.copy(alpha = 0.8f), CircleShape)
-                .clickable {
-                    AccessibilityCommandBus.post(InputEvent.MouseButtonDown(MouseButton.MIDDLE))
-                    AccessibilityCommandBus.post(InputEvent.MouseButtonUp(MouseButton.MIDDLE))
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                "M",
-                color = ReceiverDim,
-                fontSize = 14.sp,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-            )
-        }
-
         // ── Top bar (auto-hides) ─────────────────────────────────────────────
         var showBar by remember { mutableStateOf(true) }
         LaunchedEffect(isTouching) {
@@ -184,8 +161,7 @@ fun TrackpadScreen(
         // ── Bottom hint (auto-hides) ─────────────────────────────────────────
         if (showBar) {
             Text(
-                "1 finger: move · Tap: click · Hold: right click\n" +
-                "2 fingers: scroll · M button: middle click",
+                "1 finger: move · Tap: click · Hold: right click\n2 fingers: scroll",
                 color = ReceiverDim.copy(alpha = 0.5f),
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace,
@@ -201,15 +177,16 @@ fun TrackpadScreen(
 }
 
 /**
- * Single-coroutine gesture detection for the trackpad.
+ * Single-coroutine gesture detection — delta-based trackpad (btmouse style).
  *
- * State machine (no concurrent detectors):
- *   IDLE → pointer-down → COOLDOWN
- *   COOLDOWN + move > TAP_THRESHOLD → DRAGGING
- *   COOLDOWN + hold ≥ 500ms (no movement) → LONG_PRESS → COOLDOWN
- *   COOLDOWN + pointer-up (no movement) → TAP → IDLE
- *   DRAGGING + pointer-up → IDLE
- *   SCROLLING + all-pointers-up → IDLE
+ * No CursorGoto. Movement is purely relative (MouseMove deltas).
+ * The AccessibilityCommandBus tracks cursor position internally.
+ *
+ * Gestures:
+ *   Single-finger drag → MouseMove(dx, dy) — relative cursor movement
+ *   Single-finger tap (no movement) → MouseDown/Up(LEFT) — left click
+ *   Long press (hold still ≥ 500ms) → MouseDown/Up(RIGHT) — right click
+ *   Two-finger vertical drag → Scroll(0, dy) — scroll wheel
  */
 private suspend fun PointerInputScope.awaitTrackpadGestureScope(
     getCursorX: () -> Float,
@@ -219,7 +196,6 @@ private suspend fun PointerInputScope.awaitTrackpadGestureScope(
     setTouching: (Boolean) -> Unit,
 ) {
     awaitEachGesture {
-        // ── Wait for pointer-down ────────────────────────────────────────────
         val down = awaitFirstDown(requireUnconsumed = false)
         setTouching(true)
         val downX = down.position.x
@@ -232,19 +208,11 @@ private suspend fun PointerInputScope.awaitTrackpadGestureScope(
         var isTwoFinger = false
         var lastTwoFingerY = 0f
 
-        // ── Pointer-down: set cursor to touch position ───────────────────────
-        val cx = (downX / size.width).coerceIn(0f, 1f)
-        val cy = (downY / size.height).coerceIn(0f, 1f)
-        setCursorX(cx)
-        setCursorY(cy)
-        AccessibilityCommandBus.post(InputEvent.CursorGoto(cx, cy))
-
-        // ── Process events until all pointers lift ────────────────────────────
         while (true) {
             val event = awaitPointerEvent()
             val pressed = event.changes.filter { it.pressed }
 
-            // All pointers lifted → exit (awaitEachGesture restarts on next touch)
+            // All pointers lifted
             if (pressed.isEmpty()) {
                 // Tap: no movement, no long-press → left click
                 if (!longPressFired && !isTwoFinger && totalMovement < TAP_THRESHOLD_PX) {
@@ -254,20 +222,19 @@ private suspend fun PointerInputScope.awaitTrackpadGestureScope(
                 break
             }
 
-            // ── Two-finger detection ─────────────────────────────────────────
+            // ── Two-finger scroll ────────────────────────────────────────────
             if (pressed.size >= 2 && !isTwoFinger) {
                 isTwoFinger = true
                 lastTwoFingerY = (pressed[0].position.y + pressed[1].position.y) / 2f
             }
 
             if (isTwoFinger) {
-                // One finger lifted during two-finger scroll → end scroll
                 if (pressed.size < 2) {
+                    // One finger lifted → end scroll, single finger continues
                     isTwoFinger = false
                     lastX = pressed.first().position.x
                     lastY = pressed.first().position.y
                 } else {
-                    // Two-finger scroll
                     val avgY = (pressed[0].position.y + pressed[1].position.y) / 2f
                     val scrollDy = (avgY - lastTwoFingerY) / size.height * SCROLL_MULTIPLIER
                     if (abs(scrollDy) > 0.001f) {
@@ -279,27 +246,28 @@ private suspend fun PointerInputScope.awaitTrackpadGestureScope(
                 }
             }
 
-            // ── Single-finger: track movement ────────────────────────────────
+            // ── Single-finger movement ───────────────────────────────────────
             val change = pressed.first()
-            val movX = change.position.x - downX
-            val movY = change.position.y - downY
-            totalMovement = abs(movX) + abs(movY)
+            val dx = change.position.x - lastX
+            val dy = change.position.y - lastY
+            val movement = sqrt(dx * dx + dy * dy)
+            totalMovement += abs(dx) + abs(dy)
 
-            if (totalMovement >= TAP_THRESHOLD_PX && !longPressFired) {
-                // Crossed threshold → drag mode: send incremental MouseMove
-                val dx = (change.position.x - lastX) / size.width
-                val dy = (change.position.y - lastY) / size.height
-                if (dx != 0f || dy != 0f) {
-                    AccessibilityCommandBus.post(InputEvent.MouseMove(dx, dy))
-                    setCursorX((getCursorX() + dx).coerceIn(0f, 1f))
-                    setCursorY((getCursorY() + dy).coerceIn(0f, 1f))
-                }
+            if (movement > 0.5f) {
+                // Normalize deltas to 0-1 range relative to screen size
+                val ndx = dx / size.width
+                val ndy = dy / size.height
+                AccessibilityCommandBus.post(InputEvent.MouseMove(ndx, ndy))
+                setCursorX((getCursorX() + ndx).coerceIn(0f, 1f))
+                setCursorY((getCursorY() + ndy).coerceIn(0f, 1f))
                 lastX = change.position.x
                 lastY = change.position.y
-            } else if (!longPressFired) {
-                // Still within threshold → check for long-press
+            }
+
+            // Long-press detection (hold still ≥ 500ms)
+            if (!longPressFired && totalMovement < TAP_THRESHOLD_PX) {
                 val elapsed = System.currentTimeMillis() - downTime
-                if (elapsed >= 500) {
+                if (elapsed >= LONG_PRESS_MS) {
                     longPressFired = true
                     AccessibilityCommandBus.post(InputEvent.MouseButtonDown(MouseButton.RIGHT))
                     AccessibilityCommandBus.post(InputEvent.MouseButtonUp(MouseButton.RIGHT))
@@ -307,9 +275,6 @@ private suspend fun PointerInputScope.awaitTrackpadGestureScope(
             }
         }
 
-        // ── Gesture ended → reset ────────────────────────────────────────────
         setTouching(false)
     }
 }
-
-
