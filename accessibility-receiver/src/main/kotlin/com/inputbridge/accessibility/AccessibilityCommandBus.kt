@@ -130,6 +130,7 @@ object AccessibilityCommandBus {
 
         // Initialize Shizuku input injection if available (1-5ms vs 10-30ms dispatchGesture)
         try {
+            ShizukuInputInjector.registerListeners()
             ShizukuInputInjector.init()
             if (ShizukuInputInjector.isAvailable) {
                 BridgeLogger.i(TAG, "Shizuku available — using InputManager (1-5ms)")

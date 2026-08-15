@@ -25,12 +25,26 @@ private const val TAG = "ShizukuInputInjector"
 @RequiresApi(Build.VERSION_CODES.N)
 object ShizukuInputInjector {
 
-    private var inputManager: Any? = null
-    private var injectMethod: java.lang.reflect.Method? = null
+    @Volatile private var inputManager: Any? = null
+    @Volatile private var injectMethod: java.lang.reflect.Method? = null
 
     @Volatile
     var isAvailable = false
         private set
+
+    private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
+        BridgeLogger.i(TAG, "Shizuku binder received — re-initializing")
+        init()
+    }
+
+    private val binderDeadListener = Shizuku.OnBinderDeadListener {
+        BridgeLogger.w(TAG, "Shizuku binder died — invalidating")
+        isAvailable = false
+        inputManager = null
+        injectMethod = null
+    }
+
+    private var listenersRegistered = false
 
     /**
      * Initialize Shizuku input injection.
@@ -59,6 +73,34 @@ object ShizukuInputInjector {
             BridgeLogger.d(TAG, "Shizuku not available: ${t.message}")
             isAvailable = false
         }
+    }
+
+    /**
+     * Register Shizuku binder lifecycle listeners.
+     * Call once from Application.onCreate() or AccessibilityService.onCreate().
+     */
+    fun registerListeners() {
+        if (listenersRegistered) return
+        try {
+            Shizuku.addBinderReceivedListenerSticky(binderReceivedListener)
+            Shizuku.addBinderDeadListener(binderDeadListener)
+            listenersRegistered = true
+            BridgeLogger.i(TAG, "Shizuku lifecycle listeners registered")
+        } catch (t: Throwable) {
+            BridgeLogger.d(TAG, "Failed to register Shizuku listeners: ${t.message}")
+        }
+    }
+
+    /**
+     * Unregister Shizuku binder lifecycle listeners.
+     */
+    fun unregisterListeners() {
+        if (!listenersRegistered) return
+        try {
+            Shizuku.removeBinderReceivedListener(binderReceivedListener)
+            Shizuku.removeBinderDeadListener(binderDeadListener)
+            listenersRegistered = false
+        } catch (_: Throwable) { }
     }
 
     /**
@@ -96,13 +138,16 @@ object ShizukuInputInjector {
      * Sends ACTION_DOWN followed by ACTION_UP.
      */
     fun tap(x: Float, y: Float): Boolean {
-        val now = SystemClock.uptimeMillis()
-        val downEvent = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, x, y, 0)
-        val upEvent = MotionEvent.obtain(now, now, MotionEvent.ACTION_UP, x, y, 0)
-        val result = injectInputEvent(downEvent) && injectInputEvent(upEvent)
+        val downTime = SystemClock.uptimeMillis()
+        val downEvent = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, x, y, 0)
+        val result = injectInputEvent(downEvent)
         downEvent.recycle()
+
+        val upTime = SystemClock.uptimeMillis()
+        val upEvent = MotionEvent.obtain(downTime, upTime, MotionEvent.ACTION_UP, x, y, 0)
+        val upResult = injectInputEvent(upEvent)
         upEvent.recycle()
-        return result
+        return result && upResult
     }
 
     /**
@@ -110,15 +155,15 @@ object ShizukuInputInjector {
      * Sends ACTION_DOWN, waits [durationMs], then sends ACTION_UP.
      */
     suspend fun longPress(x: Float, y: Float, durationMs: Long = 600L): Boolean {
-        val now = SystemClock.uptimeMillis()
-        val downEvent = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, x, y, 0)
+        val downTime = SystemClock.uptimeMillis()
+        val downEvent = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, x, y, 0)
         val result = injectInputEvent(downEvent)
         downEvent.recycle()
 
         kotlinx.coroutines.delay(durationMs)
 
         val upTime = SystemClock.uptimeMillis()
-        val upEvent = MotionEvent.obtain(now, upTime, MotionEvent.ACTION_UP, x, y, 0)
+        val upEvent = MotionEvent.obtain(downTime, upTime, MotionEvent.ACTION_UP, x, y, 0)
         val upResult = injectInputEvent(upEvent)
         upEvent.recycle()
         return result && upResult
@@ -129,11 +174,11 @@ object ShizukuInputInjector {
      * Sends ACTION_DOWN, multiple MOVE events, then ACTION_UP.
      */
     suspend fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long = 200L): Boolean {
-        val now = SystemClock.uptimeMillis()
+        val downTime = SystemClock.uptimeMillis()
         val steps = (durationMs / 8).coerceAtLeast(2)
         val stepDelay = durationMs / steps
 
-        val downEvent = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, x1, y1, 0)
+        val downEvent = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, x1, y1, 0)
         val result = injectInputEvent(downEvent)
         downEvent.recycle()
 
@@ -141,15 +186,15 @@ object ShizukuInputInjector {
             val progress = i.toFloat() / steps
             val x = x1 + (x2 - x1) * progress
             val y = y1 + (y2 - y1) * progress
-            val moveTime = now + stepDelay * i
-            val moveEvent = MotionEvent.obtain(now, moveTime, MotionEvent.ACTION_MOVE, x, y, 0)
+            val moveTime = downTime + stepDelay * i
+            val moveEvent = MotionEvent.obtain(downTime, moveTime, MotionEvent.ACTION_MOVE, x, y, 0)
             injectInputEvent(moveEvent)
             moveEvent.recycle()
             kotlinx.coroutines.delay(stepDelay)
         }
 
         val upTime = SystemClock.uptimeMillis()
-        val upEvent = MotionEvent.obtain(now, upTime, MotionEvent.ACTION_UP, x2, y2, 0)
+        val upEvent = MotionEvent.obtain(downTime, upTime, MotionEvent.ACTION_UP, x2, y2, 0)
         val upResult = injectInputEvent(upEvent)
         upEvent.recycle()
         return result && upResult
@@ -166,6 +211,7 @@ object ShizukuInputInjector {
      * Clean up resources.
      */
     fun destroy() {
+        unregisterListeners()
         inputManager = null
         injectMethod = null
         isAvailable = false
