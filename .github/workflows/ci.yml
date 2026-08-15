@@ -39,7 +39,7 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Build Debug APKs
-        run: ./gradlew :app-bridge:assembleDebug :app-receiver:assembleDebug --stacktrace
+        run: ./gradlew :app-bridge:assembleDebug :app-receiver:assembleDebug --stacktrace --no-configuration-cache
 
       - name: Upload Bridge APK
         uses: actions/upload-artifact@v4
@@ -136,7 +136,7 @@ jobs:
           SIGNING_KEY_ALIAS: inputbridge
           SIGNING_KEY_PASSWORD: inputbridge123
           SIGNING_STORE_PASSWORD: inputbridge123
-        run: ./gradlew :app-bridge:assembleRelease :app-receiver:assembleRelease --stacktrace
+        run: ./gradlew :app-bridge:assembleRelease :app-receiver:assembleRelease --stacktrace --no-configuration-cache
 
       - name: Upload Release APKs
         uses: actions/upload-artifact@v4
