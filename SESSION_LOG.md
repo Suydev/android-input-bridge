@@ -18,7 +18,7 @@
 | BUG-105 | High | Thread.sleep() on Main thread freezes UI during longPress/scroll | Fixed |
 | BUG-106 | High | MotionEvent UP events use wrong downTime, gestures may not be recognized | Fixed |
 | BUG-107 | Medium | Redundant reflection when Shizuku is already a compile dependency | Fixed |
-| BUG-108 | Medium | ShizukuProvider in app-receiver manifest but dependency in accessibility-receiver | Fixed |
+| BUG-108 | Medium | ShizukuProvider in app-receiver manifest but dependency in accessibility-receiver | WONTFIX (library can't declare application) |
 | BUG-109 | Low | destroy() doesn't null all mutable fields | Fixed |
 | BUG-110 | Low | shizuku-compiler defined in TOML but unused | Fixed |
 

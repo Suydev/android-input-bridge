@@ -2048,8 +2048,8 @@ and `init {}` block).
 **Files involved**: `app-receiver/src/main/AndroidManifest.xml`, `accessibility-receiver/src/main/AndroidManifest.xml`
 
 **Priority**: Medium
-**Status**: ✅ FIXED (Session 032)
-**Fix**: Moved `ShizukuProvider` declaration from `app-receiver` to `accessibility-receiver/src/main/AndroidManifest.xml`. Removed duplicate from app-receiver.
+**Status**: ⚠️ WONTFIX (Session 032) — Library modules cannot declare `<application>` in manifest; ShizukuProvider must stay in app-receiver.
+**Fix**: N/A — architectural constraint, not a bug.
 
 ---
 
