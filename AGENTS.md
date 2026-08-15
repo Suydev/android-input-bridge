@@ -231,7 +231,14 @@ Each one has caused at least one bug when violated. Treat them as axiomatic.
 - Adding any key to one REQUIRES adding it to the other in the same commit
 - There is no automated test for this symmetry — it must be reviewed manually
 
-### 4.7 Feature Flags
+### 4.8 Shizuku Input Injection
+- **Shizuku** provides `InputManager.injectInputEvent()` via shell (UID 2000) privileges
+- Latency: **1-5ms** vs **10-30ms** for `AccessibilityService.dispatchGesture()`
+- Required on RECEIVER tablet (OnePlus Pad Go), NOT on bridge phone
+- Installed via: GitHub release (https://github.com/RikkaApps/Shizuku/releases/)
+- On Android 11+: Shizuku can auto-start from wireless debugging settings (no computer needed)
+- ShizukuProvider must be declared in receiver's AndroidManifest.xml with `android:permission="android.permission.INTERACT_ACROSS_USERS_FULL"`
+- Falls back to `dispatchGesture()` when Shizuku is unavailable (permission not granted, app not installed)
 - `FeatureFlags.WIFI_DIRECT_ENABLED` — must stay `false`; `WifiDirectTransport` is a stub
 - Do not add any code path that enables this without a full transport implementation
 

@@ -29,6 +29,10 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.datastore.preferences)
 
+    // Shizuku: privileged input injection via InputManager (1-5ms vs 10-30ms dispatchGesture)
+    implementation(libs.shizuku.api)
+    implementation(libs.shizuku.provider)
+
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
