@@ -19,10 +19,6 @@ koinCompose = "3.5.6"
 mockk = "1.13.11"
 material = "1.12.0"
 
-# Shizuku (privileged input injection without root)
-# Shizuku uses JitPack; use the official GitHub release coordinates
-shizuku = "13.6.0"
-
 [libraries]
 # AndroidX Core
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
