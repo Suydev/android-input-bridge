@@ -6,7 +6,11 @@ import android.bluetooth.BluetoothHidDevice
 import android.bluetooth.BluetoothHidDeviceAppSdpSettings
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
 import com.inputbridge.core.config.FeatureFlags
 import com.inputbridge.core.logging.BridgeLogger
 import com.inputbridge.core.model.InputEvent
@@ -15,11 +19,17 @@ import com.inputbridge.protocol.Packet
 import com.inputbridge.transport.wifi.ConnectionState
 import com.inputbridge.transport.wifi.Transport
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.Executors
 
@@ -27,6 +37,8 @@ private const val TAG = "BluetoothHidTransport"
 
 private const val REGISTER_TIMEOUT_MS = 10_000L
 private const val CONNECT_TIMEOUT_MS  = 15_000L
+private const val RECONNECT_DELAY_MS  = 2_000L
+private const val RECONNECT_MAX_ATTEMPTS = 5
 
 /**
  * Bluetooth HID Device transport — Phase 6.
@@ -36,25 +48,11 @@ private const val CONNECT_TIMEOUT_MS  = 15_000L
  * receives a real hardware-level cursor and keyboard — no root, no ADB,
  * no receiver app required on the host side.
  *
- * Prerequisites on the host:
- *   1. Pair the host device with the bridge phone via Bluetooth Settings.
- *   2. Optionally note the host's BT MAC address and enter it in Settings
- *      so the bridge initiates the connection rather than waiting.
- *
- * Generic design — works with ANY Bluetooth host, not just the OnePlus Pad Go.
- * Works with any USB HID keyboard/mouse combo as input source (not just
- * the Portronics Key2 Combo). All device-specific details live in Settings.
- *
- * Architecture:
- *   UsbInputCapture → InputEvent
- *         ↓
- *   HidReportBuilder.on*(event) → ByteArray (HID report)
- *         ↓
- *   BluetoothHidDevice.sendReport(host, reportId, data)
- *
- * Fallback: if the phone's Bluetooth stack does not support the HID Device
- * role (rare but possible on some vendor ROMs), [connect] returns false and
- * BridgeService falls back to UDP transport automatically.
+ * Improvements over original:
+ * - BroadcastReceiver for BT lifecycle events (adapter state, ACL disconnect)
+ * - Automatic reconnection on BT drop (up to RECONNECT_MAX_ATTEMPTS)
+ * - Re-acquire HID profile proxy when service disconnects
+ * - Connection priority request after successful connection
  */
 class BluetoothHidTransport(private val context: Context) : Transport {
 
@@ -90,6 +88,18 @@ class BluetoothHidTransport(private val context: Context) : Transport {
     /** Completed once the target host device connects (or times out). */
     private var connectionDeferred = CompletableDeferred<Boolean>()
 
+    /** Scope for reconnection coroutines. */
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
+    /** Reconnection job — non-null while a reconnect attempt is in progress. */
+    private var reconnectJob: Job? = null
+
+    /** Number of consecutive reconnection attempts (reset on successful connect). */
+    @Volatile private var reconnectAttempts = 0
+
+    /** True while the transport is in "keep alive" mode (should auto-reconnect). */
+    @Volatile private var keepAlive = false
+
     // ── BluetoothHidDevice.Callback ───────────────────────────────────────────
 
     private val hidCallback = object : BluetoothHidDevice.Callback() {
@@ -112,6 +122,7 @@ class BluetoothHidTransport(private val context: Context) : Transport {
                 }
                 BluetoothProfile.STATE_CONNECTED -> {
                     handleHostConnected(device)
+                    reconnectAttempts = 0
                     if (!connectionDeferred.isCompleted) connectionDeferred.complete(true)
                 }
                 BluetoothProfile.STATE_DISCONNECTING,
@@ -120,6 +131,8 @@ class BluetoothHidTransport(private val context: Context) : Transport {
                     _connectionState.value = ConnectionState.Disconnected
                     DiagnosticsManager.update { copy(btConnected = false, btDeviceName = "") }
                     BridgeLogger.i(TAG, "BT HID host disconnected: ${deviceLabel(device)}")
+                    // Auto-reconnect if we should stay alive
+                    if (keepAlive) scheduleReconnect()
                 }
             }
         }
@@ -147,12 +160,69 @@ class BluetoothHidTransport(private val context: Context) : Transport {
 
         override fun onServiceDisconnected(profile: Int) {
             if (profile != BluetoothProfile.HID_DEVICE) return
+            BridgeLogger.w(TAG, "HID_DEVICE profile proxy disconnected — re-acquiring")
             hidDevice = null
             connectedHost = null
             _connectionState.value = ConnectionState.Disconnected
-            BridgeLogger.w(TAG, "HID_DEVICE profile proxy disconnected")
+            // Re-acquire the proxy — the BT service may have restarted
+            if (keepAlive) reacquireProxy()
         }
     }
+
+    // ── BroadcastReceiver for BT lifecycle events ─────────────────────────────
+
+    private val btReceiver = object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context, intent: Intent) {
+            when (intent.action) {
+                BluetoothAdapter.ACTION_STATE_CHANGED -> {
+                    val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.STATE_OFF)
+                    BridgeLogger.i(TAG, "BT adapter state changed: $state")
+                    when (state) {
+                        BluetoothAdapter.STATE_OFF -> {
+                            // Bluetooth turned off — clean up
+                            connectedHost = null
+                            hidDevice = null
+                            _connectionState.value = ConnectionState.Error("Bluetooth turned off")
+                            DiagnosticsManager.update { copy(btConnected = false, btDeviceName = "") }
+                        }
+                        BluetoothAdapter.STATE_ON -> {
+                            // Bluetooth turned back on — re-acquire proxy and reconnect
+                            BridgeLogger.i(TAG, "BT turned on — re-acquiring HID proxy")
+                            if (keepAlive) reacquireProxy()
+                        }
+                    }
+                }
+                BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                    val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                    }
+                    if (device != null && device == connectedHost) {
+                        BridgeLogger.w(TAG, "ACL disconnected for host: ${deviceLabel(device)}")
+                        connectedHost = null
+                        _connectionState.value = ConnectionState.Disconnected
+                        DiagnosticsManager.update { copy(btConnected = false, btDeviceName = "") }
+                        if (keepAlive) scheduleReconnect()
+                    }
+                }
+                BluetoothDevice.ACTION_ACL_CONNECTED -> {
+                    val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                    }
+                    if (device != null) {
+                        BridgeLogger.i(TAG, "ACL connected: ${deviceLabel(device)}")
+                    }
+                }
+            }
+        }
+    }
+
+    private var receiverRegistered = false
 
     // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -219,7 +289,11 @@ class BluetoothHidTransport(private val context: Context) : Transport {
             return false
         }
 
+        keepAlive = true
         _connectionState.value = ConnectionState.Connecting
+
+        // Register BroadcastReceiver for BT lifecycle events
+        registerReceiver()
 
         // Request the HID_DEVICE profile proxy.  profileListener.onServiceConnected()
         // fires asynchronously; it calls registerHidApp() when ready.
@@ -251,6 +325,11 @@ class BluetoothHidTransport(private val context: Context) : Transport {
     }
 
     override suspend fun disconnect() {
+        keepAlive = false
+        reconnectJob?.cancel()
+        reconnectJob = null
+        reconnectAttempts = 0
+
         try {
             // Release all keys on the host before disconnecting (prevents stuck keys)
             connectedHost?.let { host ->
@@ -270,6 +349,8 @@ class BluetoothHidTransport(private val context: Context) : Transport {
             DiagnosticsManager.update { copy(btConnected = false, btDeviceName = "") }
             BridgeLogger.i(TAG, "BluetoothHidTransport disconnected")
         }
+
+        unregisterReceiver()
     }
 
     /**
@@ -277,6 +358,115 @@ class BluetoothHidTransport(private val context: Context) : Transport {
      * and go directly through [sendInputEvent]. Always returns false.
      */
     override suspend fun send(packet: Packet): Boolean = false
+
+    // ── Reconnection logic ────────────────────────────────────────────────────
+
+    /**
+     * Schedule a reconnection attempt with exponential backoff.
+     * Called when the BT connection drops unexpectedly.
+     */
+    private fun scheduleReconnect() {
+        if (reconnectJob?.isActive == true) return
+        if (reconnectAttempts >= RECONNECT_MAX_ATTEMPTS) {
+            BridgeLogger.e(TAG, "BT reconnect failed after $RECONNECT_MAX_ATTEMPTS attempts — giving up")
+            _connectionState.value = ConnectionState.Error("Bluetooth connection lost — tap MOUSE to reconnect")
+            return
+        }
+
+        val delayMs = RECONNECT_DELAY_MS * (reconnectAttempts + 1)
+        BridgeLogger.i(TAG, "Scheduling BT reconnect in ${delayMs}ms (attempt ${reconnectAttempts + 1}/$RECONNECT_MAX_ATTEMPTS)")
+
+        reconnectJob = scope.launch {
+            delay(delayMs)
+            reconnectAttempts++
+            reacquireProxy()
+        }
+    }
+
+    /**
+     * Re-acquire the HID_DEVICE profile proxy and re-register the HID app.
+     * This handles cases where the BT service restarted or the proxy became stale.
+     */
+    private fun reacquireProxy() {
+        val adapter = getAdapter() ?: return
+        if (!adapter.isEnabled) {
+            BridgeLogger.w(TAG, "Cannot re-acquire proxy: BT is off")
+            return
+        }
+
+        BridgeLogger.i(TAG, "Re-acquiring HID_DEVICE profile proxy")
+        // Reset state for fresh registration
+        appRegistered.complete(false)
+        val freshAppRegistered = CompletableDeferred<Boolean>()
+
+        // Close old proxy
+        hidDevice?.let { getAdapter()?.closeProfileProxy(BluetoothProfile.HID_DEVICE, it) }
+        hidDevice = null
+
+        // Create fresh profile listener
+        val freshListener = object : BluetoothProfile.ServiceListener {
+            override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
+                if (profile != BluetoothProfile.HID_DEVICE) return
+                hidDevice = proxy as BluetoothHidDevice
+                BridgeLogger.i(TAG, "HID_DEVICE proxy re-acquired — registering app")
+                registerHidApp()
+            }
+            override fun onServiceDisconnected(profile: Int) {
+                if (profile != BluetoothProfile.HID_DEVICE) return
+                BridgeLogger.w(TAG, "HID_DEVICE proxy lost again during re-acquire")
+                hidDevice = null
+            }
+        }
+
+        adapter.getProfileProxy(context, freshListener, BluetoothProfile.HID_DEVICE)
+    }
+
+    /**
+     * Request connection priority to reduce latency and improve resilience.
+     * Called after a successful host connection.
+     */
+    private fun requestConnectionPriority() {
+        val hid = hidDevice ?: return
+        val host = connectedHost ?: return
+
+        try {
+            // Get the GATT connection to request priority (available on API 21+)
+            val gatt = hid.javaClass.getMethod("getConnection", BluetoothDevice::class.java)
+                .invoke(hid, host)
+            if (gatt != null) {
+                val requestPriority = gatt.javaClass.getMethod("requestConnectionPriority", Int::class.javaPrimitiveType)
+                // CONNECTION_PRIORITY_HIGH = 1
+                requestPriority.invoke(gatt, 1)
+                BridgeLogger.i(TAG, "Requested HIGH connection priority for ${deviceLabel(host)}")
+            }
+        } catch (e: Exception) {
+            BridgeLogger.d(TAG, "Could not request connection priority: ${e.message}")
+        }
+    }
+
+    // ── Receiver management ───────────────────────────────────────────────────
+
+    private fun registerReceiver() {
+        if (receiverRegistered) return
+        val filter = IntentFilter().apply {
+            addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
+            addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+            addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+        }
+        context.registerReceiver(btReceiver, filter)
+        receiverRegistered = true
+        BridgeLogger.i(TAG, "BT BroadcastReceiver registered")
+    }
+
+    private fun unregisterReceiver() {
+        if (!receiverRegistered) return
+        try {
+            context.unregisterReceiver(btReceiver)
+        } catch (e: Exception) {
+            BridgeLogger.d(TAG, "Receiver already unregistered: ${e.message}")
+        }
+        receiverRegistered = false
+    }
 
     // ── Private helpers ────────────────────────────────────────────────────────
 
@@ -324,7 +514,10 @@ class BluetoothHidTransport(private val context: Context) : Transport {
         BridgeLogger.i(TAG, "Connecting to host ${deviceLabel(target)} (immediate=$callOk)")
 
         val confirmed = withTimeoutOrNull(CONNECT_TIMEOUT_MS) { connectionDeferred.await() } ?: false
-        if (!confirmed) {
+        if (confirmed) {
+            // Request high connection priority after successful connect
+            requestConnectionPriority()
+        } else {
             BridgeLogger.w(TAG, "Connection to $targetDeviceAddress timed out after ${CONNECT_TIMEOUT_MS}ms")
             _connectionState.value = ConnectionState.Error(
                 "Could not reach $targetDeviceAddress — is the device on and already paired?"
