@@ -498,7 +498,9 @@ class BridgeService : Service() {
                     PacketType.ERROR -> {
                         BridgeLogger.d(TAG, "Unexpected packet from receiver: ${packet.type}")
                     }
-                    // Input event packets are bridge→receiver only; cannot arrive here.
+                    // Input event packets: reverse trackpad mode.
+                    // The receiver tablet captures touch and sends these back to the bridge
+                    // for local injection via the accessibility service.
                     PacketType.KEY_DOWN,
                     PacketType.KEY_UP,
                     PacketType.MOUSE_MOVE,
@@ -508,7 +510,9 @@ class BridgeService : Service() {
                     PacketType.TEXT_INPUT,
                     PacketType.MODIFIER_STATE,
                     PacketType.SPECIAL_ACTION,
-                    PacketType.CURSOR_GOTO -> Unit
+                    PacketType.CURSOR_GOTO -> {
+                        BridgeInputInjector.handlePacket(packet)
+                    }
                 }
             }
         }

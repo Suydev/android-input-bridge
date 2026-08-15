@@ -68,6 +68,7 @@ class MainActivity : ComponentActivity() {
                         ConnectionScreen(
                             onSettings    = { navController.navigate(ReceiverRoute.SETTINGS) },
                             onDiagnostics = { navController.navigate(ReceiverRoute.DIAGNOSTICS) },
+                            onTrackpad    = { navController.navigate(ReceiverRoute.TRACKPAD) },
                             viewModel     = viewModel,
                         )
                     }
@@ -80,6 +81,12 @@ class MainActivity : ComponentActivity() {
                     }
                     composable(ReceiverRoute.SETTINGS) {
                         ReceiverSettingsScreen(
+                            onBack    = { navController.popBackStack() },
+                            viewModel = viewModel,
+                        )
+                    }
+                    composable(ReceiverRoute.TRACKPAD) {
+                        TrackpadScreen(
                             onBack    = { navController.popBackStack() },
                             viewModel = viewModel,
                         )
@@ -138,7 +145,8 @@ object ReceiverRoute {
     const val WELCOME       = "welcome"
     const val CONNECTION    = "connection"
     const val ACCESSIBILITY = "accessibility"
-    const val PERMISSIONS   = "permissions"   // BUG-020 FIX: new route
+    const val PERMISSIONS   = "permissions"
     const val SETTINGS      = "settings"
+    const val TRACKPAD      = "trackpad"
     const val DIAGNOSTICS   = "diagnostics"
 }

@@ -34,6 +34,7 @@ import com.inputbridge.receiver.viewmodel.ReceiverViewModel
 fun ConnectionScreen(
     onSettings: () -> Unit,
     onDiagnostics: () -> Unit,
+    onTrackpad: () -> Unit,
     viewModel: ReceiverViewModel,
 ) {
     val diagnostics      by viewModel.diagnostics.collectAsStateWithLifecycle()
@@ -158,6 +159,26 @@ fun ConnectionScreen(
                     color = ReceiverDim, fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace, letterSpacing = 2.sp,
                 )
+            }
+
+            // ── Trackpad button (only when paired) ────────────────────────────
+            if (isPaired && diagnostics.transportConnected) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        viewModel.connectTrackpadTransport()
+                        onTrackpad()
+                    },
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = ReceiverPrimary),
+                    border = BorderStroke(1.dp, ReceiverPrimary.copy(alpha = 0.8f)),
+                ) {
+                    Text(
+                        "OPEN TRACKPAD",
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 2.sp,
+                        fontSize = 12.sp,
+                    )
+                }
             }
         }
 

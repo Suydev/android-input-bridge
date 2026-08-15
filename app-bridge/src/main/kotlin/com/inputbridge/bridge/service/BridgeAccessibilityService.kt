@@ -2,10 +2,14 @@ package com.inputbridge.bridge.service
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.accessibilityservice.GestureDescription
 import android.content.Intent
+import android.graphics.Path
 import android.os.Build
+import android.util.DisplayMetrics
 import android.util.Log
 import android.view.KeyEvent
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import com.inputbridge.bridge.prefs.BridgePreferences
 import com.inputbridge.core.config.TransportConfig
@@ -20,18 +24,18 @@ import org.koin.android.ext.android.inject
 private const val TAG = "BridgeA11y"
 
 /**
- * AccessibilityService on the bridge phone that captures USB keyboard input
- * via onKeyEvent() and forwards it to the receiver over UDP.
+ * AccessibilityService on the bridge phone that:
+ * 1. Captures USB keyboard input via onKeyEvent() and forwards it to the receiver over UDP.
+ * 2. Receives input events from the receiver (reverse trackpad) and injects them locally
+ *    via dispatchGesture().
  *
- * This works because Android routes ALL key events (including from USB HID
- * keyboards) through the accessibility framework before delivering them to
- * apps. Even though UsbManager.deviceList blacklists boot HID devices, the
- * InputDispatcher still injects key events that accessibility services can
- * intercept with FLAG_REQUEST_FILTER_KEY_EVENTS.
+ * This dual role is possible because the same accessibility service can both intercept
+ * key events (FLAG_REQUEST_FILTER_KEY_EVENTS) and dispatch gestures (dispatchGesture).
  *
  * Lifecycle:
- * - onServiceConnected(): sets up flag, opens UDP transport
- * - onKeyEvent(): converts KeyEvent → InputEvent → Packet → UDP send
+ * - onServiceConnected(): sets up flags, opens UDP transport, records screen size
+ * - onKeyEvent(): converts KeyEvent → InputEvent → Packet → UDP send (capture direction)
+ * - injectInputEvent(): receives InputEvent from reverse trackpad → dispatchGesture (injection)
  * - onUnbind(): disconnects transport
  */
 class BridgeAccessibilityService : AccessibilityService() {
@@ -42,6 +46,8 @@ class BridgeAccessibilityService : AccessibilityService() {
             private set
 
         fun isRunning() = instance != null
+
+        private const val TAP_DURATION_MS = 50L
     }
 
     private val packetFactory = EventPacketFactory()
@@ -61,6 +67,14 @@ class BridgeAccessibilityService : AccessibilityService() {
     @Volatile private var altPressed = false
     @Volatile private var metaPressed = false
 
+    // Screen dimensions for gesture injection (populated on service connected)
+    @Volatile private var screenWidth = 1080
+    @Volatile private var screenHeight = 1920
+
+    // Virtual cursor position for reverse trackpad (normalized 0-1)
+    @Volatile private var cursorX = 0.5f
+    @Volatile private var cursorY = 0.5f
+
     // ── Lifecycle ───────────────────────────────────────────────────────────
 
     override fun onServiceConnected() {
@@ -71,6 +85,17 @@ class BridgeAccessibilityService : AccessibilityService() {
         // Request key event filtering
         serviceInfo = serviceInfo.apply {
             flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
+        }
+
+        // Record real screen dimensions for gesture injection
+        val wm = getSystemService(WINDOW_SERVICE) as? WindowManager
+        if (wm != null) {
+            val metrics = DisplayMetrics()
+            @Suppress("DEPRECATION")
+            wm.defaultDisplay.getRealMetrics(metrics)
+            screenWidth = metrics.widthPixels
+            screenHeight = metrics.heightPixels
+            BridgeLogger.i(TAG, "Screen size: ${screenWidth}x${screenHeight}")
         }
 
         connectTransport()
@@ -107,11 +132,9 @@ class BridgeAccessibilityService : AccessibilityService() {
     override fun onKeyEvent(event: KeyEvent): Boolean {
         val transport = udpTransport
         if (transport == null || !transport.isConnected) {
-            // Don't consume — let the system handle it normally
             return false
         }
 
-        // Update modifier state
         when (event.keyCode) {
             KeyEvent.KEYCODE_SHIFT_LEFT, KeyEvent.KEYCODE_SHIFT_RIGHT ->
                 shiftPressed = event.action == KeyEvent.ACTION_DOWN
@@ -124,40 +147,111 @@ class BridgeAccessibilityService : AccessibilityService() {
         }
 
         val modifiers = ModifierState(
-            shift = shiftPressed,
-            ctrl = ctrlPressed,
-            alt = altPressed,
-            meta = metaPressed,
+            shift = shiftPressed, ctrl = ctrlPressed,
+            alt = altPressed, meta = metaPressed,
         )
 
         val inputEvent = if (event.action == KeyEvent.ACTION_DOWN) {
-            InputEvent.KeyDown(
-                keyCode = event.keyCode,
-                scanCode = event.scanCode,
-                modifiers = modifiers,
-            )
+            InputEvent.KeyDown(event.keyCode, event.scanCode, modifiers)
         } else if (event.action == KeyEvent.ACTION_UP) {
-            InputEvent.KeyUp(
-                keyCode = event.keyCode,
-                scanCode = event.scanCode,
-                modifiers = modifiers,
-            )
+            InputEvent.KeyUp(event.keyCode, event.scanCode, modifiers)
         } else {
             return false
         }
 
         val packet = packetFactory.fromEvent(inputEvent) ?: return false
-        // BUG-100: wrap in try-catch — send() may throw IOException if socket closed during
-        // onUnbind→onDestroy race. Uncaught exception kills the app process.
         scope.launch { runCatching { transport.send(packet) } }
 
-        // Log first few events for debugging
         BridgeLogger.d(TAG, "Key event: ${KeyEvent.keyCodeToString(event.keyCode)} " +
             "action=${if (event.action == KeyEvent.ACTION_DOWN) "DOWN" else "UP"}")
 
-        // Consume the event so it doesn't also reach local apps
-        // (the user wants it forwarded to the tablet, not processed locally)
         return true
+    }
+
+    // ── Reverse trackpad: input injection ──────────────────────────────────
+
+    /**
+     * Inject an input event received from the receiver tablet (reverse trackpad mode).
+     * Called from BridgeService's incoming packet loop.
+     *
+     * Supported event types:
+     * - CursorGoto: moves the virtual cursor and dispatches a tap gesture at the target position
+     * - MouseButtonDown/Up: dispatches tap/long-press at current virtual cursor position
+     * - Scroll: dispatches a swipe gesture for scrolling
+     * - MouseMove: updates virtual cursor position (relative delta)
+     */
+    fun injectInputEvent(event: InputEvent) {
+        if (!isRunning()) return
+
+        when (event) {
+            is InputEvent.CursorGoto -> {
+                // Absolute position: normalize to screen coordinates
+                val x = (event.x * screenWidth).coerceIn(0f, screenWidth.toFloat())
+                val y = (event.y * screenHeight).coerceIn(0f, screenHeight.toFloat())
+                cursorX = event.x
+                cursorY = event.y
+                dispatchTapGesture(x, y)
+                BridgeLogger.d(TAG, "CursorGoto → tap at (${x.toInt()}, ${y.toInt()})")
+            }
+            is InputEvent.MouseMove -> {
+                // Relative delta: update virtual cursor position
+                cursorX = (cursorX + event.dx).coerceIn(0f, 1f)
+                cursorY = (cursorY + event.dy).coerceIn(0f, 1f)
+            }
+            is InputEvent.MouseButtonDown -> {
+                // Click at current virtual cursor position
+                val x = (cursorX * screenWidth).coerceIn(0f, screenWidth.toFloat())
+                val y = (cursorY * screenHeight).coerceIn(0f, screenHeight.toFloat())
+                if (event.button == 0) {
+                    dispatchTapGesture(x, y)
+                } else {
+                    dispatchLongPressGesture(x, y)
+                }
+                BridgeLogger.d(TAG, "MouseButton ${event.button} at (${x.toInt()}, ${y.toInt()})")
+            }
+            is InputEvent.MouseButtonUp -> {
+                // No-op for now (tap is already dispatched on down)
+            }
+            is InputEvent.Scroll -> {
+                // Vertical scroll: dispatch a small swipe gesture
+                val centerX = screenWidth / 2f
+                val startY = screenHeight / 2f
+                val endY = startY - event.dy * 100f  // scroll direction
+                dispatchSwipeGesture(centerX, startY, centerX, endY, 100L)
+                BridgeLogger.d(TAG, "Scroll dy=${event.dy}")
+            }
+            else -> {
+                BridgeLogger.d(TAG, "Unsupported reverse event: ${event::class.simpleName}")
+            }
+        }
+    }
+
+    private fun dispatchTapGesture(x: Float, y: Float) {
+        val path = Path().apply { moveTo(x, y) }
+        val stroke = GestureDescription.StrokeDescription(path, 0L, TAP_DURATION_MS)
+        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        dispatchGesture(gesture, null, null)
+    }
+
+    private fun dispatchLongPressGesture(x: Float, y: Float) {
+        val path = Path().apply { moveTo(x, y) }
+        val stroke = GestureDescription.StrokeDescription(path, 0L, 600L)
+        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        dispatchGesture(gesture, null, null)
+    }
+
+    private fun dispatchSwipeGesture(
+        startX: Float, startY: Float,
+        endX: Float, endY: Float,
+        durationMs: Long,
+    ) {
+        val path = Path().apply {
+            moveTo(startX, startY)
+            lineTo(endX, endY)
+        }
+        val stroke = GestureDescription.StrokeDescription(path, 0L, durationMs)
+        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        dispatchGesture(gesture, null, null)
     }
 
     // ── Transport ───────────────────────────────────────────────────────────
