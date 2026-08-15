@@ -13,6 +13,8 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.timber)
+    implementation(libs.shizuku.api)
+    implementation(libs.shizuku.provider)
 
     testImplementation(libs.junit)
     testImplementation(libs.mockk)
