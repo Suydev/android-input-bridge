@@ -18,7 +18,6 @@ koin = "3.5.6"
 koinCompose = "3.5.6"
 mockk = "1.13.11"
 material = "1.12.0"
-shizuku = "13.6.0"
 
 [libraries]
 # AndroidX Core
@@ -71,8 +70,10 @@ mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
 kotlinx-coroutines-test-lib = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
 
 # Shizuku (privileged input injection without root)
-shizuku-api = { group = "dev.rikka.shizuku", name = "api", version.ref = "shizuku" }
-shizuku-provider = { group = "dev.rikka.shizuku", name = "provider", version.ref = "shizuku" }
+# Shizuku uses JitPack; use the official GitHub release coordinates
+shizuku-version = "13.6.0"
+shizuku-api = { group = "com.github.rikkaapps.shizuku", name = "api", version.ref = "shizuku-version" }
+shizuku-provider = { group = "com.github.rikkaapps.shizuku", name = "provider", version.ref = "shizuku-version" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
