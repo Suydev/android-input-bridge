@@ -2466,3 +2466,22 @@ entered. Bridge never connects.
 listens for it and replies directly to the bridge's discovery port (54322); receiver still
 periodically broadcasts its presence. UI no longer asks for IP or PIN: bridge Settings shows
 auto-discovered status, receiver Connection screen shows auto-connect guidance.
+
+## BUG-134 — No fallback when broadcast discovery is blocked; trackpad dead without IP
+
+**Description**: Auto-discovery (BUG-133) is the only way to connect. On some Wi-Fi/router
+setups broadcasts are dropped (client isolation), so the bridge never finds the receiver and
+the connection never happens. Because the on-screen trackpad read `prefs.targetIp` once at
+mount, it also stayed dead whenever discovery had not populated the IP.
+**Steps to reproduce**: Put both devices on a network that blocks UDP broadcasts; start both
+apps. Bridge stays "Searching"; trackpad shows "Connecting…" forever.
+**Expected behavior**: App connects even when broadcasts are blocked (manual IP fallback), and
+the trackpad links as soon as the receiver IP is known.
+**Actual behavior**: No connection; trackpad cannot capture mouse/keyboard.
+**Suspected cause**: Discovery is environment-dependent; no manual fallback; trackpad used a
+stale IP snapshot.
+**Files involved**: `app-bridge/.../ui/screens/SettingsScreen.kt`, `app-bridge/.../ui/screens/BridgeTrackpadScreen.kt`
+**Priority**: High
+**Status**: ✅ FIXED (Session 039)
+**Fix**: Re-added an OPTIONAL "Receiver IP (optional)" field in bridge Settings (blank = auto).
+The on-screen trackpad now polls the live discovered IP and (re)connects when available.

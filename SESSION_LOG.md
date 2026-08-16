@@ -1,3 +1,24 @@
+## Session 039 — Manual-IP fallback + live-IP trackpad (BUG-134)
+**Date:** 2026-08-16
+**Agent:** opencode
+**Status:** ✅ Complete
+
+### Goals
+- User: connection never happens without manual IP; trackpad cannot capture mouse/keyboard.
+- Add a fallback so the app connects even when UDP broadcast discovery is blocked by the network.
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|----|----------|-------------|---------|
+| BUG-134 | High | No manual-IP fallback when broadcast discovery is blocked; trackpad used stale IP snapshot | ✅ FIXED |
+
+### What Was Changed
+- `SettingsScreen.kt` (bridge): re-added optional "Receiver IP (optional)" field (blank = auto-discovery).
+- `BridgeTrackpadScreen.kt`: connect logic now polls the live discovered `prefs.targetIp` and links when available.
+- (Pending deeper fix from a reference app APK the user will provide for decompilation.)
+
+---
+
 ## Session 038 — Bidirectional auto-discovery + remove IP/PIN UI (BUG-133)
 **Date:** 2026-08-16
 **Agent:** opencode

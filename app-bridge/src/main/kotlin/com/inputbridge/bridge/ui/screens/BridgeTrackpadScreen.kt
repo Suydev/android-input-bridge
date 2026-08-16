@@ -92,19 +92,25 @@ fun BridgeTrackpadScreen(
     val transportState = remember { mutableStateOf<UdpTransport?>(null) }
     val packetFactory = remember { EventPacketFactory() }
 
-    // Connect transport on mount
+    // Connect transport on mount — retry until the discovered receiver IP is available.
+    // BUG-134 FIX: auto-discovery fills prefs.targetIp asynchronously; if we only tried once
+    // at mount the trackpad would fail when opened before discovery completed. Poll the live
+    // pref so the trackpad links as soon as the bridge service discovers the receiver.
     DisposableEffect(Unit) {
         val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         val job = scope.launch {
-            val config = TransportConfig(
-                targetIp = prefs.targetIp,
-                port = prefs.port,
-            )
-            val transport = UdpTransport(config, isSender = true)
-            val ok = transport.connect()
-            if (ok) {
-                transportState.value = transport
-                isConnected = true
+            while (isActive) {
+                val ip = prefs.targetIp
+                if (ip.isNotBlank()) {
+                    val config = TransportConfig(targetIp = ip, port = prefs.port)
+                    val transport = UdpTransport(config, isSender = true)
+                    if (transport.connect()) {
+                        transportState.value = transport
+                        isConnected = true
+                        break
+                    }
+                }
+                kotlinx.coroutines.delay(1500)
             }
         }
         onDispose {

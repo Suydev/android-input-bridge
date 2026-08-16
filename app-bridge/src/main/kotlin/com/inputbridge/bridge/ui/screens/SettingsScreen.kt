@@ -43,6 +43,7 @@ fun SettingsScreen(
     val config     by viewModel.config.collectAsStateWithLifecycle()
     val btAddress  by viewModel.btTargetAddress.collectAsStateWithLifecycle()
 
+    var targetIpInput  by remember { mutableStateOf(config.transport.targetIp) }
     var btAddressInput by remember { mutableStateOf(btAddress) }
 
     val isBluetoothHid = config.transport.mode == TransportMode.BLUETOOTH_HID
@@ -159,13 +160,28 @@ fun SettingsScreen(
                 }
 
                 Text(
-                    "Receiver IP: ${if (config.transport.targetIp.isNotBlank()) config.transport.port.let { config.transport.targetIp } else "auto-discovered"}",
+                    "Receiver IP: ${if (config.transport.targetIp.isNotBlank()) config.transport.targetIp else "auto-discovered"}",
                     color = BridgeDim, fontSize = 12.sp, fontFamily = FontFamily.Monospace,
                 )
 
                 Text(
                     "Port: ${config.transport.port}",
                     color = BridgeDim, fontSize = 12.sp, fontFamily = FontFamily.Monospace,
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                // BUG-134 FIX: optional manual IP. Auto-discovery is primary, but some
+                // Wi-Fi/router setups block broadcasts (client isolation) so discovery never
+                // finds the receiver. This field is a fallback — leave blank for auto.
+                OutlinedTextField(
+                    value = targetIpInput,
+                    onValueChange = { targetIpInput = it; viewModel.setTargetIp(it.trim()) },
+                    label = { Text("Receiver IP (optional)", fontFamily = FontFamily.Monospace) },
+                    placeholder = { Text("leave blank = auto", fontFamily = FontFamily.Monospace) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = outlinedTextFieldColors(),
                 )
 
                 HorizontalDivider(color = BridgeDim.copy(alpha = 0.3f))
