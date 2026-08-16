@@ -160,6 +160,8 @@ class BridgeViewModel(
         _config.update { it.copy(transport = it.transport.copy(targetIp = ip)) }
         prefs.targetIp = ip
         if (prefs.isPaired) prefs.isPaired = false
+        // BUG-128 FIX: a new target IP must re-pair immediately if the service is running.
+        triggerRepair()
     }
 
     fun setPort(port: Int) {
@@ -173,6 +175,25 @@ class BridgeViewModel(
         val trimmed = pin.trim()
         _config.update { it.copy(security = it.security.copy(pairingToken = trimmed)) }
         prefs.setPinAndClearPairing(trimmed)
+        // BUG-128 FIX: once the user has entered a full 6-digit PIN, re-run pairing so
+        // the freshly-saved PIN is actually sent (the pipeline only paired once at start).
+        if (trimmed.length == 6) triggerRepair()
+    }
+
+    /**
+     * BUG-128 FIX: ask the running [BridgeService] to re-run the pairing handshake with
+     * the current PIN. No-op if the service is not running yet.
+     */
+    private fun triggerRepair() {
+        runCatching {
+            context.startService(
+                Intent(context, BridgeService::class.java).apply {
+                    action = BridgeService.ACTION_REPAIR
+                }
+            )
+        }.onFailure { e ->
+            BridgeLogger.w(TAG, "Failed to request re-pair: ${e.message}")
+        }
     }
 
     fun clearPairing() {

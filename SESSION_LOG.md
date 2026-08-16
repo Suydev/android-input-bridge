@@ -2,6 +2,26 @@
 
 ---
 
+## Session 035 — Fix pairing never re-runs after runtime PIN/IP change (BUG-128)
+**Date:** 2026-08-16
+**Agent:** opencode
+**Status:** ✅ Complete — pushed, CI green
+
+### Goals
+- Fix "PIN is correct but pairing still says wrong": a late PIN entry was never sent.
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|----|----------|-------------|---------|
+| BUG-128 | High | Bridge pairs once at startup; runtime PIN/target-IP change never re-pairs | Fixed |
+
+### What Was Changed
+- `app-bridge/.../bridge/service/BridgeService.kt`: added `ACTION_REPAIR` and `rePair()` (resets `pairResponseDeferred`, re-runs `doPairing()` on the live transport).
+- `app-bridge/.../bridge/viewmodel/BridgeViewModel.kt`: `setPairingPin` (full 6 digits) and `setTargetIp` send `ACTION_REPAIR` to the running service.
+- `BUGS.md`: added BUG-128.
+
+---
+
 ## Session 034 — Close audit findings O and P (BUG-125, BUG-126)
 **Date:** 2026-08-16
 **Agent:** opencode

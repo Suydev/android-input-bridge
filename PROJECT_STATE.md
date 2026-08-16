@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 034 — closed audit findings O/P (BUG-125 click-on-up, BUG-126 require-paired-sender) (2026-08-16)
+> **Last updated:** Session 035 — BUG-128: bridge re-pairs on runtime PIN/target-IP change (2026-08-16)
 
 ---
 

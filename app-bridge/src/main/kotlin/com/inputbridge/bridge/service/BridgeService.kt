@@ -193,6 +193,19 @@ class BridgeService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        // BUG-128 FIX: re-run pairing with the current PIN without restarting the pipeline.
+        // Lets a PIN/target-IP change made in Settings after the service started take effect
+        // (otherwise the stale PIN sent at pipeline start keeps getting rejected).
+        if (intent?.action == ACTION_REPAIR) {
+            val transport = udpTransport
+            if (transport != null) {
+                BridgeLogger.i(TAG, "Re-pair action received — re-running handshake")
+                serviceScope.launch { rePair(transport) }
+            } else {
+                BridgeLogger.d(TAG, "Re-pair ignored — pipeline not running yet")
+            }
+            return START_STICKY
+        }
         if (!pipelineStarted.compareAndSet(false, true)) {
             BridgeLogger.d(TAG, "onStartCommand: pipeline already starting/running — ignoring")
             return START_STICKY
@@ -595,6 +608,26 @@ class BridgeService : Service() {
                 }
                 false
             }
+        }
+    }
+
+    /**
+     * BUG-128 FIX: re-run the pairing handshake against the current PIN without
+     * tearing down the pipeline. Used when the user changes the PIN or target IP in
+     * Settings while the service is already running. Resets [pairResponseDeferred] so
+     * the fresh PAIR_REQUEST awaits a fresh PAIR_RESPONSE.
+     */
+    private suspend fun rePair(transport: UdpTransport) {
+        if (prefs.pairingPin.isEmpty()) {
+            BridgeLogger.i(TAG, "Re-pair: no PIN configured — clearing pairing state")
+            prefs.isPaired = false
+            DiagnosticsManager.update { copy(isPaired = false, pairedPeerIp = "") }
+            return
+        }
+        pairResponseDeferred = CompletableDeferred()
+        val paired = doPairing(transport)
+        if (!paired) {
+            BridgeLogger.w(TAG, "Re-pair failed — PIN still rejected or timed out")
         }
     }
 
@@ -1012,6 +1045,7 @@ class BridgeService : Service() {
 
     companion object {
         const val ACTION_STOP = "com.inputbridge.bridge.ACTION_STOP"
+        const val ACTION_REPAIR = "com.inputbridge.bridge.ACTION_REPAIR"
         private const val ACTION_USB_PERMISSION = "com.inputbridge.bridge.USB_PERMISSION"
     }
 }

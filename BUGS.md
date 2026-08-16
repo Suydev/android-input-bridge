@@ -2340,3 +2340,22 @@ Trade-off: a bridge with no PIN can no longer inject until its PIN matches the r
 **Status**: ⚠️ WONTFIX (Session 033) — by design; not changed.
 
 ---
+
+## BUG-128 — Bridge never re-pairs after the PIN/target-IP changes at runtime
+**Description**: `BridgeService` runs the pairing handshake exactly once, at `startPipeline()`.
+A PIN (or target IP) entered or corrected in Settings *after* the service is already running is
+persisted to `BridgePreferences` but never sent — the service keeps sending the stale PIN captured
+at startup, so the receiver permanently rejects it with "PIN does not match receiver display".
+**Steps to reproduce**: Start the bridge service (PIN empty or wrong), then enter the correct 6-digit
+PIN in Settings → pairing never succeeds.
+**Expected behavior**: Changing the PIN/target IP while the service runs immediately re-attempts pairing.
+**Actual behavior**: Pairing stays failed until the service is manually restarted.
+**Suspected cause**: No runtime trigger to re-run `doPairing()`; `onStartCommand` only handles `ACTION_STOP`.
+**Files involved**: `app-bridge/.../bridge/service/BridgeService.kt`, `app-bridge/.../bridge/viewmodel/BridgeViewModel.kt`
+**Priority**: High
+**Status**: ✅ FIXED (Session 035)
+**Fix**: Added `ACTION_REPAIR`; `BridgeViewModel.setPairingPin` (on a full 6-digit PIN) and
+`setTargetIp` send it to the running service, which calls `rePair()` — resets `pairResponseDeferred`
+and re-runs `doPairing()` against the live transport without restarting the pipeline.
+
+---
