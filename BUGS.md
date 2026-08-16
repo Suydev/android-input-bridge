@@ -2550,3 +2550,27 @@ bars/cutout) regardless of accessibility state.
 **Fix**: Added `realScreenSize(context)` (ScreenMetrics.kt) using `maximumWindowMetrics` (API 30+) /
 `getRealSize`; fed from `CursorOverlayService.onCreate` up-front and used by the accessibility service
 on connect, so the cursor space equals the true physical screen regardless of a11y state.
+
+## BUG-138 — BT HID descriptor/report not maximally host-compatible (no "any device" parity)
+
+**Description**: Studied the decompiled reference app "Bluetooth Keyboard Mouse v6.23.2" (the ground truth
+for a HID keyboard+mouse that works on any Bluetooth host). Its `ClassicHidService`/`z00`/`e10` use the
+**canonical boot-protocol** HID layouts: keyboard usage max 0x65 (101 keys) + LED Output collection, mouse
+with 5 buttons + AC Pan (horizontal scroll) on the Consumer page. Our `HidDescriptor`/`HidReportBuilder`
+diverged: keyboard usage max was 0x91 (some hosts reject non-boot maxima), the mouse exposed only 3
+buttons with no AC Pan, and Back/Forward mouse buttons were mapped to 0x00 (dropped). This reduces the
+chance of working on strict/odd hosts and loses horizontal scroll + back/forward over BT HID.
+**Steps to reproduce**: Register as BT HID combo device; connect to a strict host (some TVs/PCs/tablets).
+Keyboard may be rejected for non-boot usage max; horizontal scroll and mouse back/forward produce nothing.
+**Expected behavior**: BT HID works on any Bluetooth host exactly like the reference — boot-standard
+keyboard, 5-button mouse with horizontal scroll, LED state supported.
+**Actual behavior**: Keyboard usage max 0x91; mouse limited to 3 buttons, no AC Pan; back/forward dropped.
+**Suspected cause**: Descriptor hand-written without matching the proven reference boot layouts.
+**Files involved**: `transport-bluetooth-hid/.../bt/HidDescriptor.kt`,
+`transport-bluetooth-hid/.../bt/HidReportBuilder.kt`,
+`transport-bluetooth-hid/.../bt/BluetoothHidTransport.kt`
+**Priority**: High
+**Status**: ✅ FIXED (Session 041)
+**Fix**: Keyboard usage max → 0x65 + added LED Output collection; mouse → 5 buttons + AC Pan (Consumer
+0x0238) and a 5-byte report; `MouseButton.BACK/FORWARD` map to HID buttons 4/5; `Scroll` forwards `dx` as
+AC Pan. Latency-sensitive UDP + Shizuku path intentionally left untouched (reference is slow by design).

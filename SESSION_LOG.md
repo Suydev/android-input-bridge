@@ -1,3 +1,31 @@
+## Session 041 — BT HID descriptor aligned to reference's universal-compat boot layouts (BUG-138)
+**Date:** 2026-08-16
+**Agent:** opencode
+**Status:** ✅ Complete
+
+### Goals
+- User: study the decompiled "Bluetooth Keyboard Mouse v6.23.2" reference carefully — it has a very
+  robust mouse/keyboard capture+HID system that "works for any device", but warned its architecture is
+  slow (latency). Adopt its compatibility technique without its slowness.
+- Read `ClassicHidService.java` (requests discoverable + `sendReport`) and the `z00`/`e10` descriptor
+  providers; compare against our `HidDescriptor`/`HidReportBuilder`/`BluetoothHidTransport`.
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|----|----------|-------------|---------|
+| BUG-138 | High | BT HID descriptor/report not maximally host-compatible (usage max 0x91, 3-btn mouse, no AC Pan, back/forward dropped) | ✅ FIXED |
+
+### What Was Changed
+- `HidDescriptor.kt`: keyboard usage max 0x65 (boot standard) + LED Output collection; mouse = 5 buttons
+  + X/Y/wheel + AC Pan (Consumer 0x0238) → 5-byte mouse report. Matches reference boot layouts exactly.
+- `HidReportBuilder.kt`: 5-byte mouse report; `BACK`→0x08 / `FORWARD`→0x10; `onScroll(dx,dy)` forwards
+  `dx` as AC Pan (horizontal scroll).
+- `BluetoothHidTransport.kt`: `Scroll` forwards `event.dx` to `onScroll`.
+- Deliberately kept the UDP + Shizuku low-latency path untouched — the reference's slowness comes from its
+  Bluetooth-only design and heavy `PointerPathView`; our architecture already avoids both.
+
+---
+
 ## Session 040 — Full-screen cursor overlay + real screen-size coordinate space (BUG-136, BUG-137)
 **Date:** 2026-08-16
 **Agent:** opencode

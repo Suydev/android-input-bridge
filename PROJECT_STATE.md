@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 040 — BUG-136/137: full-screen cursor overlay + real screen-size coordinate space (2026-08-16)
+> **Last updated:** Session 041 — BUG-138: BT HID descriptor aligned to reference's universal-compat boot layouts (2026-08-16)
 
 ---
 

@@ -20,11 +20,12 @@ import com.inputbridge.core.model.MouseButton
  *     [1] reserved = 0x00
  *     [2..7] HID usage IDs for pressed keys (0x00 = empty slot)
  *
- *   Mouse (Report ID [HidDescriptor.REPORT_ID_MOUSE]), 4 bytes:
- *     [0] button bitmask (bit 0=Left, bit 1=Right, bit 2=Middle)
+ *   Mouse (Report ID [HidDescriptor.REPORT_ID_MOUSE]), 5 bytes:
+ *     [0] button bitmask (bit 0=Left, 1=Right, 2=Middle, 3=Back, 4=Forward)
  *     [1] X delta — signed, -127..127 (right = positive)
  *     [2] Y delta — signed, -127..127 (down  = positive)
  *     [3] wheel  — signed, -127..127 (scroll down = positive per HID convention)
+ *     [4] AC Pan — signed, -127..127 (horizontal scroll, right = positive)
  *
  * Thread safety: single-threaded (called from the USB capture coroutine only).
  */
@@ -68,29 +69,30 @@ class HidReportBuilder {
 
     // ── Mouse reports ──────────────────────────────────────────────────────────
 
-    /** Relative pointer movement. Returns a 4-byte mouse report. */
+    /** Relative pointer movement. Returns a 5-byte mouse report. */
     fun onMouseMove(dx: Float, dy: Float): ByteArray =
-        buildMouseReport(dx = dx.clampToByte(), dy = dy.clampToByte(), wheel = 0)
+        buildMouseReport(dx = dx.clampToByte(), dy = dy.clampToByte(), wheel = 0, pan = 0)
 
-    /** Mouse button pressed. Returns a 4-byte mouse report. */
+    /** Mouse button pressed. Returns a 5-byte mouse report. */
     fun onMouseButtonDown(button: MouseButton): ByteArray {
         mouseButtonMask = mouseButtonMask or buttonBit(button)
-        return buildMouseReport(dx = 0, dy = 0, wheel = 0)
+        return buildMouseReport(dx = 0, dy = 0, wheel = 0, pan = 0)
     }
 
-    /** Mouse button released. Returns a 4-byte mouse report. */
+    /** Mouse button released. Returns a 5-byte mouse report. */
     fun onMouseButtonUp(button: MouseButton): ByteArray {
         mouseButtonMask = mouseButtonMask and buttonBit(button).inv()
-        return buildMouseReport(dx = 0, dy = 0, wheel = 0)
+        return buildMouseReport(dx = 0, dy = 0, wheel = 0, pan = 0)
     }
 
     /**
-     * Scroll wheel. dy > 0 = scroll down (content moves up), dy < 0 = scroll up.
-     * Per HID convention, positive wheel value = scroll toward user (down).
-     * BUG-XXX FIX: removed negation — dy>0 already means scroll down in InputEvent.
+     * Scroll wheel. dy > 0 = scroll down (vertical), dx > 0 = scroll right (AC Pan).
+     * Per HID convention, positive wheel value = scroll toward user (down); AC Pan
+     * positive = scroll right. BUG-138: dx is forwarded as AC Pan so horizontal
+     * scroll/trackpad tilt works on hosts (matches the reference's mouse descriptor).
      */
-    fun onScroll(dy: Float): ByteArray =
-        buildMouseReport(dx = 0, dy = 0, wheel = dy.clampToByte())
+    fun onScroll(dx: Float, dy: Float): ByteArray =
+        buildMouseReport(dx = 0, dy = 0, wheel = dy.clampToByte(), pan = dx.clampToByte())
 
     // ── Private builders ───────────────────────────────────────────────────────
 
@@ -102,8 +104,14 @@ class HidReportBuilder {
         return report
     }
 
-    private fun buildMouseReport(dx: Int, dy: Int, wheel: Int): ByteArray =
-        byteArrayOf(mouseButtonMask.toByte(), dx.toByte(), dy.toByte(), wheel.toByte())
+    private fun buildMouseReport(dx: Int, dy: Int, wheel: Int, pan: Int): ByteArray =
+        byteArrayOf(
+            (mouseButtonMask and 0x1F).toByte(),  // 5 button bits; upper 3 bits are padding
+            dx.toByte(),
+            dy.toByte(),
+            wheel.toByte(),
+            pan.toByte(),
+        )
 
     /**
      * Map [ModifierState] to the HID keyboard modifier byte.
@@ -128,8 +136,8 @@ class HidReportBuilder {
         MouseButton.LEFT    -> 0x01
         MouseButton.RIGHT   -> 0x02
         MouseButton.MIDDLE  -> 0x04
-        MouseButton.BACK    -> 0x00  // HID has no back/forward buttons
-        MouseButton.FORWARD -> 0x00
+        MouseButton.BACK    -> 0x08  // HID mouse button 4 (Back)
+        MouseButton.FORWARD -> 0x10  // HID mouse button 5 (Forward)
     }
 
     private fun Float.clampToByte(): Int = coerceIn(-127f, 127f).toInt()

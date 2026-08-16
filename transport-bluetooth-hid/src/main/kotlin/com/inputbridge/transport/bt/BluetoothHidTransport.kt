@@ -252,7 +252,7 @@ class BluetoothHidTransport(private val context: Context) : Transport {
                 is InputEvent.MouseMove       -> hid.sendReport(host, HidDescriptor.REPORT_ID_MOUSE,    reportBuilder.onMouseMove(event.dx, event.dy))
                 is InputEvent.MouseButtonDown -> hid.sendReport(host, HidDescriptor.REPORT_ID_MOUSE,    reportBuilder.onMouseButtonDown(event.button))
                 is InputEvent.MouseButtonUp   -> hid.sendReport(host, HidDescriptor.REPORT_ID_MOUSE,    reportBuilder.onMouseButtonUp(event.button))
-                is InputEvent.Scroll          -> hid.sendReport(host, HidDescriptor.REPORT_ID_MOUSE,    reportBuilder.onScroll(event.dy))
+                is InputEvent.Scroll          -> hid.sendReport(host, HidDescriptor.REPORT_ID_MOUSE,    reportBuilder.onScroll(event.dx, event.dy))
                 // TextInput, ModifierStateChanged, NavigationAction, CursorGoto — not forwarded
                 // via BT HID; they are handled at the accessibility layer on devices that
                 // have the receiver app.
