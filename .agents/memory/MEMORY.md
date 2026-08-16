@@ -6,3 +6,4 @@
 - [PacketType exhaustiveness in hot loops](packet-type-exhaustiveness.md) — ReceiverService and BridgeService when(packet.type) must be exhaustive; lastInputSeqNo must only update for input-event arms
 - [UDP and USB startup lifecycle](udp-usb-lifecycle.md) — replies require the observed sender endpoint; set loop guard flags and collectors before starting background readers
 - [USB host permission from foreground Activity](usb-permission-foreground.md) — on Android 10/MIUI request UsbManager permission from a foreground Activity, not a background Service; FLAG_MUTABLE PendingIntent
+- [Keyboard injection needs Shizuku](keyboard-needs-shizuku.md) — receiver keyboard requires Shizuku/InputManager; AccessibilityService can't inject key events, only drive a focused EditText

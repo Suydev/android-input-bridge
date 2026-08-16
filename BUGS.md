@@ -2386,3 +2386,63 @@ from the foreground `Activity` (reliable dialog), and only starts `BridgeService
 `ACTION_USB_PERMISSION` broadcast reports `EXTRA_PERMISSION_GRANTED`. The service path remains as a
 fallback for the boot/notification-started case.
 
+---
+
+## BUG-130 — Auto-discovery used only the first interface's broadcast address; IP never found
+
+**Description**: `AutoDiscovery` broadcast the receiver presence to a single, first-found
+non-loopback interface broadcast address (or 255.255.255.255 fallback). On a hotspot/client
+setup the first interface is often the wrong subnet, so the bridge never received the
+announcement and stayed stuck "Searching" — the receiver showed "Listening, not paired" forever.
+**Steps to reproduce**: Two phones on the same Wi-Fi/hotspot; start receiver then bridge with no
+manual IP. Bridge never discovers receiver.
+**Expected behavior**: Bridge auto-discovers the receiver IP on the active subnet and connects.
+**Actual behavior**: Discovery silently fails; nothing reaches the receiver.
+**Suspected cause**: Single broadcast target; also auto-discovery only ran when targetIp was blank
+and restarted the whole pipeline on discovery.
+**Files involved**: `shared-core/.../discovery/AutoDiscovery.kt`, `app-bridge/.../bridge/service/BridgeService.kt`
+**Priority**: High
+**Status**: ✅ FIXED (Session 037)
+**Fix**: `AutoDiscovery` now broadcasts to every up, non-loopback interface broadcast address plus
+255.255.255.255. `BridgeService` runs discovery unconditionally and (re)connects to the discovered
+peer without restarting the whole pipeline.
+
+---
+
+## BUG-131 — PIN pairing gate blocked all input; user wanted direct connect (no PIN)
+
+**Description**: The receiver dropped every packet from a sender whose IP was not in its paired
+allowlist, and the bridge required a matching PIN to pair. This friction meant "nothing works"
+out of the box. User explicitly requested removing the pairing system for a direct, same-Wi-Fi
+connection.
+**Steps to reproduce**: Default install; receiver shows "Listening, not paired"; bridge never pairs.
+**Expected behavior**: On the same network the two apps connect directly and input flows.
+**Actual behavior**: Input dropped until a PIN was manually matched on both sides.
+**Files involved**: `app-receiver/.../receiver/service/ReceiverService.kt`, `app-bridge/.../bridge/service/BridgeService.kt`
+**Priority**: High
+**Status**: ✅ FIXED (Session 037)
+**Fix**: Removed the PIN allowlist gate. Receiver accepts input from any LAN sender and records the
+peer IP. Bridge connects directly (PIN handshake is now best-effort/non-fatal). Notifications no
+longer show a PIN.
+
+---
+
+## BUG-132 — Shizuku permission never requested; keyboard injection impossible
+
+**Description**: The app only called `Shizuku.checkSelfPermission()` and never `Shizuku.requestPermission()`,
+and the permissions screen never mentioned Shizuku. Because the permission was always denied, the
+app fell back to the AccessibilityService path, which CANNOT inject real key events (it can only
+manipulate a focused EditText). So keyboard input never worked.
+**Steps to reproduce**: Install receiver; enable accessibility; type via bridge. No key arrives.
+**Expected behavior**: With Shizuku installed + granted, real key events inject at 1–5ms.
+**Actual behavior**: Keyboard dead; only mouse/trackpad gestures work (via dispatchGesture).
+**Suspected cause**: Missing runtime permission request + missing UI to grant it. An
+AccessibilityService fundamentally cannot inject system key events — only Shizuku/InputManager can.
+**Files involved**: `accessibility-receiver/.../accessibility/ShizukuInputInjector.kt`, `app-receiver/.../receiver/ui/screens/ReceiverPermissionsScreen.kt`
+**Priority**: High
+**Status**: ✅ FIXED (Session 037)
+**Fix**: `ShizukuInputInjector` now registers a permission-result listener and exposes
+`requestPermissionIfNeeded(activity)`; `ReceiverPermissionsScreen` shows Shizuku state and a
+one-tap grant button, with clear instructions to install/start Shizuku first.
+
+

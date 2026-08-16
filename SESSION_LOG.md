@@ -2,6 +2,35 @@
 
 ---
 
+## Session 037 — Direct connect: auto IP + remove pairing + fix Shizuku keyboard injection (BUG-130/131/132)
+**Date:** 2026-08-16
+**Agent:** opencode
+**Status:** ✅ Complete
+
+### Goals
+- Make the two apps connect directly on the same Wi-Fi with no PIN (user: "no pin, direct").
+- Automate IP discovery (auto-discovery was fragile).
+- Fix Shizuku so real keyboard injection works (accessibility alone cannot inject keys).
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|----|----------|-------------|---------|
+| BUG-130 | High | Auto-discovery used only first interface broadcast; bridge never found receiver IP | ✅ FIXED |
+| BUG-131 | High | PIN pairing gate blocked all input; removed for direct connect | ✅ FIXED |
+| BUG-132 | High | Shizuku permission never requested → keyboard injection impossible | ✅ FIXED |
+
+### What Was Changed
+- `AutoDiscovery.kt`: broadcast to all interface broadcasts + 255.255.255.255.
+- `BridgeService.kt`: discovery runs unconditionally; `connectToReceiver()` connects directly, PIN now best-effort/non-fatal.
+- `ReceiverService.kt`: accept any LAN sender (no PIN allowlist); PAIR_REQUEST accepted unconditionally.
+- `ShizukuInputInjector.kt`: permission-result listener + `requestPermissionIfNeeded(activity)`.
+- `ReceiverPermissionsScreen.kt`: Shizuku state + one-tap grant; clarified a11y-only drives focused text field.
+
+### Key user-facing note
+Keyboard requires Shizuku (AccessibilityService cannot inject key events). Mouse/trackpad works via dispatchGesture without Shizuku.
+
+---
+
 ## Session 036 — USB host permission requested from foreground Activity (BUG-129)
 **Date:** 2026-08-16
 **Agent:** opencode

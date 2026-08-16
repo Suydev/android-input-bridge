@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.inputbridge.accessibility.ShizukuInputInjector
 import com.inputbridge.receiver.ui.theme.*
 
 /**
@@ -55,6 +56,8 @@ fun ReceiverPermissionsScreen(onBack: () -> Unit) {
     var notifGranted      by remember { mutableStateOf(false) }
     var overlayGranted    by remember { mutableStateOf(false) }
     var a11yEnabled       by remember { mutableStateOf(false) }
+    var shizukuAlive      by remember { mutableStateOf(false) }
+    var shizukuGranted    by remember { mutableStateOf(false) }
 
     fun refreshPermissions() {
         val pm = context.getSystemService(PowerManager::class.java)
@@ -74,6 +77,11 @@ fun ReceiverPermissionsScreen(onBack: () -> Unit) {
         a11yEnabled = am?.getEnabledAccessibilityServiceList(
             AccessibilityServiceInfo.FEEDBACK_GENERIC
         )?.any { it.resolveInfo.serviceInfo?.name == "com.inputbridge.accessibility.InputBridgeAccessibilityService" } == true
+
+        // BUG-132 FIX: surface Shizuku state so the user can grant it. Keyboard injection
+        // is impossible without Shizuku, so this must be visible and actionable.
+        shizukuAlive = runCatching { ShizukuInputInjector.isBinderAlive() }.getOrDefault(false)
+        shizukuGranted = runCatching { ShizukuInputInjector.isPermissionGranted() }.getOrDefault(false)
     }
 
     // Re-check on every resume so the UI reflects changes made in system settings.
@@ -123,8 +131,9 @@ fun ReceiverPermissionsScreen(onBack: () -> Unit) {
             // ── Accessibility service ─────────────────────────────────────────
             ReceiverPermItem(
                 title       = "Accessibility Service",
-                description = "REQUIRED. Allows the receiver to inject keyboard and mouse " +
-                        "events into any app. Without this, nothing works.\n\n" +
+                description = "REQUIRED for mouse/trackpad gesture injection. For real keyboard " +
+                        "key injection, also grant Shizuku (see below) — an accessibility service " +
+                        "alone cannot inject system key events, only drive a focused text field.\n\n" +
                         "Tap below → find 'InputBridge Input Controller' → enable it.",
                 granted     = a11yEnabled,
                 alwaysShowAction = true,
@@ -180,6 +189,30 @@ fun ReceiverPermissionsScreen(onBack: () -> Unit) {
                     )
                 },
                 actionLabel = "Open Overlay Settings",
+            )
+
+            // ── Shizuku (privileged injection) ────────────────────────────────────
+            // BUG-132 FIX: keyboard injection is impossible without Shizuku, so surface it
+            // prominently and make the grant one tap away.
+            ReceiverPermItem(
+                title       = "Shizuku (keyboard injection)",
+                description = if (!shizukuAlive) {
+                    "REQUIRED for real keyboard input. Install & start Shizuku (via Wireless " +
+                            "Debugging or ADB), then return here and grant permission. Without " +
+                            "Shizuku the app can only inject mouse/trackpad gestures — key " +
+                            "presses are impossible."
+                } else if (!shizukuGranted) {
+                    "Shizuku is running but permission is not granted. Tap below to grant it — " +
+                            "this is what enables real keyboard injection at 1–5ms latency."
+                } else {
+                    "Active — keyboard + mouse injected via InputManager (1–5ms)."
+                },
+                granted     = shizukuAlive && shizukuGranted,
+                alwaysShowAction = true,
+                action = {
+                    ShizukuInputInjector.requestPermissionIfNeeded(context as android.app.Activity)
+                },
+                actionLabel = if (shizukuGranted) "Re-check" else "Grant Shizuku Permission",
             )
 
             HorizontalDivider(color = ReceiverDim.copy(alpha = 0.3f))

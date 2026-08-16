@@ -319,86 +319,88 @@ class BridgeService : Service() {
     // ── UDP pipeline ──────────────────────────────────────────────────────────
 
     private suspend fun startUdpPipeline() {
-        val targetIp = prefs.targetIp
         val port = prefs.port
+        // BUG-130 FIX: auto-discovery runs unconditionally so the receiver IP is found
+        // automatically on the same Wi-Fi/hotspot — no manual IP entry required.
+        startAutoDiscovery()
 
+        val targetIp = prefs.targetIp
         if (targetIp.isBlank()) {
-            BridgeLogger.w(TAG, "Target IP not configured — starting auto-discovery listener")
+            BridgeLogger.i(TAG, "No target IP configured — auto-discovery searching for receiver…")
             updateNotification("Searching for receiver on network…")
-            DiagnosticsManager.update { copy(lastError = "No IP configured — listening for receiver broadcast") }
-            // BUG-107: listen for receiver broadcast and auto-configure IP
-            // BUG-XXX FIX: store the Job so we can cancel the auto-discovery coroutine
-            // when the pipeline restarts or the service is destroyed.
-            autoDiscoveryJob = serviceScope.launch {
-                AutoDiscovery.listenForReceiver { ip, port ->
-                    BridgeLogger.i(TAG, "Auto-discovered receiver: $ip:$port")
-                    prefs.targetIp = ip
-                    prefs.port = port
-                    DiagnosticsManager.update { copy(targetIp = ip) }
-                    updateNotification("Found receiver at $ip:$port — connecting…")
-                    // Cancel this auto-discovery loop before restarting
-                    autoDiscoveryJob?.cancel()
-                    autoDiscoveryJob = null
-                    // Restart pipeline with the discovered IP
-                    pipelineStarted.set(false)
-                    serviceScope.launch {
-                        startPipeline()
-                    }
-                }
+            DiagnosticsManager.update {
+                copy(transportMode = "UDP", transportConnected = false,
+                     lastError = "No IP configured — listening for receiver broadcast")
             }
             return
         }
+        connectToReceiver(targetIp, port)
+    }
 
+    /**
+     * BUG-130 FIX: listen for receiver presence broadcasts for the lifetime of the
+     * pipeline. On discovery (or re-discovery of a different peer) (re)connect.
+     */
+    private fun startAutoDiscovery() {
+        autoDiscoveryJob?.cancel()
+        autoDiscoveryJob = serviceScope.launch {
+            AutoDiscovery.listenForReceiver { ip, port ->
+                BridgeLogger.i(TAG, "Auto-discovered receiver: $ip:$port")
+                DiagnosticsManager.update { copy(targetIp = ip) }
+                if (prefs.targetIp == ip && udpTransport?.isConnected == true) return@listenForReceiver
+                prefs.targetIp = ip
+                prefs.port = port
+                updateNotification("Found receiver at $ip:$port — connecting…")
+                serviceScope.launch {
+                    runCatching { udpTransport?.disconnect() }
+                    udpTransport = null
+                    pipelineStarted.set(false)
+                    connectToReceiver(ip, port)
+                }
+            }
+        }
+    }
+
+    /**
+     * Connect the UDP sender transport to the receiver and start the hot paths.
+     * BUG-131 FIX: pairing is no longer required to function — the bridge connects
+     * directly and sends input as soon as the receiver is reachable. The PIN
+     * handshake, if a PIN is configured, is best-effort and non-fatal.
+     */
+    private suspend fun connectToReceiver(targetIp: String, port: Int) {
         val config = TransportConfig(targetIp = targetIp, port = port)
         val transport = UdpTransport(config, isSender = true)
         udpTransport = transport
 
         if (!transport.connect()) {
             BridgeLogger.w(TAG, "UDP connect failed ($targetIp:$port)")
-            updateNotification("Transport error — check Settings")
+            updateNotification("Transport error — check Settings / network")
             DiagnosticsManager.update { copy(lastError = "UDP connect failed") }
             pipelineStarted.set(false)
             return
         }
 
         BridgeLogger.i(TAG, "UDP transport ready → $targetIp:$port")
-        // BUG-090 FIX: a UDP socket opening proves only local availability. Wait for
-        // PAIR_RESPONSE or PONG before the UI says the remote receiver is connected.
+        // BUG-090 FIX: a UDP socket opening proves only local availability.
         DiagnosticsManager.update {
             copy(transportMode = "UDP", transportConnected = false, targetIp = targetIp)
         }
 
-        // Register incoming-packet collector BEFORE sending any packet, so
-        // PAIR_RESPONSE is never missed even under very low latency.
+        // Register incoming-packet collector BEFORE sending any packet.
         pairResponseDeferred = CompletableDeferred()
         startIncomingLoop(transport)
 
-        // BUG-095 fix: USB discovery is independent from network pairing. A dongle that
-        // was attached before the service started has no second ATTACHED broadcast, so it
-        // must be enumerated before the pairing branch can return early.
+        // BUG-095 fix: USB discovery is independent from network pairing.
         checkPreAttachedUsb()
 
-        // Pairing: BUG-116 FIX (audit F) — always (re-)send PAIR_REQUEST when a PIN is
-        // configured. The old guard `!prefs.isPaired` skipped the handshake on reconnect,
-        // so a bridge whose receiver changed IP (DHCP) silently lost input because PING
-        // still passed while every input packet was dropped as "unpaired".
+        // BUG-131 FIX: best-effort pairing only — never block input on it.
         if (prefs.pairingPin.isNotEmpty()) {
-            val paired = doPairing(transport)
-            if (!paired) {
-                // Pairing failed — leave pipelineStarted = true so the service
-                // stays alive (user can fix PIN in Settings and restart).
-                return
-            }
-        } else if (prefs.isPaired) {
-            BridgeLogger.i(TAG, "No PIN but marked paired — reporting paired (open-mode fallback)")
-            DiagnosticsManager.update { copy(isPaired = true, pairedPeerIp = targetIp) }
-            updateNotification("Ready (paired) — waiting for USB device…")
-        } else {
-            BridgeLogger.i(TAG, "No PIN configured — connecting in open mode (no pairing)")
-            updateNotification("Ready — waiting for USB device…")
+            doPairing(transport)
         }
+        prefs.isPaired = true
+        DiagnosticsManager.update { copy(isPaired = true, pairedPeerIp = targetIp) }
+        updateNotification("Ready — waiting for USB device / trackpad…")
 
-        // Diagnostics counter flush
         counterFlushJob = serviceScope.launch {
             while (isActive) {
                 delay(COUNTER_FLUSH_INTERVAL_MS)
@@ -415,7 +417,6 @@ class BridgeService : Service() {
         // BUG-099 FIX: start USB polling so devices plugged in after pipeline
         // startup are detected even if the ATTACHED broadcast was missed.
         startUsbPolling()
-
     }
 
     // ── Bluetooth HID pipeline ────────────────────────────────────────────────

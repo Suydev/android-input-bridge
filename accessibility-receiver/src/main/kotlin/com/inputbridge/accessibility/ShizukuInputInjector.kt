@@ -44,7 +44,33 @@ object ShizukuInputInjector {
         injectMethod = null
     }
 
+    /** BUG-132 FIX: the Shizuku runtime permission must be requested from an Activity.
+     *  Without it checkSelfPermission() is always denied and we silently fall back to the
+     *  accessibility path, which cannot inject key events at all. */
+    private const val PERMISSION_REQUEST_CODE = 1
+
+    private val permissionResultListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+        if (requestCode != PERMISSION_REQUEST_CODE) return@OnRequestPermissionResultListener
+        if (grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            BridgeLogger.i(TAG, "Shizuku permission granted — re-initializing injection")
+            init()
+            updateInjectionMode()
+        } else {
+            BridgeLogger.w(TAG, "Shizuku permission denied by user")
+            isAvailable = false
+            updateInjectionMode()
+        }
+    }
+
     private var listenersRegistered = false
+
+    /** True if the Shizuku app/binder is alive (installed + running). */
+    fun isBinderAlive(): Boolean = runCatching { Shizuku.pingBinder() }.getOrDefault(false)
+
+    /** True if this app has been granted the Shizuku permission. */
+    fun isPermissionGranted(): Boolean = runCatching {
+        Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED
+    }.getOrDefault(false)
 
     /**
      * Initialize Shizuku input injection.
@@ -84,6 +110,7 @@ object ShizukuInputInjector {
         try {
             Shizuku.addBinderReceivedListenerSticky(binderReceivedListener)
             Shizuku.addBinderDeadListener(binderDeadListener)
+            Shizuku.addRequestPermissionResultListener(permissionResultListener)
             listenersRegistered = true
             BridgeLogger.i(TAG, "Shizuku lifecycle listeners registered")
         } catch (t: Throwable) {
@@ -99,8 +126,32 @@ object ShizukuInputInjector {
         try {
             Shizuku.removeBinderReceivedListener(binderReceivedListener)
             Shizuku.removeBinderDeadListener(binderDeadListener)
+            Shizuku.removeRequestPermissionResultListener(permissionResultListener)
             listenersRegistered = false
         } catch (_: Throwable) { }
+    }
+
+    /**
+     * BUG-132 FIX: request the Shizuku permission from the foreground Activity if it has
+     * not been granted yet. Must be called from an Activity context (Shizuku shows a dialog).
+     * No-op if the Shizuku binder is not alive (app not installed/running).
+     */
+    fun requestPermissionIfNeeded(activity: android.app.Activity) {
+        if (!isBinderAlive()) {
+            BridgeLogger.w(TAG, "Shizuku binder not alive — cannot request permission (install & start Shizuku)")
+            return
+        }
+        if (isPermissionGranted()) {
+            init()
+            updateInjectionMode()
+            return
+        }
+        try {
+            Shizuku.requestPermission(PERMISSION_REQUEST_CODE)
+            BridgeLogger.i(TAG, "Shizuku permission request shown")
+        } catch (t: Throwable) {
+            BridgeLogger.e(TAG, "Shizuku.requestPermission failed", t)
+        }
     }
 
     /**
@@ -113,6 +164,13 @@ object ShizukuInputInjector {
         } catch (t: Throwable) {
             isAvailable = false
             false
+        }
+    }
+
+    /** Reflect the current injection mode into DiagnosticsManager. */
+    private fun updateInjectionMode() {
+        DiagnosticsManager.update {
+            copy(injectionMode = if (checkAvailability()) "Shizuku/InputManager" else "Accessibility/dispatchGesture")
         }
     }
 

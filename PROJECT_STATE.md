@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 036 — BUG-129: USB host permission requested from foreground Activity (2026-08-16)
+> **Last updated:** Session 037 — BUG-130/131/132: auto IP + remove pairing + fix Shizuku keyboard injection (2026-08-16)
 
 ---
 

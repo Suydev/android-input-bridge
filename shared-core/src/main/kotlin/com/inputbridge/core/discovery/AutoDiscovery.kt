@@ -38,17 +38,23 @@ object AutoDiscovery {
             socket.broadcast = true
 
             val message = "$BROADCAST_MSG:$listenPort".toByteArray(Charsets.UTF_8)
-            val broadcastAddr = getBroadcastAddress(socket)
+            // BUG-130 FIX: broadcast on EVERY interface's broadcast address plus the
+            // universal 255.255.255.255. The old code used only the first non-loopback
+            // interface, which on a hotspot/client setup could be the wrong subnet and
+            // the bridge never heard the announcement — leaving it stuck "Searching".
+            val targets = getAllBroadcastAddresses()
 
             while (true) {
-                try {
-                    val packet = DatagramPacket(
-                        message, message.size,
-                        broadcastAddr, DISCOVERY_PORT
-                    )
-                    socket.send(packet)
-                } catch (e: Exception) {
-                    BridgeLogger.w(TAG, "Broadcast send failed: ${e.message}")
+                for (addr in targets) {
+                    try {
+                        val packet = DatagramPacket(
+                            message, message.size,
+                            addr, DISCOVERY_PORT
+                        )
+                        socket.send(packet)
+                    } catch (e: Exception) {
+                        BridgeLogger.w(TAG, "Broadcast send to $addr failed: ${e.message}")
+                    }
                 }
                 kotlinx.coroutines.delay(BROADCAST_INTERVAL_MS)
             }
@@ -125,5 +131,28 @@ object AutoDiscovery {
         } catch (_: Exception) { }
         // Fallback: 255.255.255.255
         return InetAddress.getByName("255.255.255.255")
+    }
+
+    /**
+     * BUG-130 FIX: collect every usable broadcast address on the device — one per
+     * up, non-loopback interface — plus the universal 255.255.255.255. Broadcasting
+     * to all of them guarantees the peer on the active subnet actually receives the
+     * announcement regardless of which interface the OS reports first.
+     */
+    private fun getAllBroadcastAddresses(): List<InetAddress> {
+        val result = mutableListOf<InetAddress>()
+        try {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val networkInterface = interfaces.nextElement()
+                if (networkInterface.isLoopback || !networkInterface.isUp) continue
+                for (interfaceAddress in networkInterface.interfaceAddresses) {
+                    val broadcast = interfaceAddress.broadcast
+                    if (broadcast != null) result.add(broadcast)
+                }
+            }
+        } catch (_: Exception) { }
+        result.add(InetAddress.getByName("255.255.255.255"))
+        return result.distinct()
     }
 }

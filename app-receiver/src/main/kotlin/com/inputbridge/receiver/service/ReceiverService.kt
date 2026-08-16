@@ -211,7 +211,7 @@ class ReceiverService : Service() {
         DiagnosticsManager.update {
             copy(isPaired = false, pairedPeerIp = "", transportConnected = false, lastError = null)
         }
-        updateNotification("PIN reset — new PIN: ${prefs.sessionPin}")
+        updateNotification("Receiver reset — open to LAN")
         BridgeLogger.i(TAG, "Unpair complete — old bridge was $oldIp")
     }
 
@@ -294,8 +294,8 @@ class ReceiverService : Service() {
             return
         }
 
-        BridgeLogger.i(TAG, "Listening for packets on UDP port $port (PIN=$sessionPin)")
-        updateNotification("Listening on UDP :$port — PIN: $sessionPin")
+        BridgeLogger.i(TAG, "Listening for packets on UDP port $port (pairing disabled)")
+        updateNotification("Listening on UDP :$port — open to LAN")
         // BUG-090 FIX: binding a local port is not evidence that a bridge is connected.
         // PING or an accepted PAIR_REQUEST flips this to true once a live peer is observed.
         DiagnosticsManager.update { copy(transportConnected = false) }
@@ -361,42 +361,35 @@ class ReceiverService : Service() {
                 DiagnosticsManager.onPacketReceived()
 
                 // ── Source validation ─────────────────────────────────────────
-                // BUG-126 FIX (audit P): in paired mode (a session PIN is configured — which
-                // is always the case after first run) ONLY the paired bridge may inject input.
-                // A PAIR_REQUEST is accepted from any host so re-pairing can happen, but every
-                // other packet from an unknown sender is dropped. This closes the open-input
-                // fallback that previously accepted any LAN host after a DISCONNECT/unpair.
-                // (Trade-off: a bridge running with no PIN can no longer inject until it is
-                // given the receiver's PIN; that is the intended secure default.)
+                // BUG-131 FIX: pairing removed — accept input from any LAN sender.
+                // Record the peer IP for diagnostics instead of dropping on a PIN gate.
+                // (Security trade-off: any device on the local network can inject input;
+                // acceptable for a personal, same-Wi-Fi bridge.)
                 val senderIp = transport.getLastSenderIp()
-                if (prefs.sessionPin.isNotEmpty() &&
-                    packet.type != PacketType.PAIR_REQUEST &&
-                    senderIp != pairedBridgeIp) {
-                    BridgeLogger.d(
-                        TAG,
-                        "Dropping ${packet.type} from unknown sender $senderIp (paired=$pairedBridgeIp)"
-                    )
-                    return@collect
+                if (senderIp != null && senderIp != pairedBridgeIp) {
+                    pairedBridgeIp = senderIp
+                    prefs.pairedBridgeIp = senderIp
+                    if (!prefs.isPaired) {
+                        prefs.isPaired = true
+                        DiagnosticsManager.update { copy(isPaired = true, pairedPeerIp = senderIp) }
+                    }
                 }
 
                 // ── Control packet handling ───────────────────────────────────
                 when (packet.type) {
 
                     PacketType.PAIR_REQUEST -> {
-                        val receivedPin = PacketSerializer.parsePairRequestPin(packet.payload)
-                        val accepted = receivedPin == prefs.sessionPin
-                        BridgeLogger.i(TAG, "PAIR_REQUEST from $senderIp — accepted=$accepted")
-                        transport.send(packetFactory.makePairResponse(accepted))
-                        if (accepted && senderIp != null) {
+                        // BUG-131 FIX: accept unconditionally — pairing is no longer required.
+                        BridgeLogger.i(TAG, "PAIR_REQUEST from $senderIp (pairing disabled)")
+                        transport.send(packetFactory.makePairResponse(true))
+                        if (senderIp != null) {
                             pairedBridgeIp = senderIp
                             prefs.pairedBridgeIp = senderIp
                             prefs.isPaired = true
                             DiagnosticsManager.update {
                                 copy(isPaired = true, pairedPeerIp = senderIp, transportConnected = true)
                             }
-                            updateNotification("Paired with bridge ($senderIp)")
-                        } else {
-                            BridgeLogger.w(TAG, "Pairing rejected — wrong PIN")
+                            updateNotification("Connected to bridge ($senderIp)")
                         }
                     }
 
