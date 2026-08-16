@@ -197,7 +197,6 @@ fun BridgeScreen(
                 )
             }
         }
-        }
 
         // STOP (text button, always red, only shown when active)
         if (isBridgeActive || diagnostics.bridgeServiceRunning) {
