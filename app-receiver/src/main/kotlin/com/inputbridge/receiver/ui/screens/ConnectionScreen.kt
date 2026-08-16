@@ -40,8 +40,6 @@ fun ConnectionScreen(
     val diagnostics      by viewModel.diagnostics.collectAsStateWithLifecycle()
     val isReceiverActive by viewModel.isReceiverActive.collectAsStateWithLifecycle()
     val connectionLabel  by viewModel.connectionLabel.collectAsStateWithLifecycle()
-    val sessionPin       by viewModel.sessionPin.collectAsStateWithLifecycle()
-    val isPaired         by viewModel.isPaired.collectAsStateWithLifecycle()
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         // ── Top toolbar ───────────────────────────────────────────────────────
@@ -121,48 +119,33 @@ fun ConnectionScreen(
             )
             Spacer(Modifier.height(8.dp))
 
-            // ── Pairing PIN display ───────────────────────────────────────────
+            // ── Auto-connect guidance ─────────────────────────────────────────
             Text(
-                "PAIRING PIN",
+                "AUTO-CONNECT",
                 color = ReceiverDim, fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace, letterSpacing = 2.sp,
             )
 
-            Text(
-                text = if (sessionPin.isNotEmpty()) sessionPin else "------",
-                color = if (isPaired) ReceiverDim else ReceiverOnSurface,
-                fontSize = 36.sp,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 8.sp,
-            )
-
-            if (isPaired) {
+            if (diagnostics.transportConnected) {
                 Text(
-                    "✓ Paired with ${diagnostics.pairedPeerIp}",
+                    "✓ Bridge linked (${diagnostics.pairedPeerIp})",
                     color = ReceiverPrimary,
                     fontSize = 12.sp,
                     fontFamily = FontFamily.Monospace,
                 )
             } else {
                 Text(
-                    "Enter this PIN in the bridge app → Settings → Pairing PIN",
+                    "Start the bridge app on the same Wi-Fi — it connects automatically. " +
+                            "No IP or code needed.",
                     color = ReceiverDim,
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
+                    lineHeight = 16.sp,
                 )
             }
 
-            TextButton(onClick = { viewModel.generateNewPin() }) {
-                Text(
-                    "REGENERATE PIN",
-                    color = ReceiverDim, fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace, letterSpacing = 2.sp,
-                )
-            }
-
-            // ── Trackpad button (only when paired) ────────────────────────────
-            if (isPaired && diagnostics.transportConnected) {
+            // ── Trackpad button (once a bridge is connected) ──────────────────
+            if (diagnostics.transportConnected) {
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(
                     onClick = { onTrackpad() },

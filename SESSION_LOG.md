@@ -1,3 +1,28 @@
+## Session 038 — Bidirectional auto-discovery + remove IP/PIN UI (BUG-133)
+**Date:** 2026-08-16
+**Agent:** opencode
+**Status:** ✅ Complete
+
+### Goals
+- User: "the old code is still expecting ip and code in the ui ux" and "without those app don't connect, fix that".
+- Make connection work automatically (no IP, no PIN) and remove the obsolete manual-entry UI.
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|----|----------|-------------|---------|
+| BUG-133 | Critical | One-way broadcast discovery dropped on real Wi-Fi → bridge never connected without manual IP+PIN | ✅ FIXED |
+
+### What Was Changed
+- `AutoDiscovery.kt`: added `startQuerying()` (bridge broadcasts QUERY) and `listenForQueriesAndRespond()`
+  (receiver answers QUERY directly to the bridge's discovery port 54322). Receiver still broadcasts presence.
+- `BridgeService.kt`: `startAutoDiscovery()` now also launches `startQuerying()`.
+- `ReceiverService.kt`: also launches `listenForQueriesAndRespond(port)`.
+- `SettingsScreen.kt` (bridge): removed manual Receiver IP field + Pairing PIN section; shows auto-discovered status.
+- `ConnectionScreen.kt` (receiver): removed PIN display / "enter PIN in bridge" / Regenerate PIN; shows auto-connect guidance; trackpad button gated on `transportConnected` only.
+- `ReceiverDiagnosticsScreen.kt`: removed obsolete "Session PIN" row.
+
+---
+
 # Session Log
 
 ---

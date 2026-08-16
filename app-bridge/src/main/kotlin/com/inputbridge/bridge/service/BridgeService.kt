@@ -344,6 +344,9 @@ class BridgeService : Service() {
     private fun startAutoDiscovery() {
         autoDiscoveryJob?.cancel()
         autoDiscoveryJob = serviceScope.launch {
+            // BUG-133 FIX: listen for the receiver's announcement AND actively query so a
+            // dropped broadcast in either direction still results in a connection.
+            launch { AutoDiscovery.startQuerying() }
             AutoDiscovery.listenForReceiver { ip, port ->
                 BridgeLogger.i(TAG, "Auto-discovered receiver: $ip:$port")
                 DiagnosticsManager.update { copy(targetIp = ip) }

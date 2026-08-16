@@ -13,18 +13,26 @@ import kotlinx.coroutines.launch
 /**
  * UDP broadcast-based auto-discovery for finding the receiver on the local network.
  *
- * Protocol:
+ * Protocol (bidirectional, BUG-133 FIX):
  * - Discovery port: 54322 (different from the main data port 54321)
- * - Receiver broadcasts "INPUTBRIDGE_RECEIVER:<port>" every 3 seconds on the broadcast address
- * - Bridge listens on port 54322 and extracts the sender IP + port from the packet
- * - No handshake needed — just the broadcast message
+ * - Receiver broadcasts "INPUTBRIDGE_RECEIVER:<port>" every 3 seconds on every broadcast address.
+ * - Bridge ALSO broadcasts "INPUTBRIDGE_QUERY" every 2 seconds on every broadcast address.
+ * - The receiver listens for QUERY and replies "INPUTBRIDGE_RECEIVER:<port>" directly to the
+ *   bridge's source address+port.
+ * - The bridge listens for RECEIVER announcements AND the receiver's reply to QUERY.
+ *
+ * Making both sides both broadcast and listen guarantees discovery works even if one
+ * direction's broadcast packet is dropped by the Wi-Fi stack (common on hotspots), so the
+ * bridge connects without any manual IP or code entry.
  */
 object AutoDiscovery {
 
     private const val TAG = "AutoDiscovery"
     const val DISCOVERY_PORT = 54322
     const val BROADCAST_MSG = "INPUTBRIDGE_RECEIVER"
+    const val QUERY_MSG = "INPUTBRIDGE_QUERY"
     private const val BROADCAST_INTERVAL_MS = 3000L
+    private const val QUERY_INTERVAL_MS = 2000L
 
     /**
      * Start broadcasting this device's presence as a receiver.
@@ -66,7 +74,87 @@ object AutoDiscovery {
     }
 
     /**
-     * Listen for receiver broadcasts. Returns the receiver's IP and port.
+     * Bridge side: periodically broadcast a QUERY so any receiver that missed our listen
+     * window (or whose own broadcast was dropped) answers us directly.
+     */
+    suspend fun startQuerying() {
+        var socket: DatagramSocket? = null
+        try {
+            socket = DatagramSocket(null)
+            socket.reuseAddress = true
+            socket.broadcast = true
+            val message = QUERY_MSG.toByteArray(Charsets.UTF_8)
+            val targets = getAllBroadcastAddresses()
+            while (true) {
+                for (addr in targets) {
+                    try {
+                        socket.send(DatagramPacket(message, message.size, addr, DISCOVERY_PORT))
+                    } catch (e: Exception) {
+                        BridgeLogger.w(TAG, "Query send to $addr failed: ${e.message}")
+                    }
+                }
+                kotlinx.coroutines.delay(QUERY_INTERVAL_MS)
+            }
+        } catch (e: Exception) {
+            BridgeLogger.e(TAG, "startQuerying failed: ${e.message}")
+        } finally {
+            socket?.close()
+        }
+    }
+
+    /**
+     * Receiver side: listen for QUERY broadcasts and reply directly to the querying bridge
+     * with our RECEIVER announcement. This closes the loop when the bridge's listen socket
+     * never received our periodic broadcast (dropped packet on the Wi-Fi stack).
+     */
+    suspend fun listenForQueriesAndRespond(listenPort: Int) = coroutineScope {
+        val socket = DatagramSocket(null).apply {
+            reuseAddress = true
+            soTimeout = 2000
+            bind(InetSocketAddress(DISCOVERY_PORT))
+        }
+        launch {
+            try {
+                while (isActive) kotlinx.coroutines.delay(1000)
+            } finally {
+                socket.close()
+            }
+        }
+        val reply = "$BROADCAST_MSG:$listenPort".toByteArray(Charsets.UTF_8)
+        try {
+            val buffer = ByteArray(256)
+            while (isActive) {
+                val packet = DatagramPacket(buffer, buffer.size)
+                try {
+                    socket.receive(packet)
+                    val msg = String(packet.data, 0, packet.length, Charsets.UTF_8).trim()
+                    if (msg == QUERY_MSG) {
+                        val from = packet.address ?: continue
+                        BridgeLogger.i(TAG, "Received QUERY from $from — replying on $DISCOVERY_PORT")
+                        try {
+                            // Reply to the bridge's discovery listen port (54322), NOT the
+                            // query's ephemeral source port, so the bridge's listener receives it.
+                            socket.send(DatagramPacket(reply, reply.size, from, DISCOVERY_PORT))
+                        } catch (e: Exception) {
+                            BridgeLogger.w(TAG, "Query reply to $from failed: ${e.message}")
+                        }
+                    }
+                } catch (_: java.net.SocketTimeoutException) {
+                    // Normal timeout, continue listening
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    BridgeLogger.w(TAG, "Query listen failed: ${e.message}")
+                    break
+                }
+            }
+        } finally {
+            socket.close()
+        }
+    }
+
+    /**
+     * Listen for receiver broadcasts (and receiver replies to our QUERY).
+     * Returns the receiver's IP and port.
      * BUG-XXX FIX: now a suspend function that checks coroutine cancellation.
      * The old blocking implementation would ignore cancellation for up to 10s
      * per timeout cycle. Now uses coroutineScope + launch to close socket on cancel.

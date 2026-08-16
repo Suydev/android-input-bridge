@@ -7,3 +7,4 @@
 - [UDP and USB startup lifecycle](udp-usb-lifecycle.md) — replies require the observed sender endpoint; set loop guard flags and collectors before starting background readers
 - [USB host permission from foreground Activity](usb-permission-foreground.md) — on Android 10/MIUI request UsbManager permission from a foreground Activity, not a background Service; FLAG_MUTABLE PendingIntent
 - [Keyboard injection needs Shizuku](keyboard-needs-shizuku.md) — receiver keyboard requires Shizuku/InputManager; AccessibilityService can't inject key events, only drive a focused EditText
+- [UDP discovery must be bidirectional](udp-discovery-bidirectional.md) — bridge must query AND receiver must answer on port 54322; one-way broadcast is dropped on real Wi-Fi (BUG-133)

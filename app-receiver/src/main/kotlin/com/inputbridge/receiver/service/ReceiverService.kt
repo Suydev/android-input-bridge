@@ -305,8 +305,13 @@ class ReceiverService : Service() {
 
         // BUG-107: start UDP broadcast auto-discovery so the bridge can find this receiver
         // automatically without manually entering the IP address.
+        // BUG-133 FIX: also listen for the bridge's QUERY and answer it directly, so discovery
+        // succeeds even if our periodic broadcast was dropped by the Wi-Fi stack.
         serviceScope.launch {
             runCatching { AutoDiscovery.startBroadcasting(port) }
+        }
+        serviceScope.launch {
+            runCatching { AutoDiscovery.listenForQueriesAndRespond(port) }
         }
 
         // Periodic diagnostics flush (includes sequence drop count)

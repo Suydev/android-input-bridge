@@ -304,3 +304,11 @@ Manual hardware test (Portronics Key2 Combo) not yet performed.
 
 **Phase 5 remainder**: rolling latency average display, latency trace timestamps across pipeline stages.
 **Phase 4 remainder**: robust error handling for accessibility service disconnect and secure windows.
+
+## Session 038 auto-discovery invariant (BUG-133)
+
+- **Discovery must be bidirectional.** One-way receiver broadcast is dropped on real Wi-Fi/hotspot
+  stacks, so the bridge never connects without manual IP+PIN. The bridge broadcasts `INPUTBRIDGE_QUERY`
+  and the receiver listens for it and replies `INPUTBRIDGE_RECEIVER:<port>` directly to the bridge's
+  discovery listen port (DISCOVERY_PORT = 54322) — NOT the query's ephemeral source port, or the
+  bridge's listener never sees the reply. The receiver also keeps broadcasting its presence.

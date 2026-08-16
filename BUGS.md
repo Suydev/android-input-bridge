@@ -2446,3 +2446,23 @@ AccessibilityService fundamentally cannot inject system key events — only Shiz
 one-tap grant button, with clear instructions to install/start Shizuku first.
 
 
+
+## BUG-133 — Auto-discovery unreliable: bridge only connected with manual IP + PIN
+
+**Description**: After removing the manual IP/PIN UI (BUG-130/131) the apps still failed to
+connect automatically. The original discovery relied solely on the receiver broadcasting
+`INPUTBRIDGE_RECEIVER` and the bridge passively listening. On real Wi-Fi/hotspot stacks one
+direction's broadcast packet is frequently dropped, so the bridge stayed stuck "Searching" and
+only linked when the user typed the receiver IP and PIN by hand.
+**Steps to reproduce**: Two devices on same Wi-Fi; start receiver then bridge; no manual IP/PIN
+entered. Bridge never connects.
+**Expected behavior**: Bridge auto-connects within a few seconds of both apps running, no UI entry.
+**Actual behavior**: Connection never happens without manual IP + PIN.
+**Suspected cause**: One-way broadcast discovery is fragile; dropped broadcast → no discovery.
+**Files involved**: `shared-core/.../discovery/AutoDiscovery.kt`, `app-bridge/.../service/BridgeService.kt`, `app-receiver/.../service/ReceiverService.kt`, `app-bridge/.../ui/screens/SettingsScreen.kt`, `app-receiver/.../ui/screens/ConnectionScreen.kt`, `app-receiver/.../ui/screens/ReceiverDiagnosticsScreen.kt`
+**Priority**: Critical
+**Status**: ✅ FIXED (Session 038)
+**Fix**: Discovery made bidirectional — bridge also broadcasts `INPUTBRIDGE_QUERY` and the receiver
+listens for it and replies directly to the bridge's discovery port (54322); receiver still
+periodically broadcasts its presence. UI no longer asks for IP or PIN: bridge Settings shows
+auto-discovered status, receiver Connection screen shows auto-connect guidance.

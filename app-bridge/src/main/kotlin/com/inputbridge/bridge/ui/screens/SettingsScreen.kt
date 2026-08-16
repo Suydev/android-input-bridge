@@ -41,11 +41,8 @@ fun SettingsScreen(
     viewModel: BridgeViewModel,
 ) {
     val config     by viewModel.config.collectAsStateWithLifecycle()
-    val isPaired   by viewModel.isPaired.collectAsStateWithLifecycle()
     val btAddress  by viewModel.btTargetAddress.collectAsStateWithLifecycle()
 
-    var targetIpInput  by remember { mutableStateOf(config.transport.targetIp) }
-    var pinInput       by remember { mutableStateOf(config.security.pairingToken) }
     var btAddressInput by remember { mutableStateOf(btAddress) }
 
     val isBluetoothHid = config.transport.mode == TransportMode.BLUETOOTH_HID
@@ -141,19 +138,18 @@ fun SettingsScreen(
                             fontFamily = FontFamily.Monospace, letterSpacing = 2.sp,
                         )
                         Text(
-                            "Both devices must be on the SAME Wi-Fi network.\n\n" +
+                            "Both devices find each other AUTOMATICALLY on the same Wi-Fi — " +
+                                    "no IP or code to type.\n\n" +
                                     "★ Easiest — tablet as hotspot:\n" +
                                     "  1. OnePlus Pad Go: Settings → Hotspot → Enable.\n" +
                                     "  2. Connect this phone to that hotspot.\n" +
-                                    "  3. Tablet IP = 192.168.43.1  ← enter below.\n\n" +
+                                    "  3. Start the receiver app on the tablet, then this bridge app.\n\n" +
                                     "Option B — Same home/office router:\n" +
-                                    "  1. Connect both to the same Wi-Fi.\n" +
-                                    "  2. Tablet: Settings → Wi-Fi → tap network → IP address.\n" +
-                                    "  3. Enter that IP below.\n\n" +
-                                    "Option C — Phone as hotspot:\n" +
-                                    "  1. This phone: Settings → Hotspot → Enable.\n" +
-                                    "  2. Connect the tablet to the phone hotspot.\n" +
-                                    "  3. Find the tablet's IP in Hotspot → Connected devices.",
+                                    "  1. Connect both devices to the same Wi-Fi.\n" +
+                                    "  2. Start the receiver app on the tablet, then this bridge app.\n\n" +
+                                    "The bridge broadcasts on the network and connects as soon as the " +
+                                    "receiver announces itself. If it stays 'Searching', confirm both are " +
+                                    "on the SAME network and the receiver is running.",
                             color    = BridgeDim,
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
@@ -162,14 +158,9 @@ fun SettingsScreen(
                     }
                 }
 
-                OutlinedTextField(
-                    value = targetIpInput,
-                    onValueChange = { targetIpInput = it; viewModel.setTargetIp(it) },
-                    label = { Text("Receiver IP Address", fontFamily = FontFamily.Monospace) },
-                    placeholder = { Text("192.168.x.x", fontFamily = FontFamily.Monospace) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = outlinedTextFieldColors(),
+                Text(
+                    "Receiver IP: ${if (config.transport.targetIp.isNotBlank()) config.transport.port.let { config.transport.targetIp } else "auto-discovered"}",
+                    color = BridgeDim, fontSize = 12.sp, fontFamily = FontFamily.Monospace,
                 )
 
                 Text(
@@ -213,54 +204,6 @@ fun SettingsScreen(
                     "Leave empty to advertise and wait for the host to connect.",
                     color = BridgeDim, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
                 )
-
-                HorizontalDivider(color = BridgeDim.copy(alpha = 0.3f))
-            }
-
-            // ── Pairing ───────────────────────────────────────────────────────
-
-            if (!isBluetoothHid) {
-                SectionHeader("Pairing")
-
-                Text(
-                    "Enter the 6-digit PIN shown on the receiver app.",
-                    color = BridgeDim, fontSize = 12.sp, fontFamily = FontFamily.Monospace,
-                )
-
-                OutlinedTextField(
-                    value = pinInput,
-                    onValueChange = { v ->
-                        val digits = v.filter { it.isDigit() }.take(6)
-                        pinInput = digits
-                        viewModel.setPairingPin(digits)
-                    },
-                    label = { Text("Pairing PIN", fontFamily = FontFamily.Monospace) },
-                    placeholder = { Text("123456", fontFamily = FontFamily.Monospace) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = outlinedTextFieldColors(),
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text(
-                        text = if (isPaired) "Status: ✓ Paired" else "Status: Not paired",
-                        color = if (isPaired) BridgePrimary else BridgeDim,
-                        fontSize = 12.sp, fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.align(Alignment.CenterVertically),
-                    )
-                    if (isPaired) {
-                        TextButton(
-                            onClick = { viewModel.clearPairing() },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                        ) {
-                            Text("Clear", color = BridgeError, fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace)
-                        }
-                    }
-                }
 
                 HorizontalDivider(color = BridgeDim.copy(alpha = 0.3f))
             }
