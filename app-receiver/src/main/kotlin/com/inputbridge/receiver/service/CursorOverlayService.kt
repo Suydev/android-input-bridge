@@ -292,7 +292,7 @@ private class CursorTrailView(context: android.content.Context) : View(context) 
             invalidate()
         }
         addListener(object : android.animation.AnimatorListenerAdapter() {
-            override fun onAnimationEnd(animation: android.animation.Animator?) {
+            override fun onAnimationEnd(animation: android.animation.Animator) {
                 isRippleActive = false
                 invalidate()
             }
