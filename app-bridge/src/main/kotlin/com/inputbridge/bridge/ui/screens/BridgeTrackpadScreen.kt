@@ -35,6 +35,7 @@ import com.inputbridge.transport.wifi.UdpTransport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.sqrt
@@ -90,11 +91,11 @@ fun BridgeTrackpadScreen(
     var isConnected by remember { mutableStateOf(false) }
     val transportState = remember { mutableStateOf<UdpTransport?>(null) }
     val packetFactory = remember { EventPacketFactory() }
-    val sendScope = remember { CoroutineScope(Dispatchers.IO + SupervisorJob()) }
 
     // Connect transport on mount
     DisposableEffect(Unit) {
-        val job = sendScope.launch {
+        val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        val job = scope.launch {
             val config = TransportConfig(
                 targetIp = prefs.targetIp,
                 port = prefs.port,
@@ -108,12 +109,13 @@ fun BridgeTrackpadScreen(
         }
         onDispose {
             job.cancel()
-            sendScope.launch {
+            scope.launch {
                 transportState.value?.let { t ->
                     runCatching { t.disconnect() }
                 }
                 transportState.value = null
             }
+            scope.cancel()
         }
     }
 
@@ -135,7 +137,7 @@ fun BridgeTrackpadScreen(
                         sendEvent = { event ->
                             val transport = transportState.value ?: return@awaitTrackpadGesture
                             val packet = packetFactory.fromEvent(event) ?: return@awaitTrackpadGesture
-                            sendScope.launch { runCatching { transport.sendDirect(packet) } }
+                            transport.sendDirect(packet)
                         },
                     )
                 },
@@ -209,7 +211,7 @@ private suspend fun PointerInputScope.awaitTrackpadGesture(
     boxSize: () -> IntSize,
     density: Float,
     setTouching: (Boolean) -> Unit,
-    sendEvent: suspend (InputEvent) -> Unit,
+    sendEvent: (InputEvent) -> Unit,
 ) {
     val deadzonePx = DEADZONE_DP * density
 
