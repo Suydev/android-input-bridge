@@ -628,6 +628,9 @@ class InputBridgeAccessibilityService : AccessibilityService() {
                     }
                 } catch (e: Exception) {
                     // Continue to next node
+                } finally {
+                    // BUG-XXX FIX: recycle the node now that we are done with it.
+                    node.recycle()
                 }
             }
         }
@@ -637,8 +640,11 @@ class InputBridgeAccessibilityService : AccessibilityService() {
 
     /**
      * Recursively find all editable nodes in the accessibility tree.
-     * BUG-XXX FIX: recycle child nodes obtained via getChild() to avoid
-     * pool exhaustion under sustained input.
+     * BUG-XXX FIX: recycle intermediate (non-editable) child nodes obtained via
+     * getChild() to avoid pool exhaustion under sustained input. Editable nodes are
+     * kept in [result] and MUST NOT be recycled here — the caller in injectTextInternal
+     * recycles them after use. Recycling a node that is still referenced and later used
+     * throws IllegalStateException: Cannot perform this action on a recycled node.
      */
     private fun findEditableNodes(node: AccessibilityNodeInfo, result: MutableList<AccessibilityNodeInfo>) {
         if (node.isEditable) {
@@ -646,8 +652,10 @@ class InputBridgeAccessibilityService : AccessibilityService() {
         }
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
+            val childIsEditable = child.isEditable
             findEditableNodes(child, result)
-            child.recycle()
+            // Only recycle intermediate nodes that are NOT held in result.
+            if (!childIsEditable) child.recycle()
         }
     }
 

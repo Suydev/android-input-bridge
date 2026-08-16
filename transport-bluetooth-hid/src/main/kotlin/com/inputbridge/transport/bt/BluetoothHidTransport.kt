@@ -239,13 +239,11 @@ class BluetoothHidTransport(private val context: Context) : Transport {
      * Returns false if no host is connected or the report could not be sent.
      */
     fun sendInputEvent(event: InputEvent): Boolean {
-        // BUG-XXX FIX: capture both references atomically to avoid a concurrent
-        // disconnect() setting one to null between the two reads.
+        // BUG-XXX FIX: capture both references into locals so a concurrent
+        // disconnect() (which nulls the fields) cannot leave us with a null
+        // hid or host mid-dispatch. The rest of the method uses only the locals.
         val hid  = hidDevice ?: return false
         val host = connectedHost ?: return false
-        // Second check: if either became null between our read and this point,
-        // the try/catch will handle the NPE safely.
-        if (hidDevice == null || connectedHost == null) return false
         return try {
             when (event) {
                 is InputEvent.KeyDown         -> hid.sendReport(host, HidDescriptor.REPORT_ID_KEYBOARD, reportBuilder.onKeyDown(event))
