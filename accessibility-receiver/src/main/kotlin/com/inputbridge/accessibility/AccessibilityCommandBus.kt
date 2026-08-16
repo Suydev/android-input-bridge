@@ -276,13 +276,12 @@ object AccessibilityCommandBus {
             is InputEvent.TextInput,
             is InputEvent.ModifierStateChanged,
             is InputEvent.NavigationAction -> {
-                // BUG-140 FIX: when Shizuku (the 1-5ms fast path) is available, inject the
-                // Shizuku-capable events inline on this receive thread instead of hopping
-                // through commandFlow → Dispatchers.Main → (IO for Shizuku). Shizuku is a
-                // binder IPC safe from any thread, so this keeps keyboard/scroll/right-click
-                // on the highest-priority path. Events with no Shizuku equivalent still fall
-                // back to commandFlow (a11y on Main); left-button drag/click is intentionally
-                // excluded (it relies on accessibility gesture strokes).
+                // BUG-140 FIX: when Shizuku (the 1-5ms fast path) is available, inject key-down
+                // inline on this receive thread instead of hopping through commandFlow → Main.
+                // [ShizukuInputInjector.injectKeyEvent] is a plain binder call, so this runs with
+                // zero coroutine dispatch on the highest-priority thread. Scroll/right-click use
+                // Shizuku SUSPEND functions and stay on the commandFlow → Main → IO path; events
+                // with no Shizuku equivalent fall back to commandFlow (a11y on Main).
                 if (ShizukuInputInjector.checkAvailability() && injectShizukuFastPath(event)) return
                 if (!commandFlow.tryEmit(event)) {
                     BridgeLogger.w(TAG, "CommandFlow full — dropped ${event::class.simpleName}")
@@ -320,19 +319,17 @@ object AccessibilityCommandBus {
     // ── BUG-140 FIX: Shizuku fast-path helpers ────────────────────────────────
 
     /**
-     * Inject keyboard/scroll/right-click via Shizuku inline on the calling thread when
-     * Shizuku is available. Returns true if the event was handled (caller skips commandFlow).
-     * Only covers events whose injection has no accessibility-service gesture-state dependency
-     * (left-button drag/click, text, and navigation are deliberately excluded — they run on Main
-     * through [handleEvent]). Written as explicit `is` checks (not a sealed `when`) so it does
-     * not need an exhaustive `else ->` (AGENTS.md §4.2).
+     * Inject keyboard via Shizuku inline on the calling (receive) thread when Shizuku is available.
+     * Returns true if the event was handled (caller skips commandFlow). Only [InputEvent.KeyDown] is
+     * fast-pathed: [ShizukuInputInjector.injectKeyEvent] is a plain binder call (non-suspend), so it
+     * runs with zero coroutine dispatch on the highest-priority thread. Scroll/right-click use Shizuku
+     * SUSPEND functions and MUST run inside a coroutine, so they stay on the commandFlow → Main → IO
+     * path in [handleEvent]; left-button drag/click, text and navigation are excluded entirely (a11y
+     * gesture strokes on Main). Written as explicit `is` checks (not a sealed `when`) so it does not
+     * need an exhaustive `else ->` (AGENTS.md §4.2).
      */
     private fun injectShizukuFastPath(event: InputEvent): Boolean {
         if (event is InputEvent.KeyDown) { shizukuInjectKeyDown(event); return true }
-        if (event is InputEvent.Scroll) { shizukuInjectScroll(event); return true }
-        if (event is InputEvent.MouseButtonDown && event.button == MouseButton.RIGHT) {
-            shizukuInjectRightLongPress(); return true
-        }
         return false
     }
 
@@ -343,21 +340,10 @@ object AccessibilityCommandBus {
         ShizukuInputInjector.injectKeyEvent(keyDown)
     }
 
-    private fun shizukuInjectScroll(event: InputEvent.Scroll) {
-        val scrollDx = event.dx * SCROLL_PIXEL_MULTIPLIER
-        val scrollDy = event.dy * SCROLL_PIXEL_MULTIPLIER
-        ShizukuInputInjector.swipe(
-            x1 = cursorX,
-            y1 = cursorY,
-            x2 = (cursorX - scrollDx).coerceIn(0f, screenWidth - 1f),
-            y2 = (cursorY - scrollDy).coerceIn(0f, screenHeight - 1f),
-            durationMs = SCROLL_DURATION_MS,
-        )
-    }
-
-    private fun shizukuInjectRightLongPress() {
-        ShizukuInputInjector.longPress(cursorX, cursorY)
-    }
+    // BUG-140 FIX: Shizuku `swipe`/`longPress` are SUSPEND functions (they must run inside a
+    // coroutine), so they are intentionally NOT fast-pathed inline. Scroll and right-click keep
+    // the commandFlow → Main → IO path below. Only `injectKeyEvent` (a plain binder call) is
+    // fast-pathed, which is the high-frequency keyboard win.
 
     private fun handleEvent(event: InputEvent) {
         val svc = service ?: run {
@@ -393,7 +379,7 @@ object AccessibilityCommandBus {
                     }
                     MouseButton.RIGHT   -> {
                         if (ShizukuInputInjector.checkAvailability()) {
-                            shizukuInjectRightLongPress()
+                            scope.launch(Dispatchers.IO) { ShizukuInputInjector.longPress(cursorX, cursorY) }
                         } else {
                             svc.longPress(cursorX, cursorY)
                         }
@@ -433,7 +419,15 @@ object AccessibilityCommandBus {
                     "→ swipe(${cursorX.toInt()},${cursorY.toInt()} → " +
                     "${(cursorX - scrollDx).toInt()},${(cursorY - scrollDy).toInt()})")
                 if (ShizukuInputInjector.checkAvailability()) {
-                    shizukuInjectScroll(event)
+                    scope.launch(Dispatchers.IO) {
+                        ShizukuInputInjector.swipe(
+                            x1 = cursorX,
+                            y1 = cursorY,
+                            x2 = (cursorX - scrollDx).coerceIn(0f, screenWidth - 1f),
+                            y2 = (cursorY - scrollDy).coerceIn(0f, screenHeight - 1f),
+                            durationMs = SCROLL_DURATION_MS,
+                        )
+                    }
                 } else {
                     svc.swipe(
                         x1 = cursorX,

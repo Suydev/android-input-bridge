@@ -2610,7 +2610,7 @@ so that extra hop is pure latency with no benefit when Shizuku (the 1-5ms path) 
 converter boxes Pair/Triple per packet.
 **Expected behavior**: Converter builds InputEvent with zero Pair/Triple allocation; Shizuku-capable
 keyboard/scroll/right-click inject inline on the highest-priority receive thread, skipping commandFlow.
-**Actual behavior**: Per-packet Pair/Triple allocation; Shizuku injections take an extra coroutine dispatch hop.
+**Actual behavior**: Per-packet Pair/Triple allocation; Shizuku KeyDown injection takes an extra coroutine dispatch hop.
 **Suspected cause**: Parser helpers returned boxed tuples; post() always enqueued to commandFlow regardless of
 whether Shizuku could inject inline.
 **Files involved**: `protocol/.../protocol/PacketToEventConverter.kt`,
@@ -2619,7 +2619,9 @@ whether Shizuku could inject inline.
 **Status**: ✅ FIXED (Session 043)
 **Fix**: `PacketToEventConverter` reads key/mouse-move/scroll/cursor-goto primitives directly from the payload
 via `ByteBuffer.wrap(...).order(BIG_ENDIAN)` and builds the `InputEvent` inline (no Pair/Triple). `post()` now
-injects Shizuku-capable KeyDown/Scroll/RIGHT-long-press inline on the receive thread via `injectShizukuFastPath()`
-and skips `commandFlow`; left-button drag/click, text and navigation still go through the coroutine queue (a11y
-gesture strokes need Main). `handleEvent`'s Shizuku branches reuse the same helpers and no longer launch an extra
-`Dispatchers.IO` coroutine.
+fast-paths `InputEvent.KeyDown` via `injectShizukuFastPath()` — `ShizukuInputInjector.injectKeyEvent` is a plain
+(non-suspend) binder call, so it runs inline on the receive thread with zero coroutine dispatch (skips commandFlow).
+Scroll/right-click use Shizuku SUSPEND functions and therefore stay on the commandFlow → Main → IO path in
+`handleEvent`; left-button drag/click, text and navigation also stay on the a11y queue (gesture strokes need Main).
+Note: first CI attempt failed to compile because `swipe`/`longPress` are suspend — they must NOT be called inline;
+the fix restricts the inline fast path to KeyDown only.

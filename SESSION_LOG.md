@@ -13,7 +13,8 @@
 
 ### What Was Changed
 - `protocol/.../protocol/PacketToEventConverter.kt`: read key/mouse-move/scroll/cursor-goto fields inline from the payload (no `Pair`/`Triple`).
-- `accessibility-receiver/.../accessibility/AccessibilityCommandBus.kt`: `post()` fast-paths Shizuku-capable KeyDown/Scroll/RIGHT-long-press inline on the receive thread (skips `commandFlow`); `handleEvent` reuses the same helpers and drops the `Dispatchers.IO` launch hop. Left drag/click, text, nav keep the a11y queue.
+- `accessibility-receiver/.../accessibility/AccessibilityCommandBus.kt`: `post()` fast-paths `InputEvent.KeyDown` inline on the receive thread (Shizuku `injectKeyEvent` is non-suspend, skips `commandFlow`); Scroll/right-click stay on the `commandFlow` → Main → IO path because Shizuku `swipe`/`longPress` are suspend functions and cannot be called inline. Left drag/click, text, nav keep the a11y queue.
+- CI note: first attempt failed to compile (`swipe`/`longPress` are suspend) — fast path narrowed to KeyDown only.
 
 ---
 
