@@ -168,6 +168,10 @@ class InputBridgeAccessibilityService : AccessibilityService() {
      * Start or continue a continuous stroke for mouse drag operations.
      * Uses willContinue=true to keep the gesture alive for subsequent updates.
      * Only one active gesture at a time — new call cancels in-progress gesture.
+     *
+     * BUG-XXX FIX: cap path to MAX_STROKES_PER_GESTURE segments. Each call appends
+     * a new lineTo and re-dispatches the ENTIRE accumulated path. After 20 segments
+     * the path is reset to avoid unbounded memory growth and system gesture limits.
      */
     fun continueStroke(startX: Float, startY: Float, endX: Float, endY: Float, willContinue: Boolean) {
         val now = android.os.SystemClock.elapsedRealtime()
@@ -182,8 +186,22 @@ class InputBridgeAccessibilityService : AccessibilityService() {
         currentStrokePath?.lineTo(endX, endY)
         strokeCount++
 
+        // BUG-XXX: cap at MAX_STROKES_PER_GESTURE — reset path to avoid unbounded growth
+        if (strokeCount >= MAX_STROKES_PER_GESTURE) {
+            // Dispatch final segment, then start fresh from current position
+            val finalPath = currentStrokePath ?: return
+            val finalDuration = (now - currentStrokeStartTime).coerceAtMost(CONTINUOUS_STROKE_DURATION_MS)
+            val finalStroke = GestureDescription.StrokeDescription(finalPath, 0, finalDuration, false)
+            val finalGesture = GestureDescription.Builder().addStroke(finalStroke).build()
+            dispatchGesture(finalGesture, null, null)
+            // Reset for next segment batch
+            currentStrokePath = Path().apply { moveTo(endX, endY) }
+            currentStrokeStartTime = now
+            strokeCount = 0
+            return
+        }
+
         val path = currentStrokePath ?: return
-        // Android limit: max 20 strokes per gesture, max 60s duration
         val duration = (now - currentStrokeStartTime).coerceAtMost(CONTINUOUS_STROKE_DURATION_MS)
         val strokeDuration = if (willContinue) duration else TAP_DURATION_MS
 
@@ -203,8 +221,18 @@ class InputBridgeAccessibilityService : AccessibilityService() {
 
     /**
      * End the current continuous stroke.
+     * BUG-XXX FIX: dispatch a final gesture with willContinue=false so the system
+     * releases gesture resources instead of waiting for continuation that never arrives.
      */
     fun endStroke() {
+        val path = currentStrokePath
+        if (path != null && strokeCount > 0) {
+            val now = android.os.SystemClock.elapsedRealtime()
+            val duration = (now - currentStrokeStartTime).coerceAtMost(CONTINUOUS_STROKE_DURATION_MS)
+            val stroke = GestureDescription.StrokeDescription(path, 0, duration, false)
+            val gesture = GestureDescription.Builder().addStroke(stroke).build()
+            dispatchGesture(gesture, null, null)
+        }
         currentStrokePath = null
         currentStrokeStartTime = 0L
         strokeCount = 0
@@ -250,10 +278,48 @@ class InputBridgeAccessibilityService : AccessibilityService() {
     }
 
     private fun injectKeyCodeInternal(keyCode: Int, modifiers: ModifierState) {
-        // Ctrl shortcuts — handle before printable character resolution
+        // BUG-XXX FIX: Ctrl+Arrow keys (word-by-word cursor movement) were silently
+        // dropped because handleCtrlKey() only handles A/C/V/X and returns immediately.
+        // Route arrow keys to handleArrowKey with word granularity when Ctrl is held.
         if (modifiers.ctrl) {
-            handleCtrlKey(keyCode)
-            return
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_LEFT -> {
+                    handleArrowKey(
+                        forward = false,
+                        granularity = AccessibilityNodeInfo.MOVEMENT_GRANULARITY_WORD,
+                        extendSelection = modifiers.shift,
+                    )
+                    return
+                }
+                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    handleArrowKey(
+                        forward = true,
+                        granularity = AccessibilityNodeInfo.MOVEMENT_GRANULARITY_WORD,
+                        extendSelection = modifiers.shift,
+                    )
+                    return
+                }
+                KeyEvent.KEYCODE_DPAD_UP -> {
+                    handleArrowKey(
+                        forward = false,
+                        granularity = AccessibilityNodeInfo.MOVEMENT_GRANULARITY_LINE,
+                        extendSelection = modifiers.shift,
+                    )
+                    return
+                }
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    handleArrowKey(
+                        forward = true,
+                        granularity = AccessibilityNodeInfo.MOVEMENT_GRANULARITY_LINE,
+                        extendSelection = modifiers.shift,
+                    )
+                    return
+                }
+                else -> {
+                    handleCtrlKey(keyCode)
+                    return
+                }
+            }
         }
 
         when (keyCode) {

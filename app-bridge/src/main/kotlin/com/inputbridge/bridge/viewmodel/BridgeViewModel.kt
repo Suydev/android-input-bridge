@@ -70,6 +70,22 @@ class BridgeViewModel(
         // property initializers and init blocks in source order, so calling refreshStatus()
         // earlier dereferenced the uninitialized backing StateFlow during app startup.
         refreshStatus()
+        // BUG-XXX FIX: sync _config when BridgeService modifies prefs directly
+        // (e.g. auto-discovery sets targetIp, pairing sets isPaired).
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(2000)
+                _config.update { c ->
+                    c.copy(
+                        transport = c.transport.copy(
+                            targetIp = prefs.targetIp,
+                            port = prefs.port,
+                        ),
+                        security = c.security.copy(pairingToken = prefs.pairingPin),
+                    )
+                }
+            }
+        }
     }
 
     /**

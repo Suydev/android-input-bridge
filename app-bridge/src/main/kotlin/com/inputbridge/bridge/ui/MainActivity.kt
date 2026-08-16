@@ -83,17 +83,29 @@ class MainActivity : ComponentActivity() {
                 ) {
                     composable(BridgeRoute.WELCOME) {
                         WelcomeScreen(
-                            onContinue    = { navController.navigate(BridgeRoute.BRIDGE) },
-                            onSettings    = { navController.navigate(BridgeRoute.SETTINGS) },
-                            onPermissions = { navController.navigate(BridgeRoute.PERMISSIONS) },
+                            onContinue    = { navController.navigate(BridgeRoute.BRIDGE) {
+                                launchSingleTop = true
+                            } },
+                            onSettings    = { navController.navigate(BridgeRoute.SETTINGS) {
+                                launchSingleTop = true
+                            } },
+                            onPermissions = { navController.navigate(BridgeRoute.PERMISSIONS) {
+                                launchSingleTop = true
+                            } },
                             viewModel     = viewModel,
                         )
                     }
                     composable(BridgeRoute.BRIDGE) {
                         BridgeScreen(
-                            onSettings    = { navController.navigate(BridgeRoute.SETTINGS) },
-                            onDiagnostics = { navController.navigate(BridgeRoute.DIAGNOSTICS) },
-                            onMouse       = { navController.navigate(BridgeRoute.TRACKPAD) },
+                            onSettings    = { navController.navigate(BridgeRoute.SETTINGS) {
+                                launchSingleTop = true
+                            } },
+                            onDiagnostics = { navController.navigate(BridgeRoute.DIAGNOSTICS) {
+                                launchSingleTop = true
+                            } },
+                            onMouse       = { navController.navigate(BridgeRoute.TRACKPAD) {
+                                launchSingleTop = true
+                            } },
                             viewModel     = viewModel,
                         )
                     }

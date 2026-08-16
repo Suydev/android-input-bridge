@@ -87,6 +87,7 @@ class BridgeService : Service() {
     private var pongResponseJob: Job? = null
     private var watchdogJob: Job? = null
     private var usbPollJob: Job? = null
+    private var autoDiscoveryJob: Job? = null
 
     /**
      * BUG-099 FIX: track the last known USB device so we don't re-request permission
@@ -233,22 +234,25 @@ class BridgeService : Service() {
         pongResponseJob?.cancel()
         watchdogJob?.cancel()
 
-        // 2. Release resources in NonCancellable context
-        // BUG-103: use GlobalScope.launch instead of runBlocking to avoid ANR on main thread.
-        // runBlocking blocks until delay(60L) + stop() + disconnect() complete, which can
-        // exceed Android's 5-second ANR threshold under memory pressure.
-        CoroutineScope(NonCancellable + Dispatchers.IO).launch {
-            runCatching { usbCapture?.stop() }
-            runCatching {
-                udpTransport?.send(packetFactory.makeDisconnect())
-                delay(60L)
-            }
-            runCatching { udpTransport?.disconnect() }
-            runCatching { btTransport?.disconnect() }
-        }
+        // 2. Capture transport references before nulling fields, then clean up
+        // BUG-XXX FIX: the old code launched a coroutine that read these fields AFTER
+        // nulling them on the calling thread, so the coroutine always saw null.
+        val capturedUsb = usbCapture
+        val capturedUdp = udpTransport
+        val capturedBt  = btTransport
         usbCapture    = null
         udpTransport  = null
         btTransport   = null
+
+        CoroutineScope(NonCancellable + Dispatchers.IO).launch {
+            runCatching { capturedUsb?.stop() }
+            runCatching {
+                capturedUdp?.send(packetFactory.makeDisconnect())
+                delay(60L)
+            }
+            runCatching { capturedUdp?.disconnect() }
+            runCatching { capturedBt?.disconnect() }
+        }
 
         // 3. Cancel scope
         serviceScope.cancel()
@@ -310,13 +314,18 @@ class BridgeService : Service() {
             updateNotification("Searching for receiver on network…")
             DiagnosticsManager.update { copy(lastError = "No IP configured — listening for receiver broadcast") }
             // BUG-107: listen for receiver broadcast and auto-configure IP
-            serviceScope.launch {
+            // BUG-XXX FIX: store the Job so we can cancel the auto-discovery coroutine
+            // when the pipeline restarts or the service is destroyed.
+            autoDiscoveryJob = serviceScope.launch {
                 AutoDiscovery.listenForReceiver { ip, port ->
                     BridgeLogger.i(TAG, "Auto-discovered receiver: $ip:$port")
                     prefs.targetIp = ip
                     prefs.port = port
                     DiagnosticsManager.update { copy(targetIp = ip) }
                     updateNotification("Found receiver at $ip:$port — connecting…")
+                    // Cancel this auto-discovery loop before restarting
+                    autoDiscoveryJob?.cancel()
+                    autoDiscoveryJob = null
                     // Restart pipeline with the discovered IP
                     pipelineStarted.set(false)
                     serviceScope.launch {

@@ -120,7 +120,13 @@ object AccessibilityCommandBus {
     /** Snapshot of the current cursor Y coordinate (safe to read from any thread). */
     fun getCursorY(): Float = cursorY
 
-    // ── Configuration ─────────────────────────────────────────────────────────
+    /**
+     * BUG-XXX FIX: safety timeout for isDragging. If MouseButtonUp is dropped from
+     * commandFlow (buffer full), isDragging stays true forever. Reset after 30 seconds
+     * of continuous dragging as a safety measure.
+     */
+    @Volatile private var dragStartTime = 0L
+    private const val MAX_DRAG_DURATION_MS = 30_000L
 
     // ── Service attachment ────────────────────────────────────────────────────
 
@@ -208,6 +214,12 @@ object AccessibilityCommandBus {
                 _cursorPosition.value = Pair(cursorX, cursorY)
             }
             is InputEvent.MouseMove -> {
+                // BUG-XXX: safety timeout — if isDragging is stuck, force-reset
+                if (isDragging && System.currentTimeMillis() - dragStartTime > MAX_DRAG_DURATION_MS) {
+                    isDragging = false
+                    scope.launch(Dispatchers.Main) { service?.endStroke() }
+                }
+
                 val newX = (cursorX + event.dx).coerceIn(0f, screenWidth - 1f)
                 val newY = (cursorY + event.dy).coerceIn(0f, screenHeight - 1f)
 
@@ -296,6 +308,7 @@ object AccessibilityCommandBus {
                             svc.tap(cursorX, cursorY)
                         }
                         isDragging = true
+                        dragStartTime = System.currentTimeMillis()
                     }
                     MouseButton.RIGHT   -> {
                         if (ShizukuInputInjector.checkAvailability()) {

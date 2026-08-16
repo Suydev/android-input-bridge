@@ -109,10 +109,12 @@ fun BridgeTrackpadScreen(
         }
         onDispose {
             job.cancel()
-            scope.launch {
-                transportState.value?.let { t ->
-                    runCatching { t.disconnect() }
-                }
+            // BUG-XXX FIX: disconnect synchronously before cancelling scope.
+            // The old code launched a coroutine then immediately cancelled the scope,
+            // so the disconnect never executed.
+            val transport = transportState.value
+            if (transport != null) {
+                runCatching { kotlinx.coroutines.runBlocking { transport.disconnect() } }
                 transportState.value = null
             }
             scope.cancel()
@@ -236,8 +238,11 @@ private suspend fun PointerInputScope.awaitTrackpadGesture(
 
             // All pointers lifted
             if (pressed.isEmpty()) {
-                // Tap detection: still in deadzone = no movement = tap
-                if (inDeadzone) {
+                // BUG-XXX FIX: add time validation for multi-finger taps.
+                // Without this, placing fingers and holding still could fire a tap
+                // after the deadzone timer expired if inDeadzone was never cleared.
+                val elapsed = System.currentTimeMillis() - downTime
+                if (inDeadzone && elapsed <= TAP_MAX_MS) {
                     when (maxFingerIndex) {
                         0 -> {
                             sendEvent(InputEvent.MouseButtonDown(MouseButton.LEFT))

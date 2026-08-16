@@ -183,7 +183,15 @@ class BridgeAccessibilityService : AccessibilityService() {
      */
     fun injectInputEvent(event: InputEvent) {
         if (!isRunning()) return
+        // BUG-XXX FIX: dispatchGesture must be called from Main thread per API docs.
+        // This method is called from BridgeService's IO dispatcher. Wrap all gesture
+        // dispatches in withContext(Dispatchers.Main).
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            injectInputEventOnMain(event)
+        }
+    }
 
+    private fun injectInputEventOnMain(event: InputEvent) {
         when (event) {
             is InputEvent.CursorGoto -> {
                 // Absolute position: normalize to screen coordinates

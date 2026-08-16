@@ -247,7 +247,10 @@ class UdpTransport(
     private fun PacketType.isCritical() = when (this) {
         PacketType.PING, PacketType.PONG,
         PacketType.PAIR_REQUEST, PacketType.PAIR_RESPONSE, PacketType.PAIR_CONFIRM,
-        PacketType.DISCONNECT, PacketType.ERROR -> true
+        PacketType.DISCONNECT, PacketType.ERROR,
+        // BUG-XXX FIX: RECONNECT, ACK, and MODE_SWITCH are control packets that must
+        // not be dropped under mouse traffic. Route them through the unlimited queue.
+        PacketType.RECONNECT, PacketType.ACK, PacketType.MODE_SWITCH -> true
         else -> false
     }
 

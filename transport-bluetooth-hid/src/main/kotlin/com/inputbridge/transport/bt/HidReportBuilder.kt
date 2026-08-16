@@ -87,9 +87,10 @@ class HidReportBuilder {
     /**
      * Scroll wheel. dy > 0 = scroll down (content moves up), dy < 0 = scroll up.
      * Per HID convention, positive wheel value = scroll toward user (down).
+     * BUG-XXX FIX: removed negation — dy>0 already means scroll down in InputEvent.
      */
     fun onScroll(dy: Float): ByteArray =
-        buildMouseReport(dx = 0, dy = 0, wheel = (-dy).clampToByte())
+        buildMouseReport(dx = 0, dy = 0, wheel = dy.clampToByte())
 
     // ── Private builders ───────────────────────────────────────────────────────
 

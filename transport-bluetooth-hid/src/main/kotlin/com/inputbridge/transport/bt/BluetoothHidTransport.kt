@@ -82,8 +82,8 @@ class BluetoothHidTransport(private val context: Context) : Transport {
 
     private val reportBuilder = HidReportBuilder()
 
-    /** Completed once registerApp() succeeds or fails. */
-    private val appRegistered = CompletableDeferred<Boolean>()
+    /** BUG-XXX FIX: mutable so reacquireProxy() can replace it with a fresh instance. */
+    private var appRegistered = CompletableDeferred<Boolean>()
 
     /** Completed once the target host device connects (or times out). */
     private var connectionDeferred = CompletableDeferred<Boolean>()
@@ -93,6 +93,9 @@ class BluetoothHidTransport(private val context: Context) : Transport {
 
     /** Reconnection job — non-null while a reconnect attempt is in progress. */
     private var reconnectJob: Job? = null
+
+    /** BUG-XXX: single executor reused across registerApp() calls to avoid thread leak. */
+    private val registerExecutor = Executors.newSingleThreadExecutor()
 
     /** Number of consecutive reconnection attempts (reset on successful connect). */
     @Volatile private var reconnectAttempts = 0
@@ -395,9 +398,8 @@ class BluetoothHidTransport(private val context: Context) : Transport {
         }
 
         BridgeLogger.i(TAG, "Re-acquiring HID_DEVICE profile proxy")
-        // Reset state for fresh registration
-        appRegistered.complete(false)
-        val freshAppRegistered = CompletableDeferred<Boolean>()
+        // BUG-XXX FIX: replace with a fresh deferred so connect() waits for new registration
+        appRegistered = CompletableDeferred()
 
         // Close old proxy
         hidDevice?.let { getAdapter()?.closeProfileProxy(BluetoothProfile.HID_DEVICE, it) }
@@ -485,13 +487,12 @@ class BluetoothHidTransport(private val context: Context) : Transport {
             /* descriptors */ HidDescriptor.DESCRIPTOR,
         )
 
-        // registerApp() returns false if the call itself failed synchronously.
-        // The async result arrives in hidCallback.onAppStatusChanged().
+        // BUG-XXX FIX: reuse a single executor to avoid thread leak on reconnection.
         val callOk = hid.registerApp(
             sdp,
             /* qosOut */ null,  // best-effort QoS
             /* qosIn  */ null,
-            Executors.newSingleThreadExecutor(),
+            registerExecutor,
             hidCallback,
         )
         if (!callOk) {

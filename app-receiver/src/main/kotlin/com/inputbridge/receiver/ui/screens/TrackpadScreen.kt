@@ -254,12 +254,11 @@ private suspend fun PointerInputScope.awaitTrackpadGestureScope(
             totalMovement += abs(dx) + abs(dy)
 
             if (movement > 0.5f) {
-                // Normalize deltas to 0-1 range relative to screen size
-                val ndx = dx / size.width
-                val ndy = dy / size.height
-                AccessibilityCommandBus.post(InputEvent.MouseMove(ndx, ndy))
-                setCursorX((getCursorX() + ndx).coerceIn(0f, 1f))
-                setCursorY((getCursorY() + ndy).coerceIn(0f, 1f))
+                // Send raw pixel deltas to AccessibilityCommandBus (it tracks cursor in pixels).
+                // Keep the visual cursor in 0-1 range for the overlay dot.
+                AccessibilityCommandBus.post(InputEvent.MouseMove(dx, dy))
+                setCursorX((getCursorX() + dx / size.width).coerceIn(0f, 1f))
+                setCursorY((getCursorY() + dy / size.height).coerceIn(0f, 1f))
                 lastX = change.position.x
                 lastY = change.position.y
             }
