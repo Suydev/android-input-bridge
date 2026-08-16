@@ -2574,3 +2574,25 @@ keyboard, 5-button mouse with horizontal scroll, LED state supported.
 **Fix**: Keyboard usage max → 0x65 + added LED Output collection; mouse → 5 buttons + AC Pan (Consumer
 0x0238) and a 5-byte report; `MouseButton.BACK/FORWARD` map to HID buttons 4/5; `Scroll` forwards `dx` as
 AC Pan. Latency-sensitive UDP + Shizuku path intentionally left untouched (reference is slow by design).
+
+## BUG-139 — Bridge UDP hot path adds a coroutine dispatch hop per mouse packet
+
+**Description**: On the bridge, every `InputEvent` (including the 125 Hz mouse/scroll stream) is pushed
+into `UdpTransport`'s `inputChannel` and later dequeued by the `select()` send loop. That is one extra
+coroutine context switch + channel hand-off per packet on the highest-frequency path. `sendDirect()`
+already existed for the trackpad fast path and sends inline on the caller thread (`sock.send()`), skipping
+the channel entirely. The per-event `prefs.bridgeSensitivity` read is also a SharedPreferences-backed
+property lookup repeated 125×/sec for no reason (sensitivity is fixed for the capture session).
+**Steps to reproduce**: Build/run bridge; capture a USB mouse; profile `BridgeService.startCapture`
+collector. Mouse/scroll packets route through `inputChannel` → `select()` loop instead of sending inline.
+**Expected behavior**: The 125 Hz mouse/scroll deltas are sent inline on the collector thread with the
+fewest possible hops; keys/clicks keep channel ordering guarantees.
+**Actual behavior**: Mouse/scroll packets incur an extra dispatch hop + channel allocation per packet.
+**Suspected cause**: `udpTransport.send()` used unconditionally for all events; sensitivity re-read each event.
+**Files involved**: `app-bridge/src/main/kotlin/com/inputbridge/bridge/service/BridgeService.kt`
+(`startCapture` collector), `transport-wifi/.../wifi/UdpTransport.kt` (`sendDirect`)
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 042)
+**Fix**: `MouseMove`/`Scroll` now call `udpTransport.sendDirect(packet)` (inline send, skips the channel
++ select dispatch); keys/clicks still use `udpTransport.send()` to preserve ordering. `bridgeSensitivity`
+is cached once per capture session in a local `val` instead of being re-read per event.

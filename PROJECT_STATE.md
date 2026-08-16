@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 041 — BUG-138: BT HID descriptor aligned to reference's universal-compat boot layouts (2026-08-16)
+> **Last updated:** Session 042 — BUG-139: lowest-latency UDP hot path for bridge mouse/scroll (2026-08-16)
 
 ---
 

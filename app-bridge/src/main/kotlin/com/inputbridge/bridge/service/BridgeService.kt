@@ -874,6 +874,10 @@ class BridgeService : Service() {
         // past an absent collector.
         captureJob = serviceScope.launch {
             var eventCount = 0L
+            // BUG-139: bridge-side sensitivity is fixed for the lifetime of a capture
+            // session. Cache it once so the 125 Hz mouse stream never re-reads the
+            // SharedPreferences-backed property on the hot path.
+            val sensitivity = prefs.bridgeSensitivity
             capture.events.collect { rawEvent ->
                 val t0 = System.nanoTime()
                 eventCount++
@@ -889,11 +893,9 @@ class BridgeService : Service() {
 
                 // Apply bridge-side sensitivity to mouse movement deltas.
                 // prefs.bridgeSensitivity is 0.1–5.0; default 1.0 (no change).
-                // This is a hot-path read of a SharedPreferences float — fast enough.
                 val event: com.inputbridge.core.model.InputEvent = run {
-                    val s = prefs.bridgeSensitivity
-                    if (s != 1.0f && rawEvent is com.inputbridge.core.model.InputEvent.MouseMove) {
-                        rawEvent.copy(dx = rawEvent.dx * s, dy = rawEvent.dy * s)
+                    if (sensitivity != 1.0f && rawEvent is com.inputbridge.core.model.InputEvent.MouseMove) {
+                        rawEvent.copy(dx = rawEvent.dx * sensitivity, dy = rawEvent.dy * sensitivity)
                     } else rawEvent
                 }
 
@@ -916,7 +918,18 @@ class BridgeService : Service() {
                     lastCaptureToSendUs.set((System.nanoTime() - t0) / 1_000L)
                 } else {
                     val packet = packetFactory.fromEvent(event) ?: return@collect
-                    val sent = udpTransport?.send(packet) ?: false
+                    // BUG-139: high-frequency mouse/scroll deltas skip the UDP inputChannel
+                    // + select() dispatch hop by sending inline on this collector thread via
+                    // sendDirect(). This is the same fast path the trackpad already uses, and it
+                    // removes one coroutine context switch per packet from the 125 Hz stream.
+                    // Keys/clicks stay on the channel so they keep their ordering guarantees.
+                    val sent = if (event is com.inputbridge.core.model.InputEvent.MouseMove ||
+                        event is com.inputbridge.core.model.InputEvent.Scroll
+                    ) {
+                        udpTransport?.sendDirect(packet) ?: false
+                    } else {
+                        udpTransport?.send(packet) ?: false
+                    }
                     if (sent) {
                         DiagnosticsManager.onPacketSent()
                         lastCaptureToSendUs.set((System.nanoTime() - t0) / 1_000L)

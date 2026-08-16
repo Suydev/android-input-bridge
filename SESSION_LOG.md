@@ -1,3 +1,22 @@
+## Session 042 — Lowest-latency UDP hot path for bridge mouse/scroll (BUG-139)
+**Date:** 2026-08-16
+**Agent:** opencode
+**Status:** ✅ Complete
+
+### Goals
+- Cut latency on the highest-frequency input path (the 125 Hz mouse/scroll stream) after the user asked to "edit that app for lowest latency".
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|----|----------|-------------|---------|
+| BUG-139 | Medium | Bridge UDP send adds a coroutine dispatch hop + per-event SharedPreferences read on the hot path | ✅ FIXED |
+
+### What Was Changed
+- `app-bridge/.../bridge/service/BridgeService.kt`: `MouseMove`/`Scroll` now use `udpTransport.sendDirect()` (inline `sock.send()`, skips the `inputChannel` + `select()` dispatch hop); keys/clicks keep channel ordering. `bridgeSensitivity` cached once per capture session instead of re-read per event.
+- Deliberately left the UDP + Shizuku fast path intact; did NOT adopt the reference APK's slow Bluetooth-only + heavy `PointerPathView` architecture (per user's earlier warning about the app "having very slow architecture").
+
+---
+
 ## Session 041 — BT HID descriptor aligned to reference's universal-compat boot layouts (BUG-138)
 **Date:** 2026-08-16
 **Agent:** opencode
