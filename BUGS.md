@@ -2485,3 +2485,23 @@ stale IP snapshot.
 **Status**: ✅ FIXED (Session 039)
 **Fix**: Re-added an OPTIONAL "Receiver IP (optional)" field in bridge Settings (blank = auto).
 The on-screen trackpad now polls the live discovered IP and (re)connects when available.
+
+## BUG-135 — Bluetooth HID never discoverable; host cannot pair/find the phone
+
+**Description**: In BT HID mode the bridge registered the HID app but never entered discoverable
+mode, so the tablet/PC could never see the phone to pair with it. Result: BT HID "doesn't work"
+even though the device supports the HID Device profile.
+**Steps to reproduce**: Enable BT HID transport on the Redmi 9; try to pair/connect from the OnePlus.
+The phone never appears in the tablet's Bluetooth scan.
+**Expected behavior**: The phone is advertised as a discoverable Bluetooth keyboard+mouse; the
+host pairs once and receives input.
+**Actual behavior**: Host never sees the phone; no connection.
+**Suspected cause**: Missing `ACTION_REQUEST_DISCOVERABLE`. Confirmed by decompiling the reference
+app "Bluetooth Keyboard Mouse v6.23.2" — it calls `REQUEST_DISCOVERABLE` (300s) immediately after
+HID registration. This also overturns the earlier assumption that Redmi 9 lacks the HID Device
+role (that app works on the same hardware).
+**Files involved**: `transport-bluetooth-hid/.../bt/BluetoothHidTransport.kt`
+**Priority**: High
+**Status**: ✅ FIXED (Session 039)
+**Fix**: After `registerApp()` succeeds, `BluetoothHidTransport` now requests discoverable mode
+(`ACTION_REQUEST_DISCOVERABLE`, 300s, from the foreground service via FLAG_ACTIVITY_NEW_TASK).

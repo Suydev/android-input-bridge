@@ -1,3 +1,26 @@
+## Session 039 (addendum) — BT HID discoverable fix from reference decompile (BUG-135)
+**Date:** 2026-08-16
+**Agent:** opencode
+**Status:** ✅ Complete
+
+### Goals
+- User supplied reference APK "Bluetooth Keyboard Mouse v6.23.2 (Patched)" to decompile.
+- Understand why our BT HID never connected.
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|----|----------|-------------|---------|
+| BUG-135 | High | BT HID never entered discoverable mode; host couldn't pair the phone | ✅ FIXED |
+
+### What Was Changed
+- Decompiled the reference APK (jadx) → `io/appground/blehid/ClassicHidService.java` uses classic
+  `BluetoothHidDevice` + `sendReport()`, and forces `ACTION_REQUEST_DISCOVERABLE` after registration.
+  This overturns the prior (wrong) assumption that Redmi 9 lacks the HID Device role.
+- `BluetoothHidTransport.kt`: request discoverable mode right after `registerApp()` succeeds.
+- (BUG-134 manual-IP fallback + live-IP trackpad committed earlier in this session.)
+
+---
+
 ## Session 039 — Manual-IP fallback + live-IP trackpad (BUG-134)
 **Date:** 2026-08-16
 **Agent:** opencode

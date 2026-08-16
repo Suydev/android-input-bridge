@@ -331,6 +331,12 @@ class BluetoothHidTransport(private val context: Context) : Transport {
 
         BridgeLogger.i(TAG, "HID app registered successfully")
 
+        // BUG-135 FIX: a HID Device is only reachable by the host once it is DISCOVERABLE
+        // (inquiry-scan). Without this the tablet/PC never sees the phone to pair with it,
+        // so BT HID silently "doesn't work". The reference app (Bluetooth Keyboard Mouse)
+        // does exactly this — it requests discoverable mode on registration.
+        requestDiscoverable()
+
         if (targetDeviceAddress.isNotBlank()) {
             return connectToHost(adapter)
         }
@@ -339,6 +345,24 @@ class BluetoothHidTransport(private val context: Context) : Transport {
         _connectionState.value = ConnectionState.Connected  // "ready" — host not yet connected
         BridgeLogger.i(TAG, "HID registered — no target address set, waiting for any host to connect")
         return true
+    }
+
+    /**
+     * BUG-135 FIX: make this phone discoverable so a Bluetooth host can find and pair it as a
+     * HID keyboard+mouse. Launched from the foreground service with NEW_TASK. The user gets a
+     * system dialog; pairing only needs to happen once.
+     */
+    private fun requestDiscoverable() {
+        try {
+            val disc = Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).apply {
+                putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(disc)
+            BridgeLogger.i(TAG, "Requested Bluetooth discoverable mode (300s) for HID pairing")
+        } catch (e: Exception) {
+            BridgeLogger.w(TAG, "Could not request discoverable mode: ${e.message}")
+        }
     }
 
     override suspend fun disconnect() {
