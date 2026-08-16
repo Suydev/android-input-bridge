@@ -71,9 +71,9 @@ class InputBridgeAccessibilityService : AccessibilityService() {
         // mouse cursor clamping uses actual device dimensions.
         // BUG-137 FIX: use realScreenSize() (maximumWindowMetrics) so the cursor covers the
         // full physical display, not just the current window bounds.
-        val (w, h) = realScreenSize(this)
-        AccessibilityCommandBus.setScreenSize(w, h)
-        BridgeLogger.i(TAG, "Screen size: ${w}×${h}")
+        val size = realScreenSize(this)
+        AccessibilityCommandBus.setScreenSize(size.x, size.y)
+        BridgeLogger.i(TAG, "Screen size: ${size.x}×${size.y}")
 
         AccessibilityCommandBus.setService(this)
         BridgeLogger.i(TAG, "AccessibilityCommandBus service attached — ready for injection")
@@ -108,10 +108,8 @@ class InputBridgeAccessibilityService : AccessibilityService() {
 
     // ── Screen size ───────────────────────────────────────────────────────────
 
-    // BUG-137 FIX: getRealScreenSize() replaced by top-level realScreenSize() (ScreenMetrics.kt)
-    // which uses maximumWindowMetrics for the true full-screen bounds. Kept as a thin shim only to
-    // avoid touching other call sites; new code should call realScreenSize(this) directly.
-    private fun getRealScreenSize(): Pair<Int, Int> = with(realScreenSize(this)) { first to second }
+    // BUG-137 FIX: real screen size now comes from the top-level realScreenSize() helper
+    // (ScreenMetrics.kt), which uses maximumWindowMetrics for the true full-screen bounds.
 
     // ── Gesture injection ─────────────────────────────────────────────────────
 
