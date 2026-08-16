@@ -162,10 +162,18 @@ class ReceiverService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            BridgeLogger.i(TAG, "Stop action received")
-            stopSelf()
-            return START_NOT_STICKY
+        when (intent?.action) {
+            ACTION_STOP -> {
+                BridgeLogger.i(TAG, "Stop action received")
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_UNPAIR -> {
+                // BUG-115/118 FIX (audit E+H): a running PIN reset must drop the in-memory
+                // pairing and tell the old bridge to disconnect, not just the persisted prefs.
+                handleUnpair()
+                return START_STICKY
+            }
         }
         if (!listenerStarted.compareAndSet(false, true)) {
             BridgeLogger.d(TAG, "onStartCommand: listener already starting/running — ignoring")
@@ -179,6 +187,32 @@ class ReceiverService : Service() {
             }
         }
         return START_STICKY
+    }
+
+    /**
+     * Drop the current pairing and notify the old bridge to disconnect.
+     * BUG-115 FIX (audit E): the in-memory [pairedBridgeIp] is cleared here — it was
+     * previously only written at startListening()/PAIR_REQUEST, so a PIN reset left the
+     * old bridge's input flowing until a restart.
+     * BUG-118 FIX (audit H): a DISCONNECT is sent to the old bridge so its own pairing
+     * state (cleared on inbound DISCONNECT) stays consistent.
+     */
+    private fun handleUnpair() {
+        val oldIp = pairedBridgeIp
+        if (oldIp.isNotEmpty()) {
+            serviceScope.launch {
+                runCatching { udpTransport?.send(packetFactory.makeDisconnect()) }
+                    .onFailure { BridgeLogger.w(TAG, "Failed to send DISCONNECT during unpair: ${it.message}") }
+            }
+        }
+        pairedBridgeIp = ""
+        prefs.pairedBridgeIp = ""
+        prefs.isPaired = false
+        DiagnosticsManager.update {
+            copy(isPaired = false, pairedPeerIp = "", transportConnected = false, lastError = null)
+        }
+        updateNotification("PIN reset — new PIN: ${prefs.sessionPin}")
+        BridgeLogger.i(TAG, "Unpair complete — old bridge was $oldIp")
     }
 
     private fun handleRuntimeFailure(stage: String, throwable: Throwable) {
@@ -522,5 +556,6 @@ class ReceiverService : Service() {
 
     companion object {
         const val ACTION_STOP = "com.inputbridge.receiver.ACTION_STOP"
+        const val ACTION_UNPAIR = "com.inputbridge.receiver.ACTION_UNPAIR"
     }
 }

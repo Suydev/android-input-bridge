@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 031 — Full-screen trackpad mapping, minimum-latency sends, MOUSE button removal (BUG-103, BUG-104) (2026-08-14)
+> **Last updated:** Session 033 — Round-3 audit fixes (BUG-111 → BUG-127): pairing consistency, accessibility node recycling, BT HID reconnect, drag-session race (2026-08-16)
 
 ---
 

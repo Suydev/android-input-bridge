@@ -109,13 +109,16 @@ fun BridgeTrackpadScreen(
         }
         onDispose {
             job.cancel()
-            // BUG-XXX FIX: disconnect synchronously before cancelling scope.
-            // The old code launched a coroutine then immediately cancelled the scope,
-            // so the disconnect never executed. Use runBlocking on Dispatchers.IO so
-            // the (potentially slow) socket close does not block the Main thread / ANR.
+            // BUG-114 FIX: fire-and-forget disconnect on a standalone scope.
+            // The previous attempt used runBlocking(Dispatchers.IO), but runBlocking ALWAYS
+            // blocks its caller (the Main/composition thread here) regardless of the inner
+            // dispatcher, so teardown could stall/ANR. A separate scope runs disconnect off
+            // the caller thread and is not cancelled by the connect scope below.
             val transport = transportState.value
             if (transport != null) {
-                runCatching { kotlinx.coroutines.runBlocking(Dispatchers.IO) { transport.disconnect() } }
+                CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
+                    runCatching { transport.disconnect() }
+                }
                 transportState.value = null
             }
             scope.cancel()

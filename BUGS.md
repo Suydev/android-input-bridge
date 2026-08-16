@@ -2090,3 +2090,248 @@ and `init {}` block).
 **Fix**: Removed `shizuku-compiler` entry from `libs.versions.toml`.
 
 ---
+
+## BUG-111 — BT HID reconnect returns stale `appRegistered` and silently drops input
+**Description**: `BluetoothHidTransport.connect()` returned the already-completed `appRegistered`
+deferred from a previous session. `onAppStatusChanged` guards its `complete()` with `isCompleted`,
+so the fresh registration result was never recorded and `connect()` reported "ready" while the HID
+app was not actually registered.
+**Steps to reproduce**: Pair, disconnect, reconnect. First input after reconnect is dropped.
+**Expected behavior**: Reconnect waits for and reports the new registration result.
+**Actual behavior**: Stale `true` returned; input silently dropped at session start.
+**Suspected cause**: `appRegistered` initialized once, never reset for a new session.
+**Files involved**: `transport-bluetooth-hid/.../bt/BluetoothHidTransport.kt` (connect)
+**Priority**: High
+**Status**: ✅ FIXED (Session 033)
+**Fix**: Reset `appRegistered = CompletableDeferred()` at the top of `connect()` (mirrors `reacquireProxy`).
+
+---
+
+## BUG-112 — AccessibilityNodeInfo instances leak (pool exhaustion crash)
+**Description**: Owned `AccessibilityNodeInfo` (from `rootInActiveWindow`/`getFocused()`/`findFocus`)
+were not recycled at every call site. At 125 Hz keystroke injection the node pool exhausts and the
+service throws "pool is full".
+**Steps to reproduce**: Enable bridge, type continuously; observe pool exhaustion crash.
+**Expected behavior**: Every owned node recycled exactly once.
+**Actual behavior**: Nodes leaked at Ctrl/arrow/TAB/ENTER/text/scroll call sites and internal roots.
+**Suspected cause**: Nodes obtained but never released at several injection paths.
+**Files involved**: `accessibility-receiver/.../InputBridgeAccessibilityService.kt`
+**Priority**: High
+**Status**: ✅ FIXED (Session 033)
+**Fix**: `try/finally { node.recycle() }` at all 9 `getFocused()` call sites; recycle roots in
+`injectKeyCode`, TAB, `injectText`, and `injectTextInternal` fallback; editable nodes recycled by caller.
+
+---
+
+## BUG-113 — Duplicate UDP transport / job leak after auto-discovery restart
+**Description**: `BridgeService` auto-discovery callback cleared `pipelineStarted`, so a later
+`onStartCommand` started a second pipeline (second `UdpTransport` + send/receive jobs).
+**Steps to reproduce**: Auto-discovery restart while service running, then `onStartCommand` fires.
+**Expected behavior**: Guard stays set; pipeline starts once.
+**Actual behavior**: Duplicate transport and leaked coroutine jobs.
+**Suspected cause**: `pipelineStarted.set(false)` inside the discovery callback.
+**Files involved**: `app-bridge/.../bridge/service/BridgeService.kt`
+**Priority**: High
+**Status**: ✅ FIXED (Session 033)
+**Fix**: Removed the `pipelineStarted.set(false)`; kept the guard true.
+
+---
+
+## BUG-114 — `runBlocking(Dispatchers.IO)` blocks the Main thread on dispose
+**Description**: `BridgeTrackpadScreen` `onDispose` used `runBlocking(Dispatchers.IO){ transport.disconnect() }`.
+`runBlocking` always blocks its caller (Main/composition thread) regardless of the inner dispatcher,
+stalling teardown.
+**Steps to reproduce**: Leave the trackpad screen; UI jank / ANR on dispose.
+**Expected behavior**: Disconnect off the caller thread.
+**Actual behavior**: Main thread blocked until disconnect completes.
+**Suspected cause**: Misuse of `runBlocking` with an inner dispatcher.
+**Files involved**: `app-bridge/.../bridge/ui/screens/BridgeTrackpadScreen.kt`
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 033)
+**Fix**: Fire-and-forget `CoroutineScope(Dispatchers.IO).launch { transport.disconnect() }`.
+
+---
+
+## BUG-115 — Receiver keeps old bridge alive after PIN reset (in-memory pairing not cleared)
+**Description**: `ReceiverPreferences.generateNewPin()` clears persisted `pairedBridgeIp`/`isPaired`,
+but the running service's `@Volatile pairedBridgeIp` was only rewritten at `startListening()` and on
+`PAIR_REQUEST`. The old bridge kept sending input (PAIR_REQUEST is exempt from the drop rule) and
+flowed indefinitely.
+**Steps to reproduce**: Pair, then hit "Reset PIN" in the receiver UI; old bridge keeps injecting.
+**Expected behavior**: PIN reset drops the in-memory pairing immediately.
+**Actual behavior**: Old bridge input continues until service restart.
+**Suspected cause**: In-memory pairing state never invalidated on regen.
+**Files involved**: `app-receiver/.../receiver/service/ReceiverService.kt`, `ReceiverViewModel.kt`
+**Priority**: High
+**Status**: ✅ FIXED (Session 033)
+**Fix**: Added `ACTION_UNPAIR` → `handleUnpair()` that clears the in-memory `pairedBridgeIp`; the
+ViewModel sends that intent on PIN reset.
+
+---
+
+## BUG-116 — Bridge skips PAIR_REQUEST when already paired → silent input loss on IP change
+**Description**: `BridgeService` paired only `if (pairingPin.isNotEmpty() && !isPaired)`. On a
+reconnect after the receiver's DHCP IP changed, `isPaired` was still true so the handshake was skipped;
+PING passed but every input packet was dropped as "unpaired".
+**Steps to reproduce**: Pair, change receiver IP (DHCP), keep bridge running; input dies silently.
+**Expected behavior**: Re-pair whenever a PIN is configured.
+**Actual behavior**: Stale pairing; input dropped silently.
+**Suspected cause**: `!prefs.isPaired` guard skipped the handshake on reconnect.
+**Files involved**: `app-bridge/.../bridge/service/BridgeService.kt`
+**Priority**: High
+**Status**: ✅ FIXED (Session 033)
+**Fix**: Always (re-)send PAIR_REQUEST when `pairingPin.isNotEmpty()`.
+
+---
+
+## BUG-117 — `disconnect()` leaves in-flight `connect()` deferreds pending (state revert race)
+**Description**: On disconnect, pending `appRegistered`/`connectionDeferred` were not completed.
+An in-flight `connect()` could resume after disconnect and revert state back to Connected.
+**Steps to reproduce**: Rapid connect/disconnect; observe state flip back to Connected.
+**Expected behavior**: Disconnect unblocks any pending handshake.
+**Actual behavior**: Stale connect resumes and wrongly marks Connected.
+**Suspected cause**: Deferreds only completed on success path.
+**Files involved**: `transport-bluetooth-hid/.../bt/BluetoothHidTransport.kt` (disconnect)
+**Priority**: High
+**Status**: ✅ FIXED (Session 033)
+**Fix**: In `disconnect()`, `complete(false)` the deferreds if not already completed.
+
+---
+
+## BUG-118 — DISCONNECT not propagated both directions
+**Description**: The receiver never sent DISCONNECT on unpair, and the bridge treated inbound
+DISCONNECT as "unexpected" and ignored it, so `isPaired` never cleared on either side.
+**Steps to reproduce**: Reset PIN on receiver; bridge still believes it is paired.
+**Expected behavior**: Unpair clears pairing on both devices.
+**Actual behavior**: Stale pairing state outlives the session.
+**Suspected cause**: No DISCONNECT send on unpair; inbound DISCONNECT ignored by bridge.
+**Files involved**: `app-receiver/.../ReceiverService.kt`, `app-bridge/.../BridgeService.kt`
+**Priority**: High
+**Status**: ✅ FIXED (Session 033)
+**Fix**: Receiver `handleUnpair()` sends DISCONNECT to the old bridge; bridge inbound loop now clears
+`prefs.isPaired` on DISCONNECT.
+
+---
+
+## BUG-119 — Diagnostics `injectionMode` reports Shizuku without permission
+**Description**: The reported mode was gated on `ShizukuInputInjector.isAvailable` (binder present)
+instead of `checkAvailability()` (binder + permission). The string claimed Shizuku while injection
+actually fell back to `dispatchGesture`.
+**Steps to reproduce**: Shizuku installed but permission not granted; read injection mode.
+**Expected behavior**: Mode string reflects actual injection path.
+**Actual behavior**: Reports "Shizuku/InputManager" when it uses dispatchGesture.
+**Suspected cause**: Telemetry uses `isAvailable` not `checkAvailability`.
+**Files involved**: `accessibility-receiver/.../AccessibilityCommandBus.kt`
+**Priority**: Low
+**Status**: ✅ FIXED (Session 033)
+**Fix**: Gate the telemetry branch on `checkAvailability()`.
+
+---
+
+## BUG-120 — `lastKnownUsbDevice` not cleared on detach
+**Description**: `BridgeService` set `lastKnownUsbDevice` on attach but never nulled it on detach,
+so a stale device reference persisted.
+**Steps to reproduce**: Attach then detach a USB device; inspect `lastKnownUsbDevice`.
+**Expected behavior**: Cleared on detach.
+**Actual behavior**: Stale reference retained.
+**Suspected cause**: No clearing in `onUsbDetached`.
+**Files involved**: `app-bridge/.../bridge/service/BridgeService.kt`
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 033)
+**Fix**: `onUsbDetached` sets `lastKnownUsbDevice = null`.
+
+---
+
+## BUG-121 — Late `continueStroke` starts a dangling open gesture after drag end
+**Description**: A `continueStroke` launched just before `MouseButtonUp` can run after `endStroke()`
+on Main, see `currentStrokePath == null`, and start a fresh stroke with `willContinue = true` that is
+never ended.
+**Steps to reproduce**: High-rate drag with a dropped `MouseButtonUp` from the command queue.
+**Expected behavior**: Stale continuation is dropped.
+**Actual behavior**: Stray open gesture dispatched.
+**Suspected cause**: No drag-session token; continuation cannot tell the drag ended.
+**Files involved**: `accessibility-receiver/.../AccessibilityCommandBus.kt`, `InputBridgeAccessibilityService.kt`
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 033)
+**Fix**: Monotonic `dragSessionId` bumped on every LEFT down/up; `continueStroke` drops a continuation
+whose captured token no longer matches.
+
+---
+
+## BUG-122 — `connectionDeferred` missing `@Volatile`
+**Description**: `connectionDeferred` was read/written across the profile-callback and connect threads
+without `@Volatile`, risking a cached stale value.
+**Steps to reproduce**: Repeated BT connect/disconnect on a multi-core device.
+**Expected behavior**: Visibility across threads.
+**Actual behavior**: Possible stale observation.
+**Suspected cause**: Plain `var` used as a cross-thread lifecycle guard.
+**Files involved**: `transport-bluetooth-hid/.../bt/BluetoothHidTransport.kt`
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 033)
+**Fix**: Marked `connectionDeferred` `@Volatile`.
+
+---
+
+## BUG-123 — Receiver-mode UdpTransport dropped a dequeued packet when no sender seen
+**Description**: The receiver dropped outgoing control replies when `lastSenderAddress` was null,
+instead of using the just-received packet's source endpoint.
+**Steps to reproduce**: Receiver sends a reply before any PING/PONG round-trip.
+**Expected behavior**: Reply goes to the packet's sender.
+**Actual behavior**: Reply dropped.
+**Suspected cause**: Sender address derived only from `lastSenderAddress`.
+**Files involved**: `transport-wifi/.../wifi/UdpTransport.kt`
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 033)
+**Fix**: Use the packet's source endpoint for the reply.
+
+---
+
+## BUG-124 — `isCritical` future-proofing is latent and untested
+**Description**: A speculative `isCritical` classification path has no caller and no tests.
+**Steps to reproduce**: N/A.
+**Expected behavior**: Dead code removed or exercised.
+**Actual behavior**: Latent, unexercised branch.
+**Suspected cause**: Defensive coding added without a use case.
+**Files involved**: `app-bridge/.../BridgeService.kt`
+**Priority**: Very Low
+**Status**: ⚠️ WONTFIX (Session 033) — latent future-proofing; left as-is.
+
+---
+
+## BUG-125 — LEFT down fires both tap() and a continuous stroke
+**Description**: `AccessibilityCommandBus` issues `tap()` on LEFT down and also starts a drag stroke
+on subsequent moves. Agent confidence this is a bug is LOW; it may be intended double-action.
+**Steps to reproduce**: Click with the bridge while in accessibility mode.
+**Expected behavior**: Single, well-defined action.
+**Actual behavior**: Possibly both tap and stroke.
+**Suspected cause**: Ambiguous product intent.
+**Files involved**: `accessibility-receiver/.../AccessibilityCommandBus.kt`
+**Priority**: Low
+**Status**: ⚠️ WONTFIX (Session 033) — needs a product decision; not changed.
+
+---
+
+## BUG-126 — Receiver falls back to open-input mode after DISCONNECT
+**Description**: After a DISCONNECT the receiver accepts any LAN host's input (no `pairedBridgeIp`
+enforcement when unpaired). This is a deliberate product/security decision, not a one-line fix.
+**Steps to reproduce**: DISCONNECT, then any host on the LAN sends input.
+**Expected behavior**: (Product call) require re-pairing before accepting input.
+**Actual behavior**: Open-mode injection accepted.
+**Suspected cause**: Security model choice.
+**Files involved**: `app-receiver/.../ReceiverService.kt`
+**Priority**: Medium
+**Status**: ⚠️ WONTFIX (Session 033) — design decision; not changed pending product call.
+
+---
+
+## BUG-127 — TextInput fields truncate long strings
+**Description**: Receiver text fields cap length by design (UI constraint).
+**Steps to reproduce**: Enter a very long PIN/session value.
+**Expected behavior**: Accept arbitrary length or show a clear limit.
+**Actual behavior**: Truncated by design.
+**Suspected cause**: Intentional UI limit.
+**Files involved**: `app-receiver/.../ui/screens/*`
+**Priority**: Very Low
+**Status**: ⚠️ WONTFIX (Session 033) — by design; not changed.
+
+---

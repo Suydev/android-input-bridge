@@ -365,8 +365,11 @@ class BridgeService : Service() {
         // must be enumerated before the pairing branch can return early.
         checkPreAttachedUsb()
 
-        // Pairing: only attempt if a PIN is configured AND not already paired.
-        if (prefs.pairingPin.isNotEmpty() && !prefs.isPaired) {
+        // Pairing: BUG-116 FIX (audit F) — always (re-)send PAIR_REQUEST when a PIN is
+        // configured. The old guard `!prefs.isPaired` skipped the handshake on reconnect,
+        // so a bridge whose receiver changed IP (DHCP) silently lost input because PING
+        // still passed while every input packet was dropped as "unpaired".
+        if (prefs.pairingPin.isNotEmpty()) {
             val paired = doPairing(transport)
             if (!paired) {
                 // Pairing failed — leave pipelineStarted = true so the service
@@ -374,7 +377,7 @@ class BridgeService : Service() {
                 return
             }
         } else if (prefs.isPaired) {
-            BridgeLogger.i(TAG, "Already paired — skipping pairing handshake")
+            BridgeLogger.i(TAG, "No PIN but marked paired — reporting paired (open-mode fallback)")
             DiagnosticsManager.update { copy(isPaired = true, pairedPeerIp = targetIp) }
             updateNotification("Ready (paired) — waiting for USB device…")
         } else {
@@ -495,13 +498,29 @@ class BridgeService : Service() {
                             }
                         }
                     }
+                    // BUG-118 FIX (audit H): a DISCONNECT from the receiver (e.g. its PIN was
+                    // reset) must clear our own pairing state instead of being ignored as
+                    // "unexpected". Otherwise prefs.isPaired stays true and the stale pairing
+                    // outlives the receiver's session.
+                    PacketType.DISCONNECT -> {
+                        BridgeLogger.i(TAG, "DISCONNECT received from receiver — clearing pairing")
+                        prefs.isPaired = false
+                        DiagnosticsManager.update {
+                            copy(
+                                isPaired = false,
+                                pairedPeerIp = "",
+                                transportConnected = false,
+                                lastError = "Receiver ended the session (PIN reset/unpair)",
+                            )
+                        }
+                        updateNotification("Receiver disconnected — re-pair to resume")
+                    }
                     // Control packets the bridge does not expect to receive from the receiver.
                     PacketType.PING,
                     PacketType.KEEP_ALIVE,
                     PacketType.PAIR_REQUEST,
                     PacketType.PAIR_CONFIRM,
                     PacketType.MODE_SWITCH,
-                    PacketType.DISCONNECT,
                     PacketType.RECONNECT,
                     PacketType.ACK,
                     PacketType.ERROR -> {

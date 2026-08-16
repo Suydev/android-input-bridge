@@ -173,7 +173,15 @@ class InputBridgeAccessibilityService : AccessibilityService() {
      * a new lineTo and re-dispatches the ENTIRE accumulated path. After 20 segments
      * the path is reset to avoid unbounded memory growth and system gesture limits.
      */
-    fun continueStroke(startX: Float, startY: Float, endX: Float, endY: Float, willContinue: Boolean) {
+    fun continueStroke(startX: Float, startY: Float, endX: Float, endY: Float, willContinue: Boolean, sessionId: Long) {
+        // BUG-121 FIX (audit K): drop stale continuations that run after the drag ended.
+        // The token is bumped on every MouseButtonDown/UP(LEFT); a continuation launched
+        // before the up but executed after it would otherwise see currentStrokePath==null
+        // and start a fresh open stroke that is never ended.
+        if (sessionId != AccessibilityCommandBus.dragSessionId) {
+            return
+        }
+
         val now = android.os.SystemClock.elapsedRealtime()
 
         if (currentStrokePath == null || !willContinue) {
@@ -267,6 +275,7 @@ class InputBridgeAccessibilityService : AccessibilityService() {
             DiagnosticsManager.update { copy(isSecureWindow = true) }
             return
         }
+        root.recycle()
         DiagnosticsManager.update { copy(isSecureWindow = false) }
 
         try {
@@ -326,44 +335,58 @@ class InputBridgeAccessibilityService : AccessibilityService() {
             KeyEvent.KEYCODE_DEL -> {
                 // Backspace: remove character before cursor (or delete selection)
                 val focused = getFocused() ?: return
-                val text = focused.text?.toString() ?: return
-                val selStart = focused.textSelectionStart.coerceIn(0, text.length)
-                val selEnd = focused.textSelectionEnd.coerceIn(selStart, text.length)
-                val newText = if (selStart < selEnd) {
-                    // Delete entire selection
-                    text.substring(0, selStart) + text.substring(selEnd)
-                } else if (selStart > 0) {
-                    // Delete one character before cursor
-                    text.substring(0, selStart - 1) + text.substring(selStart)
-                } else return
-                setFocusedText(focused, newText)
+                try {
+                    val text = focused.text?.toString() ?: return
+                    val selStart = focused.textSelectionStart.coerceIn(0, text.length)
+                    val selEnd = focused.textSelectionEnd.coerceIn(selStart, text.length)
+                    val newText = if (selStart < selEnd) {
+                        // Delete entire selection
+                        text.substring(0, selStart) + text.substring(selEnd)
+                    } else if (selStart > 0) {
+                        // Delete one character before cursor
+                        text.substring(0, selStart - 1) + text.substring(selStart)
+                    } else return
+                    setFocusedText(focused, newText)
+                } finally {
+                    focused.recycle()
+                }
             }
 
             KeyEvent.KEYCODE_FORWARD_DEL -> {
                 // Delete key: remove character after cursor
                 val focused = getFocused() ?: return
-                val text = focused.text?.toString() ?: return
-                val selStart = focused.textSelectionStart.coerceIn(0, text.length)
-                val selEnd = focused.textSelectionEnd.coerceIn(selStart, text.length)
-                val newText = if (selStart < selEnd) {
-                    text.substring(0, selStart) + text.substring(selEnd)
-                } else if (selStart < text.length) {
-                    text.substring(0, selStart) + text.substring(selStart + 1)
-                } else return
-                setFocusedText(focused, newText)
+                try {
+                    val text = focused.text?.toString() ?: return
+                    val selStart = focused.textSelectionStart.coerceIn(0, text.length)
+                    val selEnd = focused.textSelectionEnd.coerceIn(selStart, text.length)
+                    val newText = if (selStart < selEnd) {
+                        text.substring(0, selStart) + text.substring(selEnd)
+                    } else if (selStart < text.length) {
+                        text.substring(0, selStart) + text.substring(selStart + 1)
+                    } else return
+                    setFocusedText(focused, newText)
+                } finally {
+                    focused.recycle()
+                }
             }
 
             KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
                 val focused = getFocused()
-                if (focused != null && focused.isEditable) {
-                    // Try to perform IME action (submit/go/search), fall back to newline
-                    val didClick = focused.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                    if (!didClick) {
-                        injectCharacterIntoFocused(focused, '\n')
+                if (focused != null) {
+                    try {
+                        if (focused.isEditable) {
+                            // Try to perform IME action (submit/go/search), fall back to newline
+                            val didClick = focused.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                            if (!didClick) {
+                                injectCharacterIntoFocused(focused, '\n')
+                            }
+                        } else {
+                            // No focused text field — act as a global click/confirm
+                            focused.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                        }
+                    } finally {
+                        focused.recycle()
                     }
-                } else {
-                    // No focused text field — act as a global click/confirm
-                    focused?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                 }
             }
 
@@ -371,6 +394,7 @@ class InputBridgeAccessibilityService : AccessibilityService() {
                 // Move focus to next element
                 val root = rootInActiveWindow
                 root?.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+                root?.recycle()
             }
 
             KeyEvent.KEYCODE_ESCAPE -> {
@@ -433,8 +457,12 @@ class InputBridgeAccessibilityService : AccessibilityService() {
             in KeyEvent.KEYCODE_F1..KeyEvent.KEYCODE_F12 -> {
                 val focused = getFocused()
                 if (focused != null) {
-                    // Try clicking the focused node (many apps handle F-keys via click)
-                    focused.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    try {
+                        // Try clicking the focused node (many apps handle F-keys via click)
+                        focused.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    } finally {
+                        focused.recycle()
+                    }
                 }
             }
 
@@ -477,7 +505,11 @@ class InputBridgeAccessibilityService : AccessibilityService() {
                 if (unicode != 0) {
                     val focused = getFocused()
                     if (focused != null) {
-                        injectCharacterIntoFocused(focused, unicode.toChar())
+                        try {
+                            injectCharacterIntoFocused(focused, unicode.toChar())
+                        } finally {
+                            focused.recycle()
+                        }
                     } else {
                         BridgeLogger.d(TAG, "No focused text node for char '${unicode.toChar()}'")
                     }
@@ -498,35 +530,39 @@ class InputBridgeAccessibilityService : AccessibilityService() {
         val effectiveChar = if (modifiers.shift || modifiers.capsLock) ch.uppercaseChar() else ch
         val focused = getFocused()
         if (focused != null) {
-            // Strategy 1: Try ACTION_SET_TEXT
-            val currentText = focused.text?.toString() ?: ""
-            val selStart = focused.textSelectionStart.coerceIn(0, currentText.length)
-            val newText = currentText.substring(0, selStart) + effectiveChar + currentText.substring(selStart)
-            val bundle = Bundle().apply {
-                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, newText)
-            }
-            val didSetText = focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, bundle)
-            if (didSetText) return
-
-            // Strategy 2: Clipboard paste
-            // BUG-XXX FIX: save and restore clipboard to avoid permanently
-            // overwriting the user's clipboard content as a side effect.
             try {
-                val clip = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                val oldClip = clip.primaryClip
-                clip.setPrimaryClip(android.content.ClipData.newPlainText("InputBridge", effectiveChar.toString()))
-                focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)
-                // Restore old clipboard after paste completes
-                if (oldClip != null) {
-                    clip.setPrimaryClip(oldClip)
+                // Strategy 1: Try ACTION_SET_TEXT
+                val currentText = focused.text?.toString() ?: ""
+                val selStart = focused.textSelectionStart.coerceIn(0, currentText.length)
+                val newText = currentText.substring(0, selStart) + effectiveChar + currentText.substring(selStart)
+                val bundle = Bundle().apply {
+                    putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, newText)
                 }
-                return
-            } catch (e: Exception) {
-                BridgeLogger.d(TAG, "Clipboard paste failed for char '$effectiveChar'")
-            }
+                val didSetText = focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, bundle)
+                if (didSetText) return
 
-            // Strategy 3: performAction (last resort)
-            focused.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                // Strategy 2: Clipboard paste
+                // BUG-XXX FIX: save and restore clipboard to avoid permanently
+                // overwriting the user's clipboard content as a side effect.
+                try {
+                    val clip = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    val oldClip = clip.primaryClip
+                    clip.setPrimaryClip(android.content.ClipData.newPlainText("InputBridge", effectiveChar.toString()))
+                    focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+                    // Restore old clipboard after paste completes
+                    if (oldClip != null) {
+                        clip.setPrimaryClip(oldClip)
+                    }
+                    return
+                } catch (e: Exception) {
+                    BridgeLogger.d(TAG, "Clipboard paste failed for char '$effectiveChar'")
+                }
+
+                // Strategy 3: performAction (last resort)
+                focused.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            } finally {
+                focused.recycle()
+            }
         }
     }
 
@@ -536,11 +572,13 @@ class InputBridgeAccessibilityService : AccessibilityService() {
      * Falls back to clipboard paste if the node does not support ACTION_SET_TEXT.
      */
     fun injectText(text: String) {
-        if (rootInActiveWindow == null) {
+        val root = rootInActiveWindow
+        if (root == null) {
             BridgeLogger.w(TAG, "Secure or inaccessible window — text injection blocked")
             DiagnosticsManager.update { copy(isSecureWindow = true) }
             return
         }
+        root.recycle()
         DiagnosticsManager.update { copy(isSecureWindow = false) }
         try {
             injectTextInternal(text)
@@ -558,80 +596,89 @@ class InputBridgeAccessibilityService : AccessibilityService() {
 
         val focused = getFocused()
         if (focused != null) {
-            // Strategy 1: Try ACTION_SET_TEXT (most reliable for standard EditText)
-            val current = focused.text?.toString() ?: ""
-            val selStart = focused.textSelectionStart.coerceIn(0, current.length)
-            val selEnd = focused.textSelectionEnd.coerceIn(selStart, current.length)
-            val newText = current.substring(0, selStart) + text + current.substring(selEnd)
-            val bundle = Bundle()
-            bundle.putCharSequence(
-                AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-                newText,
-            )
-            val set = focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, bundle)
-            if (set) return
-
-            // Strategy 2: Clipboard paste (works on many non-standard text fields)
-            // BUG-XXX FIX: save and restore clipboard to avoid permanently
-            // overwriting the user's clipboard content as a side effect.
             try {
-                val clip = getSystemService(Context.CLIPBOARD_SERVICE)
-                    as android.content.ClipboardManager
-                val oldClip = clip.primaryClip
-                clip.setPrimaryClip(android.content.ClipData.newPlainText("InputBridge", text))
-                val didPaste = focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)
-                if (oldClip != null) {
-                    clip.setPrimaryClip(oldClip)
-                }
-                if (didPaste) return
-            } catch (e: Exception) {
-                BridgeLogger.d(TAG, "Clipboard paste failed: ${e.message}")
-            }
+                // Strategy 1: Try ACTION_SET_TEXT (most reliable for standard EditText)
+                val current = focused.text?.toString() ?: ""
+                val selStart = focused.textSelectionStart.coerceIn(0, current.length)
+                val selEnd = focused.textSelectionEnd.coerceIn(selStart, current.length)
+                val newText = current.substring(0, selStart) + text + current.substring(selEnd)
+                val bundle = Bundle()
+                bundle.putCharSequence(
+                    AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+                    newText,
+                )
+                val set = focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, bundle)
+                if (set) return
 
-            // Strategy 3: Character-by-character injection
-            // Some apps don't support ACTION_SET_TEXT — inject one char at a time
-            try {
-                for (ch in text) {
-                    val charCurrent = focused.text?.toString() ?: ""
-                    val charSelStart = focused.textSelectionStart.coerceIn(0, charCurrent.length)
-                    val charNewText = charCurrent.substring(0, charSelStart) + ch + charCurrent.substring(charSelStart)
-                    val charBundle = Bundle().apply {
-                        putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, charNewText)
+                // Strategy 2: Clipboard paste (works on many non-standard text fields)
+                // BUG-XXX FIX: save and restore clipboard to avoid permanently
+                // overwriting the user's clipboard content as a side effect.
+                try {
+                    val clip = getSystemService(Context.CLIPBOARD_SERVICE)
+                        as android.content.ClipboardManager
+                    val oldClip = clip.primaryClip
+                    clip.setPrimaryClip(android.content.ClipData.newPlainText("InputBridge", text))
+                    val didPaste = focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+                    if (oldClip != null) {
+                        clip.setPrimaryClip(oldClip)
                     }
-                    focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, charBundle)
+                    if (didPaste) return
+                } catch (e: Exception) {
+                    BridgeLogger.d(TAG, "Clipboard paste failed: ${e.message}")
                 }
-                BridgeLogger.d(TAG, "Character-by-character injection succeeded for ${text.length} chars")
-                return
-            } catch (e: Exception) {
-                BridgeLogger.d(TAG, "Character-by-character injection failed: ${e.message}")
+
+                // Strategy 3: Character-by-character injection
+                // Some apps don't support ACTION_SET_TEXT — inject one char at a time
+                try {
+                    for (ch in text) {
+                        val charCurrent = focused.text?.toString() ?: ""
+                        val charSelStart = focused.textSelectionStart.coerceIn(0, charCurrent.length)
+                        val charNewText = charCurrent.substring(0, charSelStart) + ch + charCurrent.substring(charSelStart)
+                        val charBundle = Bundle().apply {
+                            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, charNewText)
+                        }
+                        focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, charBundle)
+                    }
+                    BridgeLogger.d(TAG, "Character-by-character injection succeeded for ${text.length} chars")
+                    return
+                } catch (e: Exception) {
+                    BridgeLogger.d(TAG, "Character-by-character injection failed: ${e.message}")
+                }
+            } finally {
+                focused.recycle()
             }
         }
 
         // Final fallback: try to find any editable node and inject there
         val root = rootInActiveWindow
         if (root != null) {
-            val editableNodes = mutableListOf<AccessibilityNodeInfo>()
-            findEditableNodes(root, editableNodes)
-            for (node in editableNodes) {
-                try {
-                    val current = node.text?.toString() ?: ""
-                    val bundle = Bundle().apply {
-                        putCharSequence(
-                            AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-                            current + text
-                        )
+            try {
+                val editableNodes = mutableListOf<AccessibilityNodeInfo>()
+                findEditableNodes(root, editableNodes)
+                for (node in editableNodes) {
+                    try {
+                        val current = node.text?.toString() ?: ""
+                        val bundle = Bundle().apply {
+                            putCharSequence(
+                                AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+                                current + text
+                            )
+                        }
+                        val didSet = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, bundle)
+                        if (didSet) {
+                            BridgeLogger.d(TAG, "Text injected via fallback editable node")
+                            return
+                        }
+                    } catch (e: Exception) {
+                        // Continue to next node
+                    } finally {
+                        // BUG-XXX FIX: recycle the node now that we are done with it.
+                        node.recycle()
                     }
-                    val didSet = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, bundle)
-                    if (didSet) {
-                        BridgeLogger.d(TAG, "Text injected via fallback editable node")
-                        return
-                    }
-                } catch (e: Exception) {
-                    // Continue to next node
-                } finally {
-                    // BUG-XXX FIX: recycle the node now that we are done with it.
-                    node.recycle()
                 }
+            } finally {
+                // BUG-112 FIX (audit B): recycle the tree root obtained above.
+                root.recycle()
             }
         }
 
@@ -661,9 +708,17 @@ class InputBridgeAccessibilityService : AccessibilityService() {
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    /** Get the currently input-focused accessibility node, or null. */
-    private fun getFocused(): AccessibilityNodeInfo? =
-        rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+    /**
+     * Get the currently input-focused accessibility node, or null.
+     * BUG-112 FIX (audit B): the root node obtained via rootInActiveWindow is an owned
+     * instance that must be recycled. Recycle it here so callers only own `focused`.
+     */
+    private fun getFocused(): AccessibilityNodeInfo? {
+        val root = rootInActiveWindow ?: return null
+        val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        root.recycle()
+        return focused
+    }
 
     /** Insert a single character at the cursor position in a focused text node. */
     private fun injectCharacterIntoFocused(focused: AccessibilityNodeInfo, ch: Char) {
@@ -687,22 +742,28 @@ class InputBridgeAccessibilityService : AccessibilityService() {
     /** Handle Ctrl+key shortcuts. */
     private fun handleCtrlKey(keyCode: Int) {
         val focused = getFocused()
-        when (keyCode) {
-            KeyEvent.KEYCODE_A -> {
-                // Select all: use ACTION_SET_SELECTION spanning the full text range.
-                // ACTION_SELECT_ALL does not exist in the Android SDK — the correct
-                // approach is to set the selection from 0 to text.length.
-                val node = focused ?: return
-                val text = node.text?.toString() ?: ""
-                val args = Bundle()
-                args.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0)
-                args.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, text.length)
-                node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, args)
+        if (focused != null) {
+            try {
+                when (keyCode) {
+                    KeyEvent.KEYCODE_A -> {
+                        // Select all: use ACTION_SET_SELECTION spanning the full text range.
+                        // ACTION_SELECT_ALL does not exist in the Android SDK — the correct
+                        // approach is to set the selection from 0 to text.length.
+                        val node = focused
+                        val text = node.text?.toString() ?: ""
+                        val args = Bundle()
+                        args.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0)
+                        args.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, text.length)
+                        node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, args)
+                    }
+                    KeyEvent.KEYCODE_C -> focused.performAction(AccessibilityNodeInfo.ACTION_COPY)
+                    KeyEvent.KEYCODE_V -> focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+                    KeyEvent.KEYCODE_X -> focused.performAction(AccessibilityNodeInfo.ACTION_CUT)
+                    else -> BridgeLogger.d(TAG, "Ctrl+${KeyEvent.keyCodeToString(keyCode)} not handled")
+                }
+            } finally {
+                focused.recycle()
             }
-            KeyEvent.KEYCODE_C -> focused?.performAction(AccessibilityNodeInfo.ACTION_COPY)
-            KeyEvent.KEYCODE_V -> focused?.performAction(AccessibilityNodeInfo.ACTION_PASTE)
-            KeyEvent.KEYCODE_X -> focused?.performAction(AccessibilityNodeInfo.ACTION_CUT)
-            else -> BridgeLogger.d(TAG, "Ctrl+${KeyEvent.keyCodeToString(keyCode)} not handled")
         }
     }
 
@@ -713,15 +774,19 @@ class InputBridgeAccessibilityService : AccessibilityService() {
         extendSelection: Boolean,
     ) {
         val focused = getFocused() ?: return
-        val action = if (forward)
-            AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY
-        else
-            AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY
-        val args = Bundle().apply {
-            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_MOVEMENT_GRANULARITY_INT, granularity)
-            putBoolean(AccessibilityNodeInfo.ACTION_ARGUMENT_EXTEND_SELECTION_BOOLEAN, extendSelection)
+        try {
+            val action = if (forward)
+                AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY
+            else
+                AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY
+            val args = Bundle().apply {
+                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_MOVEMENT_GRANULARITY_INT, granularity)
+                putBoolean(AccessibilityNodeInfo.ACTION_ARGUMENT_EXTEND_SELECTION_BOOLEAN, extendSelection)
+            }
+            focused.performAction(action, args)
+        } finally {
+            focused.recycle()
         }
-        focused.performAction(action, args)
     }
 
     /**

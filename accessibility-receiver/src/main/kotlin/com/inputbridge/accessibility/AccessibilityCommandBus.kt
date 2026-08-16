@@ -82,6 +82,13 @@ object AccessibilityCommandBus {
     @Volatile private var lastCursorY = 0f
     @Volatile private var isDragging = false
 
+    // BUG-121 FIX (audit K): monotonic drag-session token. Bumped on every
+    // MouseButtonDown(LEFT) and MouseButtonUp(LEFT). A continueStroke launched on
+    // Dispatchers.Main captures the token at launch; if it runs after the drag has
+    // ended, the token no longer matches and the stale continuation is dropped
+    // instead of starting a new open stroke that is never ended.
+    @Volatile internal var dragSessionId = 0L
+
     /**
      * BUG-070 FIX — @Volatile on screen dimensions.
      *
@@ -138,7 +145,11 @@ object AccessibilityCommandBus {
         try {
             ShizukuInputInjector.registerListeners()
             ShizukuInputInjector.init()
-            if (ShizukuInputInjector.isAvailable) {
+            // BUG-119 FIX (audit I): gate the reported mode on checkAvailability() (which
+            // verifies the Shizuku permission), not isAvailable() (binder present only).
+            // Without this the diagnostics string claimed Shizuku while the actual injection
+            // paths correctly fell back to dispatchGesture.
+            if (ShizukuInputInjector.checkAvailability()) {
                 BridgeLogger.i(TAG, "Shizuku available — using InputManager (1-5ms)")
                 DiagnosticsManager.update {
                     copy(injectionMode = "Shizuku/InputManager")
@@ -230,8 +241,11 @@ object AccessibilityCommandBus {
                     // MouseMove could update lastCursorX/Y, causing stale coords.
                     val startX = lastCursorX
                     val startY = lastCursorY
+                    // BUG-121 FIX (audit K): capture the drag-session token so the
+                    // continuation can detect it ran after the drag ended.
+                    val session = dragSessionId
                     scope.launch(Dispatchers.Main) {
-                        service?.continueStroke(startX, startY, newX, newY, true)
+                        service?.continueStroke(startX, startY, newX, newY, true, session)
                     }
                     lastCursorX = newX
                     lastCursorY = newY
@@ -314,6 +328,7 @@ object AccessibilityCommandBus {
                         }
                         isDragging = true
                         dragStartTime = System.currentTimeMillis()
+                        dragSessionId++
                     }
                     MouseButton.RIGHT   -> {
                         if (ShizukuInputInjector.checkAvailability()) {
@@ -332,6 +347,7 @@ object AccessibilityCommandBus {
             is InputEvent.MouseButtonUp -> {
                 if (isDragging && event.button == MouseButton.LEFT) {
                     isDragging = false
+                    dragSessionId++
                     svc.endStroke()
                 }
             }

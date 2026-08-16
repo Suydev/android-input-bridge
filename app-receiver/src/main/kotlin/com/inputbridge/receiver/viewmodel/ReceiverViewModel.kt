@@ -168,6 +168,20 @@ class ReceiverViewModel(
      */
     fun generateNewPin() {
         val pin = prefs.generateNewPin()
+        // BUG-115/118 FIX (audit E+H): poke the running ReceiverService so it clears its
+        // in-memory pairing and sends DISCONNECT to the old bridge. Persisted prefs are
+        // already cleared by generateNewPin(); the service must not keep the old bridge alive.
+        runCatching {
+            context.startService(
+                Intent(context, ReceiverService::class.java).apply {
+                    action = ReceiverService.ACTION_UNPAIR
+                }
+            )
+        }.onFailure { e ->
+            com.inputbridge.core.logging.BridgeLogger.w(
+                TAG, "Failed to notify service of PIN reset: ${e.message}"
+            )
+        }
         DiagnosticsManager.update { copy(sessionPin = pin, isPaired = false, pairedPeerIp = "") }
     }
 

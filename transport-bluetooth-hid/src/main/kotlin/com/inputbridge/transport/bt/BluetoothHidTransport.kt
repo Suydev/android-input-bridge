@@ -82,11 +82,12 @@ class BluetoothHidTransport(private val context: Context) : Transport {
 
     private val reportBuilder = HidReportBuilder()
 
-    /** BUG-XXX FIX: mutable so reacquireProxy() can replace it with a fresh instance. */
+    /** BUG-122 FIX: mutable so reacquireProxy() can replace it with a fresh instance. */
     @Volatile
     private var appRegistered = CompletableDeferred<Boolean>()
 
-    /** Completed once the target host device connects (or times out). */
+    /** Completed once the target host device connects (or times out). BUG-122 FIX: @Volatile. */
+    @Volatile
     private var connectionDeferred = CompletableDeferred<Boolean>()
 
     /** Scope for reconnection coroutines. */
@@ -304,6 +305,13 @@ class BluetoothHidTransport(private val context: Context) : Transport {
         // Register BroadcastReceiver for BT lifecycle events
         registerReceiver()
 
+        // BUG-111 FIX (audit A): reset the registration handshake here so a second
+        // connect() after disconnect() waits for the NEW registerApp() result. Without
+        // this, appRegistered is already completed from the previous session and
+        // onAppStatusChanged guards its complete() with isCompleted, so connect() would
+        // return the stale value and report "ready" while the HID app is not registered.
+        appRegistered = CompletableDeferred()
+
         // Request the HID_DEVICE profile proxy.  profileListener.onServiceConnected()
         // fires asynchronously; it calls registerHidApp() when ready.
         val profileOk = adapter.getProfileProxy(context, profileListener, BluetoothProfile.HID_DEVICE)
@@ -343,6 +351,12 @@ class BluetoothHidTransport(private val context: Context) : Transport {
         // profileListener.onServiceDisconnected which also calls closeProfileProxy.
         val hDevice = hidDevice
         val hHost = connectedHost
+
+        // BUG-117 FIX (audit G): unblock any in-flight connect() handshake so it cannot
+        // resume after this disconnect and revert state back to Connected. The callback
+        // threads complete these; if already completed we must not complete again.
+        if (!appRegistered.isCompleted) appRegistered.complete(false)
+        if (!connectionDeferred.isCompleted) connectionDeferred.complete(false)
 
         try {
             // Release all keys on the host before disconnecting (prevents stuck keys)

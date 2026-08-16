@@ -2,6 +2,49 @@
 
 ---
 
+## Session 033 — Round-3 audit fixes: pairing, accessibility recycling, BT HID, drag race (BUG-111 → BUG-127)
+**Date:** 2026-08-16
+**Agent:** opencode
+**Status:** 🔄 In Progress — code complete, NOT pushed (user: "don't push yet")
+
+### Goals
+- Complete the 17-finding round-3 audit (auth/pairing, transport/protocol, accessibility, bridge/UI/USB).
+- Fix all findings except the design/ambiguous ones (N, O, P, Q).
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|----|----------|-------------|---------|
+| BUG-111 | High | BT HID reconnect returns stale `appRegistered` → silent input drop | Fixed |
+| BUG-112 | High | AccessibilityNodeInfo leak (pool exhaustion crash) | Fixed |
+| BUG-113 | High | Duplicate UDP transport / job leak after auto-discovery restart | Fixed |
+| BUG-114 | Medium | `runBlocking(Dispatchers.IO)` blocks Main on trackpad dispose | Fixed |
+| BUG-115 | High | Receiver keeps old bridge after PIN reset (in-memory pairing uncleared) | Fixed |
+| BUG-116 | High | Bridge skips PAIR_REQUEST when already paired → silent loss on IP change | Fixed |
+| BUG-117 | High | `disconnect()` leaves in-flight `connect()` deferreds pending (state revert) | Fixed |
+| BUG-118 | High | DISCONNECT not propagated both directions | Fixed |
+| BUG-119 | Low | `injectionMode` telemetry gated on `isAvailable` not `checkAvailability()` | Fixed |
+| BUG-120 | Medium | `lastKnownUsbDevice` not cleared on detach | Fixed |
+| BUG-121 | Medium | Late `continueStroke` starts dangling open gesture after drag end | Fixed |
+| BUG-122 | Medium | `connectionDeferred` missing `@Volatile` | Fixed |
+| BUG-123 | Medium | Receiver-mode UdpTransport dropped dequeued packet when no sender seen | Fixed |
+| BUG-124 | Very Low | `isCritical` latent future-proofing | WONTFIX |
+| BUG-125 | Low | LEFT down fires tap + stroke (uncertain it's a bug) | WONTFIX (product call) |
+| BUG-126 | Medium | Receiver open-mode fallback after DISCONNECT | WONTFIX (design) |
+| BUG-127 | Very Low | TextInput truncation | WONTFIX (by design) |
+
+### What Was Changed
+- `transport-bluetooth-hid/.../BluetoothHidTransport.kt`: reset `appRegistered` in `connect()` (BUG-111); complete deferreds `false` in `disconnect()` (BUG-117); `@Volatile` on `connectionDeferred` (BUG-122).
+- `accessibility-receiver/.../InputBridgeAccessibilityService.kt`: recycle every owned node at all `getFocused()`/root call sites (BUG-112).
+- `accessibility-receiver/.../AccessibilityCommandBus.kt`: telemetry gated on `checkAvailability()` (BUG-119); monotonic `dragSessionId` + stale-continuation drop in `continueStroke` (BUG-121).
+- `app-bridge/.../bridge/service/BridgeService.kt`: always re-PAIR_REQUEST when PIN set (BUG-116); clear `isPaired` on inbound DISCONNECT (BUG-118); `onUsbDetached` nulls `lastKnownUsbDevice` (BUG-120).
+- `app-bridge/.../bridge/ui/screens/BridgeTrackpadScreen.kt`: fire-and-forget disconnect (BUG-114).
+- `app-receiver/.../receiver/service/ReceiverService.kt`: `ACTION_UNPAIR` + `handleUnpair()` clears in-memory pairing and sends DISCONNECT (BUG-115/118).
+- `app-receiver/.../receiver/viewmodel/ReceiverViewModel.kt`: `generateNewPin()` notifies the running service (BUG-115/118).
+- `transport-wifi/.../wifi/UdpTransport.kt`: reply to packet's source endpoint (BUG-123).
+- `BUGS.md`: added BUG-111 → BUG-127.
+
+---
+
 ## Session 032 — Shizuku integration audit + bug fixes (BUG-105 → BUG-110)
 **Date:** 2026-08-15
 **Agent:** opencode
