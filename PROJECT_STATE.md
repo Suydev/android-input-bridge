@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 042 — BUG-139: lowest-latency UDP hot path for bridge mouse/scroll (2026-08-16)
+> **Last updated:** Session 043 — BUG-140: receiver-side latency — drop Pair/Triple allocs + inline Shizuku injection (2026-08-16)
 
 ---
 

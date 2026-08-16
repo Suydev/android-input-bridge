@@ -1,3 +1,22 @@
+## Session 043 — Receiver-side latency: drop Pair/Triple allocs + inline Shizuku injection (BUG-140)
+**Date:** 2026-08-16
+**Agent:** opencode
+**Status:** ✅ Complete
+
+### Goals
+- Continue the "lowest latency" pass on the receiver: remove per-packet Pair/Triple allocations in `PacketToEventConverter` and run Shizuku-capable injection on the highest-priority path.
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|----|----------|-------------|---------|
+| BUG-140 | Medium | Receiver converter boxes Pair/Triple per packet; Shizuku injection takes an extra coroutine hop | ✅ FIXED |
+
+### What Was Changed
+- `protocol/.../protocol/PacketToEventConverter.kt`: read key/mouse-move/scroll/cursor-goto fields inline from the payload (no `Pair`/`Triple`).
+- `accessibility-receiver/.../accessibility/AccessibilityCommandBus.kt`: `post()` fast-paths Shizuku-capable KeyDown/Scroll/RIGHT-long-press inline on the receive thread (skips `commandFlow`); `handleEvent` reuses the same helpers and drops the `Dispatchers.IO` launch hop. Left drag/click, text, nav keep the a11y queue.
+
+---
+
 ## Session 042 — Lowest-latency UDP hot path for bridge mouse/scroll (BUG-139)
 **Date:** 2026-08-16
 **Agent:** opencode

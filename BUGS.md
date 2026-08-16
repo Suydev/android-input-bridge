@@ -2596,3 +2596,30 @@ fewest possible hops; keys/clicks keep channel ordering guarantees.
 **Fix**: `MouseMove`/`Scroll` now call `udpTransport.sendDirect(packet)` (inline send, skips the channel
 + select dispatch); keys/clicks still use `udpTransport.send()` to preserve ordering. `bridgeSensitivity`
 is cached once per capture session in a local `val` instead of being re-read per event.
+
+## BUG-140 — Receiver hot path allocates Pair/Triple per packet and adds a needless coroutine hop for Shizuku injection
+
+**Description**: On the receiver, `PacketToEventConverter.toInputEvent()` called `PacketSerializer` parse
+helpers that returned `Pair`/`Triple`, boxing a small object on every packet — ~125 unnecessary
+allocations/sec on the mouse stream, feeding only GC pressure. Separately, `AccessibilityCommandBus.post()`
+routed EVERY non-mouse event (incl. high-frequency keyboard/scroll) through `commandFlow` → `Dispatchers.Main`
+→ and (for Shizuku) a further `scope.launch(Dispatchers.IO)`. Shizuku is a binder IPC safe from any thread,
+so that extra hop is pure latency with no benefit when Shizuku (the 1-5ms path) is available.
+**Steps to reproduce**: Capture USB keyboard/mouse; on the receiver profile `PacketToEventConverter` and
+`AccessibilityCommandBus.post`. Keyboard/scroll inject via commandFlow→Main→IO even when Shizuku is present;
+converter boxes Pair/Triple per packet.
+**Expected behavior**: Converter builds InputEvent with zero Pair/Triple allocation; Shizuku-capable
+keyboard/scroll/right-click inject inline on the highest-priority receive thread, skipping commandFlow.
+**Actual behavior**: Per-packet Pair/Triple allocation; Shizuku injections take an extra coroutine dispatch hop.
+**Suspected cause**: Parser helpers returned boxed tuples; post() always enqueued to commandFlow regardless of
+whether Shizuku could inject inline.
+**Files involved**: `protocol/.../protocol/PacketToEventConverter.kt`,
+`accessibility-receiver/.../accessibility/AccessibilityCommandBus.kt`
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 043)
+**Fix**: `PacketToEventConverter` reads key/mouse-move/scroll/cursor-goto primitives directly from the payload
+via `ByteBuffer.wrap(...).order(BIG_ENDIAN)` and builds the `InputEvent` inline (no Pair/Triple). `post()` now
+injects Shizuku-capable KeyDown/Scroll/RIGHT-long-press inline on the receive thread via `injectShizukuFastPath()`
+and skips `commandFlow`; left-button drag/click, text and navigation still go through the coroutine queue (a11y
+gesture strokes need Main). `handleEvent`'s Shizuku branches reuse the same helpers and no longer launch an extra
+`Dispatchers.IO` coroutine.

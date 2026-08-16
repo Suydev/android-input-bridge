@@ -276,6 +276,14 @@ object AccessibilityCommandBus {
             is InputEvent.TextInput,
             is InputEvent.ModifierStateChanged,
             is InputEvent.NavigationAction -> {
+                // BUG-140 FIX: when Shizuku (the 1-5ms fast path) is available, inject the
+                // Shizuku-capable events inline on this receive thread instead of hopping
+                // through commandFlow → Dispatchers.Main → (IO for Shizuku). Shizuku is a
+                // binder IPC safe from any thread, so this keeps keyboard/scroll/right-click
+                // on the highest-priority path. Events with no Shizuku equivalent still fall
+                // back to commandFlow (a11y on Main); left-button drag/click is intentionally
+                // excluded (it relies on accessibility gesture strokes).
+                if (ShizukuInputInjector.checkAvailability() && injectShizukuFastPath(event)) return
                 if (!commandFlow.tryEmit(event)) {
                     BridgeLogger.w(TAG, "CommandFlow full — dropped ${event::class.simpleName}")
                     DiagnosticsManager.update {
@@ -307,6 +315,48 @@ object AccessibilityCommandBus {
                 lastInjectUs.set((System.nanoTime() - t0) / 1_000L)
             }
         }
+    }
+
+    // ── BUG-140 FIX: Shizuku fast-path helpers ────────────────────────────────
+
+    /**
+     * Inject keyboard/scroll/right-click via Shizuku inline on the calling thread when
+     * Shizuku is available. Returns true if the event was handled (caller skips commandFlow).
+     * Only covers events whose injection has no accessibility-service gesture-state dependency
+     * (left-button drag/click, text, and navigation are deliberately excluded — they run on Main
+     * through [handleEvent]). Written as explicit `is` checks (not a sealed `when`) so it does
+     * not need an exhaustive `else ->` (AGENTS.md §4.2).
+     */
+    private fun injectShizukuFastPath(event: InputEvent): Boolean {
+        if (event is InputEvent.KeyDown) { shizukuInjectKeyDown(event); return true }
+        if (event is InputEvent.Scroll) { shizukuInjectScroll(event); return true }
+        if (event is InputEvent.MouseButtonDown && event.button == MouseButton.RIGHT) {
+            shizukuInjectRightLongPress(); return true
+        }
+        return false
+    }
+
+    private fun shizukuInjectKeyDown(event: InputEvent.KeyDown) {
+        val metaState = buildMetaState(event.modifiers)
+        val now = SystemClock.uptimeMillis()
+        val keyDown = KeyEvent(now, now, KeyEvent.ACTION_DOWN, event.keyCode, 0, metaState)
+        ShizukuInputInjector.injectKeyEvent(keyDown)
+    }
+
+    private fun shizukuInjectScroll(event: InputEvent.Scroll) {
+        val scrollDx = event.dx * SCROLL_PIXEL_MULTIPLIER
+        val scrollDy = event.dy * SCROLL_PIXEL_MULTIPLIER
+        ShizukuInputInjector.swipe(
+            x1 = cursorX,
+            y1 = cursorY,
+            x2 = (cursorX - scrollDx).coerceIn(0f, screenWidth - 1f),
+            y2 = (cursorY - scrollDy).coerceIn(0f, screenHeight - 1f),
+            durationMs = SCROLL_DURATION_MS,
+        )
+    }
+
+    private fun shizukuInjectRightLongPress() {
+        ShizukuInputInjector.longPress(cursorX, cursorY)
     }
 
     private fun handleEvent(event: InputEvent) {
@@ -343,7 +393,7 @@ object AccessibilityCommandBus {
                     }
                     MouseButton.RIGHT   -> {
                         if (ShizukuInputInjector.checkAvailability()) {
-                            scope.launch(Dispatchers.IO) { ShizukuInputInjector.longPress(cursorX, cursorY) }
+                            shizukuInjectRightLongPress()
                         } else {
                             svc.longPress(cursorX, cursorY)
                         }
@@ -383,15 +433,7 @@ object AccessibilityCommandBus {
                     "→ swipe(${cursorX.toInt()},${cursorY.toInt()} → " +
                     "${(cursorX - scrollDx).toInt()},${(cursorY - scrollDy).toInt()})")
                 if (ShizukuInputInjector.checkAvailability()) {
-                    scope.launch(Dispatchers.IO) {
-                        ShizukuInputInjector.swipe(
-                            x1 = cursorX,
-                            y1 = cursorY,
-                            x2 = (cursorX - scrollDx).coerceIn(0f, screenWidth - 1f),
-                            y2 = (cursorY - scrollDy).coerceIn(0f, screenHeight - 1f),
-                            durationMs = SCROLL_DURATION_MS,
-                        )
-                    }
+                    shizukuInjectScroll(event)
                 } else {
                     svc.swipe(
                         x1 = cursorX,
@@ -408,10 +450,7 @@ object AccessibilityCommandBus {
                 BridgeLogger.d(TAG, "KeyDown: keyCode=${event.keyCode} " +
                     "(${KeyEvent.keyCodeToString(event.keyCode)})")
                 if (ShizukuInputInjector.checkAvailability()) {
-                    val metaState = buildMetaState(event.modifiers)
-                    val now = SystemClock.uptimeMillis()
-                    val keyDown = KeyEvent(now, now, KeyEvent.ACTION_DOWN, event.keyCode, 0, metaState)
-                    ShizukuInputInjector.injectKeyEvent(keyDown)
+                    shizukuInjectKeyDown(event)
                 } else {
                     svc.injectKeyCode(event.keyCode, event.modifiers)
                 }
