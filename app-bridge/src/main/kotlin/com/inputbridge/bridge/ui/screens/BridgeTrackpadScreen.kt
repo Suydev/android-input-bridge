@@ -326,18 +326,17 @@ private suspend fun PointerInputScope.awaitTrackpadGesture(
                 }
             }
 
-            if (!inDeadzone && movement > 0.5f) {
-                // Throttle: minimum 15ms between MOVE events
+            // Throttle: minimum 15ms between GOTO events
                 val now = System.currentTimeMillis()
                 if (now - lastMoveTime >= MOVE_THROTTLE_MS) {
-                    val ndx = dx / boxSize().width
-                    val ndy = dy / boxSize().height
-                    sendEvent(InputEvent.MouseMove(ndx, ndy))
+                    // Absolute normalized coordinates (0..1) → CursorGoto
+                    val nx = change.position.x / boxSize().width
+                    val ny = change.position.y / boxSize().height
+                    sendEvent(InputEvent.CursorGoto(nx, ny))
                     lastMoveTime = now
                 }
                 lastX = change.position.x
                 lastY = change.position.y
-            }
         }
 
         setTouching(false)
