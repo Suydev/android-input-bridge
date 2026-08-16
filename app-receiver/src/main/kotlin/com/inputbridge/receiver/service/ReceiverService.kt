@@ -361,12 +361,17 @@ class ReceiverService : Service() {
                 DiagnosticsManager.onPacketReceived()
 
                 // ── Source validation ─────────────────────────────────────────
-                // Accept PAIR_REQUEST from any IP (allows re-pairing after bridge restarts).
-                // All other packet types are dropped if they come from an unknown sender.
+                // BUG-126 FIX (audit P): in paired mode (a session PIN is configured — which
+                // is always the case after first run) ONLY the paired bridge may inject input.
+                // A PAIR_REQUEST is accepted from any host so re-pairing can happen, but every
+                // other packet from an unknown sender is dropped. This closes the open-input
+                // fallback that previously accepted any LAN host after a DISCONNECT/unpair.
+                // (Trade-off: a bridge running with no PIN can no longer inject until it is
+                // given the receiver's PIN; that is the intended secure default.)
                 val senderIp = transport.getLastSenderIp()
-                if (pairedBridgeIp.isNotEmpty() &&
-                    senderIp != pairedBridgeIp &&
-                    packet.type != PacketType.PAIR_REQUEST) {
+                if (prefs.sessionPin.isNotEmpty() &&
+                    packet.type != PacketType.PAIR_REQUEST &&
+                    senderIp != pairedBridgeIp) {
                     BridgeLogger.d(
                         TAG,
                         "Dropping ${packet.type} from unknown sender $senderIp (paired=$pairedBridgeIp)"

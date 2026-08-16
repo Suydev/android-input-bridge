@@ -2,6 +2,28 @@
 
 ---
 
+## Session 034 — Close audit findings O and P (BUG-125, BUG-126)
+**Date:** 2026-08-16
+**Agent:** opencode
+**Status:** ✅ Complete — pushed (user: "fix both"), CI green
+
+### Goals
+- Implement the two WONTFIX design/ambiguous findings from the round-3 audit (O, P).
+- Keep all prior fixes intact.
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|----|----------|-------------|---------|
+| BUG-125 | Low | LEFT down double-fired tap() and a drag stroke | Fixed |
+| BUG-126 | Medium | Receiver accepted any LAN host's input after DISCONNECT | Fixed |
+
+### What Was Changed
+- `accessibility-receiver/.../AccessibilityCommandBus.kt`: defer LEFT click to MouseButtonUp; fire tap only when the pointer moved < `CLICK_MOVE_THRESHOLD_PX` since down, so a drag no longer also taps (BUG-125).
+- `app-receiver/.../ReceiverService.kt`: when a session PIN is set, drop every non-PAIR_REQUEST packet from a sender that is not the paired bridge — closes the open-input fallback (BUG-126).
+- `BUGS.md`: BUG-125/BUG-126 → ✅ FIXED (Session 034).
+
+---
+
 ## Session 033 — Round-3 audit fixes: pairing, accessibility recycling, BT HID, drag race (BUG-111 → BUG-127)
 **Date:** 2026-08-16
 **Agent:** opencode

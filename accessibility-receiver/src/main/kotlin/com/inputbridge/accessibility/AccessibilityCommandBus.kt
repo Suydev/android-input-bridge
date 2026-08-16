@@ -82,6 +82,15 @@ object AccessibilityCommandBus {
     @Volatile private var lastCursorY = 0f
     @Volatile private var isDragging = false
 
+    // BUG-125 FIX (audit O): cursor position at the moment of LEFT MouseButtonDown,
+    // used to decide whether the gesture was a click (no move) or a drag.
+    private var dragDownX = 0f
+    private var dragDownY = 0f
+
+    // BUG-125 FIX (audit O): a LEFT gesture that moves less than this many screen pixels
+    // between down and up is treated as a click, not a drag.
+    private const val CLICK_MOVE_THRESHOLD_PX = 10f
+
     // BUG-121 FIX (audit K): monotonic drag-session token. Bumped on every
     // MouseButtonDown(LEFT) and MouseButtonUp(LEFT). A continueStroke launched on
     // Dispatchers.Main captures the token at launch; if it runs after the drag has
@@ -321,11 +330,13 @@ object AccessibilityCommandBus {
                 lastCursorY = cursorY
                 when (event.button) {
                     MouseButton.LEFT    -> {
-                        if (ShizukuInputInjector.checkAvailability()) {
-                            ShizukuInputInjector.tap(cursorX, cursorY)
-                        } else {
-                            svc.tap(cursorX, cursorY)
-                        }
+                        // BUG-125 FIX (audit O): do NOT tap on down. Tapping here and then
+                        // also starting a drag stroke on move means a click+small-drag
+                        // double-fires (the down tap plus the gesture). Instead, remember
+                        // the down position and only perform the tap on mouse-up if the
+                        // pointer did not move enough to be a drag.
+                        dragDownX = cursorX
+                        dragDownY = cursorY
                         isDragging = true
                         dragStartTime = System.currentTimeMillis()
                         dragSessionId++
@@ -349,6 +360,18 @@ object AccessibilityCommandBus {
                     isDragging = false
                     dragSessionId++
                     svc.endStroke()
+                    // BUG-125 FIX (audit O): if the pointer barely moved, this was a click,
+                    // not a drag — dispatch the tap now (deferred from MouseButtonDown). When
+                    // the gesture was a real drag, the stroke already represented it, so we
+                    // must NOT also tap.
+                    val moved = kotlin.math.hypot(cursorX - dragDownX, cursorY - dragDownY)
+                    if (moved < CLICK_MOVE_THRESHOLD_PX) {
+                        if (ShizukuInputInjector.checkAvailability()) {
+                            ShizukuInputInjector.tap(cursorX, cursorY)
+                        } else {
+                            svc.tap(cursorX, cursorY)
+                        }
+                    }
                 }
             }
 

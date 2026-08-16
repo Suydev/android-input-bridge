@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 033 — Round-3 audit fixes (BUG-111 → BUG-127): pairing consistency, accessibility node recycling, BT HID reconnect, drag-session race (2026-08-16)
+> **Last updated:** Session 034 — closed audit findings O/P (BUG-125 click-on-up, BUG-126 require-paired-sender) (2026-08-16)
 
 ---
 

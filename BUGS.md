@@ -2299,28 +2299,33 @@ instead of using the just-received packet's source endpoint.
 ---
 
 ## BUG-125 — LEFT down fires both tap() and a continuous stroke
-**Description**: `AccessibilityCommandBus` issues `tap()` on LEFT down and also starts a drag stroke
-on subsequent moves. Agent confidence this is a bug is LOW; it may be intended double-action.
+**Description**: `AccessibilityCommandBus` issued `tap()` on LEFT down AND started a drag stroke on
+subsequent moves, so a click or small drag double-fired (the down tap plus the gesture).
 **Steps to reproduce**: Click with the bridge while in accessibility mode.
-**Expected behavior**: Single, well-defined action.
-**Actual behavior**: Possibly both tap and stroke.
-**Suspected cause**: Ambiguous product intent.
+**Expected behavior**: A click dispatches exactly one tap; a drag dispatches only the gesture.
+**Actual behavior**: Both a tap (on down) and a drag stroke (on move) were dispatched.
+**Suspected cause**: Tap was performed eagerly on MouseButtonDown instead of deferred to mouse-up.
 **Files involved**: `accessibility-receiver/.../AccessibilityCommandBus.kt`
 **Priority**: Low
-**Status**: ⚠️ WONTFIX (Session 033) — needs a product decision; not changed.
+**Status**: ✅ FIXED (Session 034)
+**Fix**: Tap is now deferred to MouseButtonUp; it fires only when the pointer moved less than
+`CLICK_MOVE_THRESHOLD_PX` since down (a click), so a real drag no longer also taps.
 
 ---
 
 ## BUG-126 — Receiver falls back to open-input mode after DISCONNECT
-**Description**: After a DISCONNECT the receiver accepts any LAN host's input (no `pairedBridgeIp`
-enforcement when unpaired). This is a deliberate product/security decision, not a one-line fix.
+**Description**: After a DISCONNECT the receiver accepted any LAN host's input (no `pairedBridgeIp`
+enforcement when unpaired).
 **Steps to reproduce**: DISCONNECT, then any host on the LAN sends input.
-**Expected behavior**: (Product call) require re-pairing before accepting input.
-**Actual behavior**: Open-mode injection accepted.
-**Suspected cause**: Security model choice.
+**Expected behavior**: Only the paired bridge may inject input; unknown senders are dropped.
+**Actual behavior**: Open-mode injection accepted from any host.
+**Suspected cause**: Validation rule only dropped unknown senders while `pairedBridgeIp` was non-empty.
 **Files involved**: `app-receiver/.../ReceiverService.kt`
 **Priority**: Medium
-**Status**: ⚠️ WONTFIX (Session 033) — design decision; not changed pending product call.
+**Status**: ✅ FIXED (Session 034)
+**Fix**: When a session PIN is configured (always, after first run) the receive loop drops every
+non-PAIR_REQUEST packet whose sender is not the paired bridge, closing the open-input fallback.
+Trade-off: a bridge with no PIN can no longer inject until its PIN matches the receiver.
 
 ---
 
