@@ -1,6 +1,7 @@
 package com.inputbridge.protocol
 
 import com.inputbridge.core.model.*
+import com.inputbridge.core.logging.BridgeLogger
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -17,6 +18,10 @@ object PacketSerializer {
 
     private val BYTE_ORDER = ByteOrder.BIG_ENDIAN
 
+    /** BUG-XXX FIX: maximum serialized packet size. Prevents oversized TextInput
+     *  payloads from exceeding UDP MTU and causing fragmentation/drops. */
+    private const val MAX_PACKET_SIZE = 1400
+
     // ── Serialization ─────────────────────────────────────────────────────────
 
     /**
@@ -25,7 +30,23 @@ object PacketSerializer {
      */
     fun serialize(packet: Packet): ByteArray {
         val payload = packet.payload
-        val buf = ByteBuffer.allocate(Packet.HEADER_SIZE + payload.size)
+        // BUG-XXX FIX: enforce MAX_PACKET_SIZE to prevent oversized packets
+        // (e.g. large TextInput) from exceeding UDP MTU.
+        val totalSize = Packet.HEADER_SIZE + payload.size
+        if (totalSize > MAX_PACKET_SIZE) {
+            BridgeLogger.w("PacketSerializer", "Packet too large: $totalSize bytes " +
+                "(type=${packet.type}, payload=${payload.size}) — truncating payload")
+            val truncatedPayload = payload.copyOf(MAX_PACKET_SIZE - Packet.HEADER_SIZE)
+            val buf = ByteBuffer.allocate(MAX_PACKET_SIZE)
+                .order(BYTE_ORDER)
+            buf.put(packet.version)
+            buf.put(packet.type.id)
+            buf.putInt(packet.sequenceNo)
+            buf.putLong(packet.timestampMs)
+            buf.put(truncatedPayload)
+            return buf.array()
+        }
+        val buf = ByteBuffer.allocate(totalSize)
             .order(BYTE_ORDER)
         buf.put(packet.version)
         buf.put(packet.type.id)

@@ -455,11 +455,19 @@ class InputBridgeAccessibilityService : AccessibilityService() {
             KeyEvent.KEYCODE_NUMPAD_MULTIPLY -> injectPrintableChar(modifiers, '*')
             KeyEvent.KEYCODE_NUMPAD_DIVIDE -> injectPrintableChar(modifiers, '/')
 
-            // Media keys — perform global actions
-            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> performGlobalAction(GLOBAL_ACTION_BACK)
-            KeyEvent.KEYCODE_MEDIA_STOP -> performGlobalAction(GLOBAL_ACTION_HOME)
-            KeyEvent.KEYCODE_MEDIA_NEXT -> performGlobalAction(GLOBAL_ACTION_RECENTS)
-            KeyEvent.KEYCODE_MEDIA_PREVIOUS -> performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
+            // Media keys — BUG-XXX FIX: the old code mapped these to unrelated global actions
+            // (PLAY_PAUSE→BACK, STOP→HOME, NEXT→RECENTS, PREVIOUS→NOTIFICATIONS) which was
+            // semantically wrong. Accessibility services cannot inject media key events directly;
+            // log and drop so the user gets correct feedback instead of random actions.
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+            KeyEvent.KEYCODE_MEDIA_STOP,
+            KeyEvent.KEYCODE_MEDIA_NEXT,
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+            KeyEvent.KEYCODE_MEDIA_REWIND,
+            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
+                BridgeLogger.d(TAG, "Media key ${KeyEvent.keyCodeToString(keyCode)} — " +
+                    "no accessibility equivalent, dropped")
+            }
 
             else -> {
                 // Attempt to resolve a printable Unicode character from the keyCode
@@ -501,10 +509,17 @@ class InputBridgeAccessibilityService : AccessibilityService() {
             if (didSetText) return
 
             // Strategy 2: Clipboard paste
+            // BUG-XXX FIX: save and restore clipboard to avoid permanently
+            // overwriting the user's clipboard content as a side effect.
             try {
                 val clip = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                val oldClip = clip.primaryClip
                 clip.setPrimaryClip(android.content.ClipData.newPlainText("InputBridge", effectiveChar.toString()))
                 focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+                // Restore old clipboard after paste completes
+                if (oldClip != null) {
+                    clip.setPrimaryClip(oldClip)
+                }
                 return
             } catch (e: Exception) {
                 BridgeLogger.d(TAG, "Clipboard paste failed for char '$effectiveChar'")
@@ -557,11 +572,17 @@ class InputBridgeAccessibilityService : AccessibilityService() {
             if (set) return
 
             // Strategy 2: Clipboard paste (works on many non-standard text fields)
+            // BUG-XXX FIX: save and restore clipboard to avoid permanently
+            // overwriting the user's clipboard content as a side effect.
             try {
                 val clip = getSystemService(Context.CLIPBOARD_SERVICE)
                     as android.content.ClipboardManager
+                val oldClip = clip.primaryClip
                 clip.setPrimaryClip(android.content.ClipData.newPlainText("InputBridge", text))
                 val didPaste = focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+                if (oldClip != null) {
+                    clip.setPrimaryClip(oldClip)
+                }
                 if (didPaste) return
             } catch (e: Exception) {
                 BridgeLogger.d(TAG, "Clipboard paste failed: ${e.message}")
@@ -616,6 +637,8 @@ class InputBridgeAccessibilityService : AccessibilityService() {
 
     /**
      * Recursively find all editable nodes in the accessibility tree.
+     * BUG-XXX FIX: recycle child nodes obtained via getChild() to avoid
+     * pool exhaustion under sustained input.
      */
     private fun findEditableNodes(node: AccessibilityNodeInfo, result: MutableList<AccessibilityNodeInfo>) {
         if (node.isEditable) {
@@ -624,6 +647,7 @@ class InputBridgeAccessibilityService : AccessibilityService() {
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
             findEditableNodes(child, result)
+            child.recycle()
         }
     }
 

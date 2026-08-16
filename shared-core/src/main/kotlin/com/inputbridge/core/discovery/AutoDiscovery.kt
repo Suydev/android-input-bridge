@@ -5,6 +5,10 @@ import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import com.inputbridge.core.logging.BridgeLogger
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 /**
  * UDP broadcast-based auto-discovery for finding the receiver on the local network.
@@ -57,18 +61,31 @@ object AutoDiscovery {
 
     /**
      * Listen for receiver broadcasts. Returns the receiver's IP and port.
-     * Call from a coroutine on Dispatchers.IO.
+     * BUG-XXX FIX: now a suspend function that checks coroutine cancellation.
+     * The old blocking implementation would ignore cancellation for up to 10s
+     * per timeout cycle. Now uses coroutineScope + launch to close socket on cancel.
      */
-    fun listenForReceiver(onFound: (ip: String, port: Int) -> Unit) {
-        var socket: DatagramSocket? = null
-        try {
-            socket = DatagramSocket(null)
-            socket.reuseAddress = true
-            socket.soTimeout = 10000 // 10s timeout for retry
-            socket.bind(InetSocketAddress(DISCOVERY_PORT))
+    suspend fun listenForReceiver(onFound: (ip: String, port: Int) -> Unit) = coroutineScope {
+        val socket = DatagramSocket(null).apply {
+            reuseAddress = true
+            soTimeout = 3000
+            bind(InetSocketAddress(DISCOVERY_PORT))
+        }
 
+        // Close socket when coroutine is cancelled so blocking receive() unblocks
+        launch {
+            try {
+                while (isActive) {
+                    kotlinx.coroutines.delay(1000)
+                }
+            } finally {
+                socket.close()
+            }
+        }
+
+        try {
             val buffer = ByteArray(256)
-            while (true) {
+            while (isActive) {
                 val packet = DatagramPacket(buffer, buffer.size)
                 try {
                     socket.receive(packet)
@@ -87,9 +104,10 @@ object AutoDiscovery {
                 }
             }
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             BridgeLogger.e(TAG, "listenForReceiver failed: ${e.message}")
         } finally {
-            socket?.close()
+            socket.close()
         }
     }
 

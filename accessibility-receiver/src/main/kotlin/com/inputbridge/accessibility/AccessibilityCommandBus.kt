@@ -225,8 +225,13 @@ object AccessibilityCommandBus {
 
                 // If dragging, send continueStroke to keep the gesture alive
                 if (isDragging) {
+                    // BUG-XXX FIX: capture start coords at launch time, not at
+                    // dispatch time on Main. Between launch and execution, another
+                    // MouseMove could update lastCursorX/Y, causing stale coords.
+                    val startX = lastCursorX
+                    val startY = lastCursorY
                     scope.launch(Dispatchers.Main) {
-                        service?.continueStroke(lastCursorX, lastCursorY, newX, newY, true)
+                        service?.continueStroke(startX, startY, newX, newY, true)
                     }
                     lastCursorX = newX
                     lastCursorY = newY

@@ -53,6 +53,7 @@ class UsbInputCapture(
 
     override val events: Flow<InputEvent> = _events.asSharedFlow()
     override val status: Flow<CaptureStatus> = _status.asStateFlow()
+    @Volatile
     override var isActive: Boolean = false
         private set
 

@@ -44,7 +44,13 @@ object BridgeLogger {
 private class ProductionTree : Timber.Tree() {
     override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
         if (priority < android.util.Log.WARN) return
-        android.util.Log.println(priority, tag ?: "InputBridge", message)
-        t?.let { android.util.Log.e(tag ?: "InputBridge", message, it) }
+        val resolvedTag = tag ?: "InputBridge"
+        // BUG-XXX FIX: original code called println() then Log.e() for throwables,
+        // causing every warning+with-throwable to appear twice in logcat.
+        if (t != null) {
+            android.util.Log.e(resolvedTag, message, t)
+        } else {
+            android.util.Log.println(priority, resolvedTag, message)
+        }
     }
 }

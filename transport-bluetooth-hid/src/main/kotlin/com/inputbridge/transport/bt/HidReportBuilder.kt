@@ -125,10 +125,11 @@ class HidReportBuilder {
     }
 
     private fun buttonBit(button: MouseButton): Int = when (button) {
-        MouseButton.LEFT   -> 0x01
-        MouseButton.RIGHT  -> 0x02
-        MouseButton.MIDDLE -> 0x04
-        else               -> 0x00
+        MouseButton.LEFT    -> 0x01
+        MouseButton.RIGHT   -> 0x02
+        MouseButton.MIDDLE  -> 0x04
+        MouseButton.BACK    -> 0x00  // HID has no back/forward buttons
+        MouseButton.FORWARD -> 0x00
     }
 
     private fun Float.clampToByte(): Int = coerceIn(-127f, 127f).toInt()

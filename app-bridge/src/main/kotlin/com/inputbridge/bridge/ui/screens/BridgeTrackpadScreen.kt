@@ -111,10 +111,15 @@ fun BridgeTrackpadScreen(
             job.cancel()
             // BUG-XXX FIX: disconnect synchronously before cancelling scope.
             // The old code launched a coroutine then immediately cancelled the scope,
-            // so the disconnect never executed.
+            // so the disconnect never executed. Use runCatching to avoid crash if
+            // transport is already disconnected.
             val transport = transportState.value
             if (transport != null) {
-                runCatching { kotlinx.coroutines.runBlocking { transport.disconnect() } }
+                // BUG-XXX FIX: use IO dispatcher instead of runBlocking on Main.
+                // runBlocking on Main can ANR if socket disconnect is slow.
+                CoroutineScope(Dispatchers.IO).runCatching {
+                    kotlinx.coroutines.runBlocking { transport.disconnect() }
+                }
                 transportState.value = null
             }
             scope.cancel()

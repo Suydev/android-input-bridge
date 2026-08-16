@@ -62,11 +62,16 @@ class BridgeAccessibilityService : AccessibilityService() {
         BridgePreferences(applicationContext)
     }
 
-    // Modifier state tracking
-    @Volatile private var shiftPressed = false
-    @Volatile private var ctrlPressed = false
-    @Volatile private var altPressed = false
-    @Volatile private var metaPressed = false
+    // Modifier state tracking — BUG-XXX FIX: track left/right separately so
+    // releasing one side while the other is held doesn't clear the modifier.
+    @Volatile private var shiftLeftPressed = false
+    @Volatile private var shiftRightPressed = false
+    @Volatile private var ctrlLeftPressed = false
+    @Volatile private var ctrlRightPressed = false
+    @Volatile private var altLeftPressed = false
+    @Volatile private var altRightPressed = false
+    @Volatile private var metaLeftPressed = false
+    @Volatile private var metaRightPressed = false
 
     // Screen dimensions for gesture injection (populated on service connected)
     @Volatile private var screenWidth = 1080
@@ -137,19 +142,29 @@ class BridgeAccessibilityService : AccessibilityService() {
         }
 
         when (event.keyCode) {
-            KeyEvent.KEYCODE_SHIFT_LEFT, KeyEvent.KEYCODE_SHIFT_RIGHT ->
-                shiftPressed = event.action == KeyEvent.ACTION_DOWN
-            KeyEvent.KEYCODE_CTRL_LEFT, KeyEvent.KEYCODE_CTRL_RIGHT ->
-                ctrlPressed = event.action == KeyEvent.ACTION_DOWN
-            KeyEvent.KEYCODE_ALT_LEFT, KeyEvent.KEYCODE_ALT_RIGHT ->
-                altPressed = event.action == KeyEvent.ACTION_DOWN
-            KeyEvent.KEYCODE_META_LEFT, KeyEvent.KEYCODE_META_RIGHT ->
-                metaPressed = event.action == KeyEvent.ACTION_DOWN
+            KeyEvent.KEYCODE_SHIFT_LEFT ->
+                shiftLeftPressed = event.action == KeyEvent.ACTION_DOWN
+            KeyEvent.KEYCODE_SHIFT_RIGHT ->
+                shiftRightPressed = event.action == KeyEvent.ACTION_DOWN
+            KeyEvent.KEYCODE_CTRL_LEFT ->
+                ctrlLeftPressed = event.action == KeyEvent.ACTION_DOWN
+            KeyEvent.KEYCODE_CTRL_RIGHT ->
+                ctrlRightPressed = event.action == KeyEvent.ACTION_DOWN
+            KeyEvent.KEYCODE_ALT_LEFT ->
+                altLeftPressed = event.action == KeyEvent.ACTION_DOWN
+            KeyEvent.KEYCODE_ALT_RIGHT ->
+                altRightPressed = event.action == KeyEvent.ACTION_DOWN
+            KeyEvent.KEYCODE_META_LEFT ->
+                metaLeftPressed = event.action == KeyEvent.ACTION_DOWN
+            KeyEvent.KEYCODE_META_RIGHT ->
+                metaRightPressed = event.action == KeyEvent.ACTION_DOWN
         }
 
         val modifiers = ModifierState(
-            shift = shiftPressed, ctrl = ctrlPressed,
-            alt = altPressed, meta = metaPressed,
+            shift = shiftLeftPressed || shiftRightPressed,
+            ctrl = ctrlLeftPressed || ctrlRightPressed,
+            alt = altLeftPressed || altRightPressed,
+            meta = metaLeftPressed || metaRightPressed,
         )
 
         val inputEvent = if (event.action == KeyEvent.ACTION_DOWN) {

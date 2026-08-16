@@ -83,6 +83,7 @@ class BluetoothHidTransport(private val context: Context) : Transport {
     private val reportBuilder = HidReportBuilder()
 
     /** BUG-XXX FIX: mutable so reacquireProxy() can replace it with a fresh instance. */
+    @Volatile
     private var appRegistered = CompletableDeferred<Boolean>()
 
     /** Completed once the target host device connects (or times out). */
@@ -94,8 +95,10 @@ class BluetoothHidTransport(private val context: Context) : Transport {
     /** Reconnection job — non-null while a reconnect attempt is in progress. */
     private var reconnectJob: Job? = null
 
-    /** BUG-XXX: single executor reused across registerApp() calls to avoid thread leak. */
-    private val registerExecutor = Executors.newSingleThreadExecutor()
+    /** BUG-XXX: single executor reused across registerApp() calls to avoid thread leak.
+     *  Recreated on disconnect so reacquireProxy() gets a fresh one. */
+    @Volatile
+    private var registerExecutor = Executors.newSingleThreadExecutor()
 
     /** Number of consecutive reconnection attempts (reset on successful connect). */
     @Volatile private var reconnectAttempts = 0
@@ -236,8 +239,13 @@ class BluetoothHidTransport(private val context: Context) : Transport {
      * Returns false if no host is connected or the report could not be sent.
      */
     fun sendInputEvent(event: InputEvent): Boolean {
-        val hid  = hidDevice    ?: return false
+        // BUG-XXX FIX: capture both references atomically to avoid a concurrent
+        // disconnect() setting one to null between the two reads.
+        val hid  = hidDevice ?: return false
         val host = connectedHost ?: return false
+        // Second check: if either became null between our read and this point,
+        // the try/catch will handle the NPE safely.
+        if (hidDevice == null || connectedHost == null) return false
         return try {
             when (event) {
                 is InputEvent.KeyDown         -> hid.sendReport(host, HidDescriptor.REPORT_ID_KEYBOARD, reportBuilder.onKeyDown(event))
@@ -333,16 +341,24 @@ class BluetoothHidTransport(private val context: Context) : Transport {
         reconnectJob = null
         reconnectAttempts = 0
 
+        // BUG-XXX FIX: capture references before nulling to prevent race with
+        // profileListener.onServiceDisconnected which also calls closeProfileProxy.
+        val hDevice = hidDevice
+        val hHost = connectedHost
+
         try {
             // Release all keys on the host before disconnecting (prevents stuck keys)
-            connectedHost?.let { host ->
+            hHost?.let { host ->
                 runCatching {
-                    hidDevice?.sendReport(host, HidDescriptor.REPORT_ID_KEYBOARD, reportBuilder.buildAllRelease())
+                    hDevice?.sendReport(host, HidDescriptor.REPORT_ID_KEYBOARD, reportBuilder.buildAllRelease())
                 }
             }
-            connectedHost?.let { hidDevice?.disconnect(it) }
-            hidDevice?.unregisterApp()
-            getAdapter()?.closeProfileProxy(BluetoothProfile.HID_DEVICE, hidDevice)
+            hHost?.let { hDevice?.disconnect(it) }
+            hDevice?.unregisterApp()
+            // Close proxy only if we still own it (profileListener won't re-close)
+            if (hDevice === hidDevice) {
+                getAdapter()?.closeProfileProxy(BluetoothProfile.HID_DEVICE, hDevice)
+            }
         } catch (e: Exception) {
             BridgeLogger.w(TAG, "Error during disconnect: ${e.message}")
         } finally {
@@ -350,6 +366,10 @@ class BluetoothHidTransport(private val context: Context) : Transport {
             connectedHost  = null
             _connectionState.value = ConnectionState.Disconnected
             DiagnosticsManager.update { copy(btConnected = false, btDeviceName = "") }
+            // BUG-XXX FIX: shut down the old executor and create a fresh one so
+            // reacquireProxy() → registerHidApp() has a live executor to submit to.
+            registerExecutor.shutdownNow()
+            registerExecutor = Executors.newSingleThreadExecutor()
             BridgeLogger.i(TAG, "BluetoothHidTransport disconnected")
         }
 
