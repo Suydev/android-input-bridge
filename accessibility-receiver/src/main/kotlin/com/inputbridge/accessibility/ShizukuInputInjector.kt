@@ -7,6 +7,7 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import androidx.annotation.RequiresApi
 import com.inputbridge.core.logging.BridgeLogger
+import com.inputbridge.diagnostics.DiagnosticsManager
 import rikka.shizuku.Shizuku
 import rikka.shizuku.ShizukuBinderWrapper
 import rikka.shizuku.SystemServiceHelper
