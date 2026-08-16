@@ -144,6 +144,13 @@ class CursorOverlayService : Service() {
                 scheduleTrailCleanup()
             }
         }
+
+        // Observe click events for ripple animation
+        serviceScope.launch {
+            AccessibilityCommandBus.clicks.collect { (x, y) ->
+                overlayView?.triggerClickRipple(x, y)
+            }
+        }
     }
 
     /**
@@ -212,7 +219,7 @@ private class CursorTrailView(context: android.content.Context) : View(context) 
     // Trail points with timestamps
     private val trailPoints = LinkedList<TrailPoint>()
 
-    // Paints
+    // Paints - pre-allocated, no onDraw allocations
     private val trailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         style = Paint.Style.STROKE
@@ -238,6 +245,24 @@ private class CursorTrailView(context: android.content.Context) : View(context) 
         strokeWidth = 3f
     }
 
+    private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(70, 0, 0, 0)
+        style = Paint.Style.FILL
+    }
+
+    // Arrow cursor path (Windows-style)
+    private val arrowPath = android.graphics.Path().apply {
+        moveTo(0f, 0f)           // Tip
+        lineTo(12f, 18f)         // Right edge
+        lineTo(6f, 14f)          // Inner notch
+        lineTo(18f, 28f)         // Far right
+        lineTo(0f, 20f)          // Bottom center
+        lineTo(-18f, 28f)        // Far left
+        lineTo(-6f, 14f)         // Inner notch
+        lineTo(-12f, 18f)        // Left edge
+        close()
+    }
+
     // Click ripple state
     private var rippleX = 0f
     private var rippleY = 0f
@@ -249,8 +274,30 @@ private class CursorTrailView(context: android.content.Context) : View(context) 
     private val cursorRadius = 8f
     private val density = resources.displayMetrics.density
 
+    // Current cursor position (always valid, independent of trail)
+    private var cursorX = 0f
+    private var cursorY = 0f
+    private var hasValidPosition = false
+
     // Last trail point time to throttle updates
     private var lastTrailTime = 0L
+
+    // Ripple animator for smooth 60fps without postInvalidateDelayed in onDraw
+    private val rippleAnimator = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+        duration = CLICK_RIPPLE_DURATION_MS.toLong()
+        addUpdateListener { anim ->
+            val progress = anim.animatedValue as Float
+            rippleRadius = progress * CLICK_RIPPLE_MAX_RADIUS_DP * density
+            rippleAlpha = (255 * (1f - progress)).toInt().coerceIn(0, 255)
+            invalidate()
+        }
+        addListener(object : android.animation.AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: android.animation.Animator?) {
+                isRippleActive = false
+                invalidate()
+            }
+        })
+    }
 
     /**
      * Add a new trail point at the given position.
@@ -262,6 +309,11 @@ private class CursorTrailView(context: android.content.Context) : View(context) 
         // Throttle trail points to ~60fps
         if (now - lastTrailTime < TRAIL_STEP_MS) return
         lastTrailTime = now
+
+        // Always update cursor position immediately (no throttle for position)
+        cursorX = x
+        cursorY = y
+        hasValidPosition = true
 
         // Add new point
         trailPoints.add(TrailPoint(x, y, now))
@@ -275,7 +327,7 @@ private class CursorTrailView(context: android.content.Context) : View(context) 
     }
 
     /**
-     * Clear the trail (called after inactivity).
+     * Clear the trail but KEEP the cursor dot visible.
      */
     fun clearTrail() {
         if (trailPoints.isEmpty()) return
@@ -289,16 +341,9 @@ private class CursorTrailView(context: android.content.Context) : View(context) 
     fun triggerClickRipple(x: Float, y: Float) {
         rippleX = x
         rippleY = y
-        rippleRadius = 0f
-        rippleAlpha = 255
         isRippleActive = true
+        rippleAnimator.start()
         invalidate()
-
-        // Animate the ripple
-        postDelayed({
-            isRippleActive = false
-            invalidate()
-        }, CLICK_RIPPLE_DURATION_MS)
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -332,35 +377,27 @@ private class CursorTrailView(context: android.content.Context) : View(context) 
             }
         }
 
-        // Draw cursor dot
-        if (trailPoints.isNotEmpty()) {
-            val lastPoint = trailPoints.last
+        // Draw cursor arrow at current position (always visible if we have a position)
+        if (hasValidPosition) {
+            canvas.save()
+            canvas.translate(cursorX, cursorY)
 
             // Drop shadow
-            canvas.drawCircle(lastPoint.x + 2f, lastPoint.y + 2f, cursorRadius * density, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.argb(70, 0, 0, 0)
-                style = Paint.Style.FILL
-            })
+            canvas.drawPath(arrowPath, shadowPaint)
 
             // White fill
-            canvas.drawCircle(lastPoint.x, lastPoint.y, cursorRadius * density, cursorPaint)
+            canvas.drawPath(arrowPath, cursorPaint)
 
             // Black outline
-            canvas.drawCircle(lastPoint.x, lastPoint.y, cursorRadius * density, cursorOutlinePaint)
+            canvas.drawPath(arrowPath, cursorOutlinePaint)
+
+            canvas.restore()
         }
 
         // Draw click ripple
         if (isRippleActive) {
-            rippleRadius += (CLICK_RIPPLE_MAX_RADIUS_DP * density) / (CLICK_RIPPLE_DURATION_MS / 16f)
-            rippleAlpha = (255 * (1f - rippleRadius / (CLICK_RIPPLE_MAX_RADIUS_DP * density))).toInt()
-                .coerceIn(0, 255)
-
             ripplePaint.alpha = rippleAlpha
             canvas.drawCircle(rippleX, rippleY, rippleRadius, ripplePaint)
-
-            if (rippleAlpha > 0) {
-                postInvalidateDelayed(16)
-            }
         }
     }
 }

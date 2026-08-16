@@ -63,6 +63,12 @@ object AccessibilityCommandBus {
     )
     private val commandFlow = MutableSharedFlow<InputEvent>(extraBufferCapacity = 256)
 
+    /** Click events for visual feedback (ripple) on the cursor overlay. */
+    private val clickFlow = MutableSharedFlow<Pair<Float, Float>>(extraBufferCapacity = 16)
+
+    /** Expose click flow for the cursor overlay service. */
+    val clicks: kotlinx.coroutines.flow.SharedFlow<Pair<Float, Float>> = clickFlow
+
     @Volatile private var service: InputBridgeAccessibilityService? = null
 
     /**
@@ -407,6 +413,8 @@ object AccessibilityCommandBus {
                         } else {
                             svc.tap(cursorX, cursorY)
                         }
+                        // Emit click for visual ripple on cursor overlay
+                        clickFlow.tryEmit(cursorX to cursorY)
                     }
                 }
             }
