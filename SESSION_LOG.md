@@ -1,3 +1,33 @@
+## Session 040 — Full-screen cursor overlay + real screen-size coordinate space (BUG-136, BUG-137)
+**Date:** 2026-08-16
+**Agent:** opencode
+**Status:** ✅ Complete
+
+### Goals
+- User: "i want the cursor windows like find search on internet now fix the ui and fallbacls".
+- Research full-screen `TYPE_APPLICATION_OVERLAY` cursor (status bar / nav bar / cutout) and fix the
+  overlay UI so the cursor covers the entire physical display, plus connection/screen-size fallbacks.
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|----|----------|-------------|---------|
+| BUG-136 | High | Overlay inset away from cutout/system bars; cursor can't reach screen edges | ✅ FIXED |
+| BUG-137 | High | Cursor space clamped to 1080×2400 (or smaller a11y bounds); can't span full screen | ✅ FIXED |
+
+### What Was Changed
+- Web-verified: Android avoids display cutouts by default; API 30+ uses
+  `LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS` (replaces the old negative-y offset workaround); combine with
+  `FLAG_LAYOUT_NO_LIMITS` + `FLAG_LAYOUT_IN_SCREEN` for an edge-to-edge overlay.
+- `CursorOverlayService.kt`: added `LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS` + `FLAG_LAYOUT_NO_LIMITS`;
+  feed `realScreenSize()` into `AccessibilityCommandBus.setScreenSize()` at create time.
+- `ScreenMetrics.kt` (new): `realScreenSize(context)` using `maximumWindowMetrics` (API 30+) /
+  `Display.getRealSize()`, the true full physical display including system bars + cutout.
+- `InputBridgeAccessibilityService.kt`: `onServiceConnected` now uses `realScreenSize()` instead of
+  `currentWindowMetrics.bounds` (which excluded system bars); removed the now-unused `getRealScreenSize`
+  body and `DisplayMetrics` import.
+
+---
+
 ## Session 039 (addendum) — BT HID discoverable fix from reference decompile (BUG-135)
 **Date:** 2026-08-16
 **Agent:** opencode

@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 038 — BUG-133: bidirectional auto-discovery + remove IP/PIN UI (2026-08-16)
+> **Last updated:** Session 040 — BUG-136/137: full-screen cursor overlay + real screen-size coordinate space (2026-08-16)
 
 ---
 

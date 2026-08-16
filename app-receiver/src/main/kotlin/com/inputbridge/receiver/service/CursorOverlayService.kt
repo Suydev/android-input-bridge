@@ -15,6 +15,7 @@ import android.view.View
 import android.view.WindowManager
 import androidx.annotation.RequiresApi
 import com.inputbridge.accessibility.AccessibilityCommandBus
+import com.inputbridge.accessibility.realScreenSize
 import com.inputbridge.core.logging.BridgeLogger
 import com.inputbridge.diagnostics.DiagnosticsManager
 import com.inputbridge.receiver.prefs.ReceiverPreferences
@@ -75,11 +76,22 @@ class CursorOverlayService : Service() {
             return
         }
 
+        // BUG-137 FIX: feed the true physical screen size to the command bus up-front so the
+        // virtual cursor space matches the real display even before the accessibility service
+        // connects (otherwise it clamps to the 1080×2400 default and cannot cover the full screen).
+        val realSize = realScreenSize(this)
+        AccessibilityCommandBus.setScreenSize(realSize.x, realSize.y)
+        BridgeLogger.i(TAG, "Overlay real screen size: ${realSize.x}×${realSize.y}")
+
         // Arrow size is user-configurable and persisted for tablet displays.
         val density = resources.displayMetrics.density
         val viewPx = (prefs.cursorSizeDp * density).toInt().coerceAtLeast(1)
         overlaySizePx = viewPx
 
+        // BUG-136 FIX: extend the overlay into the status bar, nav bar, and display cutout so the
+        // cursor can travel edge-to-edge like a real OS pointer. FLAG_LAYOUT_NO_LIMITS lifts the
+        // system-bar insets; LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS lets the window cover the cutout
+        // (API 30+ replacement for the old negative-y offset workaround).
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
@@ -91,6 +103,7 @@ class CursorOverlayService : Service() {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
                 WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
@@ -99,6 +112,9 @@ class CursorOverlayService : Service() {
             gravity = Gravity.TOP or Gravity.START
             x = 0
             y = 0
+            // BUG-136 FIX: cover the display cutout / status bar region on all edges.
+            layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
             softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
         }
         layoutParams = params

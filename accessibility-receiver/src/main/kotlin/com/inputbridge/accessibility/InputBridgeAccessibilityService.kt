@@ -7,7 +7,6 @@ import android.content.Intent
 import android.graphics.Path
 import android.os.Build
 import android.os.Bundle
-import android.util.DisplayMetrics
 import android.view.KeyEvent
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
@@ -70,7 +69,9 @@ class InputBridgeAccessibilityService : AccessibilityService() {
 
         // Get real screen dimensions and pass them to the command bus so
         // mouse cursor clamping uses actual device dimensions.
-        val (w, h) = getRealScreenSize()
+        // BUG-137 FIX: use realScreenSize() (maximumWindowMetrics) so the cursor covers the
+        // full physical display, not just the current window bounds.
+        val (w, h) = realScreenSize(this)
         AccessibilityCommandBus.setScreenSize(w, h)
         BridgeLogger.i(TAG, "Screen size: ${w}×${h}")
 
@@ -107,24 +108,10 @@ class InputBridgeAccessibilityService : AccessibilityService() {
 
     // ── Screen size ───────────────────────────────────────────────────────────
 
-    private fun getRealScreenSize(): Pair<Int, Int> {
-        return try {
-            val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val bounds = wm.currentWindowMetrics.bounds
-                Pair(bounds.width(), bounds.height())
-            } else {
-                @Suppress("DEPRECATION")
-                val metrics = DisplayMetrics()
-                @Suppress("DEPRECATION")
-                wm.defaultDisplay.getRealMetrics(metrics)
-                Pair(metrics.widthPixels, metrics.heightPixels)
-            }
-        } catch (e: Exception) {
-            BridgeLogger.w(TAG, "Could not get screen size, using default", e)
-            Pair(1080, 2400)
-        }
-    }
+    // BUG-137 FIX: getRealScreenSize() replaced by top-level realScreenSize() (ScreenMetrics.kt)
+    // which uses maximumWindowMetrics for the true full-screen bounds. Kept as a thin shim only to
+    // avoid touching other call sites; new code should call realScreenSize(this) directly.
+    private fun getRealScreenSize(): Pair<Int, Int> = with(realScreenSize(this)) { first to second }
 
     // ── Gesture injection ─────────────────────────────────────────────────────
 

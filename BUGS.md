@@ -2505,3 +2505,48 @@ role (that app works on the same hardware).
 **Status**: ✅ FIXED (Session 039)
 **Fix**: After `registerApp()` succeeds, `BluetoothHidTransport` now requests discoverable mode
 (`ACTION_REQUEST_DISCOVERABLE`, 300s, from the foreground service via FLAG_ACTIVITY_NEW_TASK).
+
+## BUG-136 — Cursor overlay does not extend into status bar / nav bar / display cutout
+
+**Description**: The `CursorOverlayService` window uses `MATCH_PARENT` with `FLAG_LAYOUT_IN_SCREEN`
+but lacks `LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS` and `FLAG_LAYOUT_NO_LIMITS`. On the OnePlus Pad Go
+(center punch-hole camera) the window is inset away from the cutout and the system bars, so the cursor
+can never travel into those regions — the overlay visually "does not cover the full screen".
+**Steps to reproduce**: Enable overlay on a device with a punch-hole/status bar; move the mouse to the
+top edge / camera hole. The cursor halts before reaching the very edge.
+**Expected behavior**: The cursor window covers the entire physical display edge-to-edge, including
+behind the status bar, nav bar, and the display cutout (matching a real OS pointer).
+**Actual behavior**: Overlay is inset; cursor cannot reach the true screen edges.
+**Suspected cause**: Missing `layoutInDisplayCutoutMode = LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS` and
+`FLAG_LAYOUT_NO_LIMITS` on the overlay `WindowManager.LayoutParams` (web-verified: Android avoids
+cutouts by default; API 30+ uses `LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS` instead of the old negative-y
+offset workaround).
+**Files involved**: `app-receiver/.../receiver/service/CursorOverlayService.kt`
+**Priority**: High
+**Status**: ✅ FIXED (Session 040)
+**Fix**: Added `LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS` + `FLAG_LAYOUT_NO_LIMITS` to the overlay
+`WindowManager.LayoutParams`.
+
+## BUG-137 — Cursor coordinate space defaults to 1080×2400 until a11y reports size; can't span full screen
+
+**Description**: `AccessibilityCommandBus` clamps the virtual cursor to `screenWidth/screenHeight`, which
+default to 1080×2400 and are only updated by `InputBridgeAccessibilityService.onServiceConnected()` via
+`getRealScreenSize()` (which uses `currentWindowMetrics.bounds` — the *current* window bounds, NOT the
+full physical screen). If accessibility is disabled, slow, or reports a bounds smaller than the real
+screen, the cursor is confined to a sub-region and "cannot cover the full screen".
+**Steps to reproduce**: Start overlay without (or before) the accessibility service connecting, or on a
+tablet whose `currentWindowMetrics.bounds` excludes system bars; move the mouse far right/down. Cursor
+stops at ~1080px / 2400px, not the real edge.
+**Expected behavior**: Cursor coordinate space equals the true physical screen size (including system
+bars/cutout) regardless of accessibility state.
+**Actual behavior**: Cursor clamps to 1080×2400 (or the smaller a11y-reported bounds).
+**Suspected cause**: (a) no independent real-screen-size source for the overlay; (b) accessibility uses
+`currentWindowMetrics.bounds` instead of the full-screen `maximumWindowMetrics` (API 30+) / `getRealSize`.
+**Files involved**: `app-receiver/.../receiver/service/CursorOverlayService.kt`,
+`accessibility-receiver/.../accessibility/InputBridgeAccessibilityService.kt`,
+`accessibility-receiver/.../accessibility/AccessibilityCommandBus.kt`
+**Priority**: High
+**Status**: ✅ FIXED (Session 040)
+**Fix**: Added `realScreenSize(context)` (ScreenMetrics.kt) using `maximumWindowMetrics` (API 30+) /
+`getRealSize`; fed from `CursorOverlayService.onCreate` up-front and used by the accessibility service
+on connect, so the cursor space equals the true physical screen regardless of a11y state.
