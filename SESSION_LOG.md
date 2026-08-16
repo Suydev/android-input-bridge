@@ -2,6 +2,26 @@
 
 ---
 
+## Session 036 — USB host permission requested from foreground Activity (BUG-129)
+**Date:** 2026-08-16
+**Agent:** opencode
+**Status:** ✅ Complete
+
+### Goals
+- Fix "USB host access doesn't give the app access to the connected keyboard/mouse" on Android 10 / Redmi 9 (MIUI).
+- Research Android 10 `UsbManager` docs; implement per the `btmouse`/`jdx` USB-host consideration.
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|----|----------|-------------|---------|
+| BUG-129 | High | USB permission only requested from background `BridgeService`; MIUI drops the dialog so the app never gets access to the HID device | ✅ FIXED |
+
+### What Was Changed
+- `app-bridge/.../ui/MainActivity.kt`: added foreground `UsbManager.requestPermission()` requester + `ACTION_USB_PERMISSION` receiver; `onResume` scan and `USB_DEVICE_ATTACHED` launch intent now request permission from the foreground Activity and only start `BridgeService` after `EXTRA_PERMISSION_GRANTED`. `onNewIntent`/`onStart`/`onStop` wired for the receiver.
+- `BridgeService` USB-permission path retained as fallback for boot/notification-started case.
+
+---
+
 ## Session 035 — Fix pairing never re-runs after runtime PIN/IP change (BUG-128)
 **Date:** 2026-08-16
 **Agent:** opencode

@@ -277,6 +277,18 @@ where the constant value is a safe integer fallback.
 - Holding Application context in a ViewModel is SAFE (it lives as long as the process)
 - Never create `BridgePreferences(activityContext)` — always inject via Koin
 
+### 5.6 USB Host Permission Must Be Requested From a Foreground Activity
+- On Android 10 (API 29) / MIUI (Redmi 9) the `UsbManager` permission dialog is only reliably
+  shown when `requestPermission()` is called from a **foreground `Activity`**. Calling it from a
+  background `Service` (even a foreground service) can silently drop the dialog, leaving
+  `hasPermission()` false and `openDevice()` returning null — the app never gets access to the
+  connected USB keyboard/mouse.
+- `MainActivity` is the authoritative requester (BUG-129): it calls `requestPermission()` from the
+  foreground and only starts `BridgeService` after the `ACTION_USB_PERMISSION` broadcast reports
+  `EXTRA_PERMISSION_GRANTED`. The service path remains as a fallback for boot/notification starts.
+- The permission `PendingIntent` requires `FLAG_MUTABLE` (API 31+) so the system can write
+  `EXTRA_PERMISSION_GRANTED` / `EXTRA_DEVICE` into it; use flag `0` on API < 31.
+
 ---
 
 ## 6. Kotlin 2.0 Constraints

@@ -2359,3 +2359,30 @@ PIN in Settings → pairing never succeeds.
 and re-runs `doPairing()` against the live transport without restarting the pipeline.
 
 ---
+
+## BUG-129 — USB host permission requested only from background service; bridge never gets access to keyboard/mouse
+
+**Description**: All USB-permission acquisition lives in `BridgeService` (a background
+`foregroundService`). The service calls `UsbManager.requestPermission()` from a non-foreground
+context. On Android 10 (API 29, Redmi 9 / MIUI) the system permission dialog is silently dropped
+when no foreground `Activity` is present, so `hasPermission()` stays false and `openDevice()`
+returns null — the app never obtains access to the connected USB keyboard/mouse receiver.
+**Steps to reproduce**: Plug the Portronics Key2 Combo receiver into the Redmi 9 OTG while the
+bridge service is the only running component (app not foregrounded). Observe "Cannot open USB
+device" in logs / no input is bridged; `DiagnosticsManager.usbPermissionGranted` stays false.
+**Expected behavior**: Plugging in the USB receiver should reliably grant USB host access (even
+when requested from a background service) so input capture starts.
+**Actual behavior**: Permission dialog does not appear; app never gets access to the device.
+**Suspected cause**: Android 10/MIUI only reliably shows the USB-permission dialog from a
+foreground `Activity`. Requesting it from the service is the fragile path — the same consideration
+the `btmouse`/`jdx` USB-host projects solved by requesting permission from a foreground Activity.
+**Files involved**: `app-bridge/src/main/kotlin/com/inputbridge/bridge/ui/MainActivity.kt`,
+`app-bridge/src/main/kotlin/com/inputbridge/bridge/service/BridgeService.kt`
+**Priority**: High
+**Status**: ✅ FIXED (Session 036)
+**Fix**: `MainActivity` now acts as the authoritative foreground permission requester: on USB
+attach / `onResume` scan, if the app lacks permission it calls `UsbManager.requestPermission()`
+from the foreground `Activity` (reliable dialog), and only starts `BridgeService` once the
+`ACTION_USB_PERMISSION` broadcast reports `EXTRA_PERMISSION_GRANTED`. The service path remains as a
+fallback for the boot/notification-started case.
+

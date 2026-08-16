@@ -1,8 +1,13 @@
 package com.inputbridge.bridge.ui
 
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Intent
+import android.content.IntentFilter
 import android.hardware.usb.UsbConstants
+import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
+import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
@@ -65,6 +70,76 @@ class MainActivity : ComponentActivity() {
         private const val TAG = "MainActivity"
         /** How long to hold Volume Down to trigger emergency stop (ms). */
         const val EMERGENCY_HOLD_MS = 3_000L
+        /** Private action for the foreground USB-permission grant broadcast (BUG-129). */
+        private const val ACTION_USB_PERMISSION = "com.inputbridge.bridge.USB_PERMISSION"
+    }
+
+    // ── Foreground USB permission requester (BUG-129) ──────────────────────────
+    //
+    // BUG-129 FIX: On Android 10 / MIUI the USB-permission dialog is only reliably
+    // shown when requested from a FOREGROUND Activity. The background BridgeService
+    // requests it too, but that path is fragile (dialog silently dropped). This
+    // Activity is the authoritative requester: when a HID device is present and the
+    // app lacks permission, we call requestPermission() here so the user sees the
+    // dialog, then start the service only after EXTRA_PERMISSION_GRANTED.
+
+    private val usbPermissionReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action != ACTION_USB_PERMISSION) return
+            val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+            } ?: return
+            val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
+            if (granted) {
+                Log.i(TAG, "USB permission granted (foreground Activity) — starting bridge service")
+                startBridgeService()
+            } else {
+                Log.w(TAG, "USB permission denied (foreground Activity)")
+                Toast.makeText(
+                    this@MainActivity,
+                    "USB permission denied — cannot capture keyboard/mouse",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
+
+    private fun startBridgeService() {
+        try {
+            startForegroundService(Intent(this, BridgeService::class.java))
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start bridge service: ${e.message}")
+        }
+    }
+
+    private fun requestUsbPermissionFromActivity(device: UsbDevice) {
+        val usbManager = getSystemService(USB_SERVICE) as UsbManager
+        // FLAG_MUTABLE required: the system writes EXTRA_PERMISSION_GRANTED / EXTRA_DEVICE
+        // into this PendingIntent before delivering it. On API < S a flag of 0 is correct.
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            PendingIntent.FLAG_MUTABLE
+        } else {
+            0
+        }
+        val pi = PendingIntent.getBroadcast(this, 1, Intent(ACTION_USB_PERMISSION), flags)
+        usbManager.requestPermission(device, pi)
+        Log.i(TAG, "USB permission requested from foreground Activity for ${device.deviceName}")
+    }
+
+    private fun handleUsbLaunchIntent(intent: Intent?) {
+        if (intent?.action != UsbManager.ACTION_USB_DEVICE_ATTACHED) return
+        val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+        } ?: return
+        val usbManager = getSystemService(USB_SERVICE) as UsbManager
+        if (usbManager.hasPermission(device)) startBridgeService()
+        else requestUsbPermissionFromActivity(device)
     }
 
     // ── Activity lifecycle ────────────────────────────────────────────────────
@@ -73,6 +148,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         applyKeepScreenOn()
+        handleUsbLaunchIntent(intent)
 
         setContent {
             BridgeTheme {
@@ -153,6 +229,30 @@ class MainActivity : ComponentActivity() {
         scanUsbAndStartIfNeeded()
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // BUG-129 FIX: a USB attach while the app is already running is delivered here
+        // (singleTask launch mode). Handle it so permission is requested from foreground.
+        handleUsbLaunchIntent(intent)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // BUG-129 FIX: register the foreground permission receiver (app-local action).
+        val filter = IntentFilter(ACTION_USB_PERMISSION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(usbPermissionReceiver, filter, RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(usbPermissionReceiver, filter)
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        runCatching { unregisterReceiver(usbPermissionReceiver) }
+    }
+
     /**
      * BUG-101 FIX: scan UsbManager.deviceList for HID devices and start the bridge
      * service if one is found and the service is not already running.
@@ -170,12 +270,13 @@ class MainActivity : ComponentActivity() {
                 if (device.getInterface(i).interfaceClass == UsbConstants.USB_CLASS_HID) {
                     Log.i(TAG, "Activity.onResume: HID device found — $name " +
                         "(vendor=${device.vendorId}, product=${device.productId})")
-                    // Start the bridge service — it will handle USB permission and capture.
-                    // If the service is already running, startForegroundService is a no-op.
-                    try {
-                        startForegroundService(Intent(this, BridgeService::class.java))
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to start bridge service from onResume: ${e.message}")
+                    // BUG-129 FIX: request USB permission from this foreground Activity if we
+                    // don't already have it, so the system dialog is reliably shown. Only start
+                    // the bridge service once permission is granted (the receiver does that).
+                    if (usbManager.hasPermission(device)) {
+                        startBridgeService()
+                    } else {
+                        requestUsbPermissionFromActivity(device)
                     }
                     return
                 }

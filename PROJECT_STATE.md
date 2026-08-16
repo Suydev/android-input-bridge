@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 035 — BUG-128: bridge re-pairs on runtime PIN/target-IP change (2026-08-16)
+> **Last updated:** Session 036 — BUG-129: USB host permission requested from foreground Activity (2026-08-16)
 
 ---
 
