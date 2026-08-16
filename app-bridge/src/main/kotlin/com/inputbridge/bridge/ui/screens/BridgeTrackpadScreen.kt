@@ -99,7 +99,7 @@ fun BridgeTrackpadScreen(
     DisposableEffect(Unit) {
         val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         val job = scope.launch {
-            while (isActive) {
+            while (true) {
                 val ip = prefs.targetIp
                 if (ip.isNotBlank()) {
                     val config = TransportConfig(targetIp = ip, port = prefs.port)
