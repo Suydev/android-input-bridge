@@ -131,7 +131,7 @@ fun BridgeTrackpadScreen(
     }
 
     // Bluetooth HID transport connection - use by inject() for proper Koin delegation
-    val btService: BluetoothHidTransport? by inject()
+    val btService by inject<BluetoothHidTransport>()
     DisposableEffect(Unit) {
         // Check if BT HID is available and connect
         val service = btService
@@ -163,7 +163,7 @@ fun BridgeTrackpadScreen(
             },
             modifier = Modifier
                 .fillMaxSize()
-                .onSizeChanged { coordinates ->
+                .onSizeChanged { size: androidx.compose.ui.unit.IntSize ->
                     // Trackpad size available here if needed
                 }
         )
