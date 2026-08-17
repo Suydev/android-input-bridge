@@ -35,7 +35,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import org.koin.core.koin
+import org.koin.androidx.compose.get
 
 /**
  * Bridge-side trackpad using Android's pointer capture API.
@@ -163,7 +163,7 @@ fun BridgeTrackpadScreen(
             },
             modifier = Modifier
                 .fillMaxSize()
-                .onSizeChanged { size: androidx.compose.ui.unit.IntSize ->
+                .onGloballyPositioned { coordinates ->
                     // Trackpad size available here if needed
                 }
         )
