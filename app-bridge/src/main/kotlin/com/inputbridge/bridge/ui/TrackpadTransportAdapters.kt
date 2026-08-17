@@ -1,7 +1,7 @@
 package com.inputbridge.bridge.ui
 
-import com.inputbridge.core.config.TransportConfig
 import com.inputbridge.core.model.InputEvent
+import com.inputbridge.core.model.MouseButton
 import com.inputbridge.protocol.EventPacketFactory
 import com.inputbridge.transport.bt.BluetoothHidTransport
 import com.inputbridge.transport.wifi.UdpTransport
@@ -23,50 +23,41 @@ class BluetoothHidTrackpadAdapter(
     private val hidTransport: BluetoothHidTransport
 ) : PointerCaptureTrackpadView.TrackpadTransport {
 
-    private val reportBuilder = com.inputbridge.transport.bt.HidReportBuilder()
-
     override fun onCursorMove(x: Float, y: Float) {
-        // Absolute cursor position - use CursorGoto equivalent
-        // For HID, we send relative moves from current position
-        // But since we have absolute coords, we'd need to track delta
-        // For now, HID mode uses relative moves from the trackpad
+        // HID doesn't support absolute positioning well
+        // Trackpad sends relative moves from current position
+        // For now, skip - HID mode uses relative moves
     }
 
     override fun onButtonDown(button: Int) {
         val hidButton = when (button) {
-            0 -> com.inputbridge.core.model.MouseButton.LEFT
-            1 -> com.inputbridge.core.model.MouseButton.RIGHT
-            2 -> com.inputbridge.core.model.MouseButton.MIDDLE
-            3 -> com.inputbridge.core.model.MouseButton.BACK
-            4 -> com.inputbridge.core.model.MouseButton.FORWARD
-            else -> com.inputbridge.core.model.MouseButton.LEFT
+            0 -> MouseButton.LEFT
+            1 -> MouseButton.RIGHT
+            2 -> MouseButton.MIDDLE
+            3 -> MouseButton.BACK
+            4 -> MouseButton.FORWARD
+            else -> MouseButton.LEFT
         }
-        val report = com.inputbridge.transport.bt.HidReportBuilder().onMouseButtonDown(hidButton)
-        hidTransport.sendReport(report)
+        val event = InputEvent.MouseButtonDown(hidButton)
+        hidTransport.sendInputEvent(event)
     }
 
     override fun onButtonUp(button: Int) {
         val hidButton = when (button) {
-            0 -> com.inputbridge.core.model.MouseButton.LEFT
-            1 -> com.inputbridge.core.model.MouseButton.RIGHT
-            2 -> com.inputbridge.core.model.MouseButton.MIDDLE
-            3 -> com.inputbridge.core.model.MouseButton.BACK
-            4 -> com.inputbridge.core.model.MouseButton.FORWARD
-            else -> com.inputbridge.core.model.MouseButton.LEFT
+            0 -> MouseButton.LEFT
+            1 -> MouseButton.RIGHT
+            2 -> MouseButton.MIDDLE
+            3 -> MouseButton.BACK
+            4 -> MouseButton.FORWARD
+            else -> MouseButton.LEFT
         }
-        val report = com.inputbridge.transport.bt.HidReportBuilder().onMouseButtonUp(hidButton)
-        hidTransport.sendReport(report)
+        val event = InputEvent.MouseButtonUp(hidButton)
+        hidTransport.sendInputEvent(event)
     }
 
     override fun onScroll(x: Float, y: Float) {
-        val report = com.inputbridge.transport.bt.HidReportBuilder().onScroll(x, y)
-        hidTransport.sendReport(report)
-    }
-
-    fun onCursorMoveAbsolute(x: Float, y: Float) {
-        // For HID, we can't easily do absolute positioning
-        // This would require tracking previous position and sending deltas
-        // Or use a different approach - send CursorGoto via UDP fallback
+        val event = InputEvent.Scroll(x, y)
+        hidTransport.sendInputEvent(event)
     }
 }
 
@@ -80,39 +71,42 @@ class WifiTrackpadAdapter(
 ) : PointerCaptureTrackpadView.TrackpadTransport {
 
     override fun onCursorMove(x: Float, y: Float) {
-        // CursorGoto with absolute coordinates (0..1)
-        val packet = packetFactory.createCursorGoto(x, y)
+        val event = InputEvent.CursorGoto(x, y)
+        val packet = packetFactory.fromEvent(event) ?: return
         udpTransport.sendDirect(packet)
     }
 
     override fun onButtonDown(button: Int) {
         val mouseButton = when (button) {
-            0 -> com.inputbridge.core.model.MouseButton.LEFT
-            1 -> com.inputbridge.core.model.MouseButton.RIGHT
-            2 -> com.inputbridge.core.model.MouseButton.MIDDLE
-            3 -> com.inputbridge.core.model.MouseButton.BACK
-            4 -> com.inputbridge.core.model.MouseButton.FORWARD
-            else -> com.inputbridge.core.model.MouseButton.LEFT
+            0 -> MouseButton.LEFT
+            1 -> MouseButton.RIGHT
+            2 -> MouseButton.MIDDLE
+            3 -> MouseButton.BACK
+            4 -> MouseButton.FORWARD
+            else -> MouseButton.LEFT
         }
-        val packet = packetFactory.createMouseButtonDown(mouseButton)
+        val event = InputEvent.MouseButtonDown(mouseButton)
+        val packet = packetFactory.fromEvent(event) ?: return
         udpTransport.sendDirect(packet)
     }
 
     override fun onButtonUp(button: Int) {
         val mouseButton = when (button) {
-            0 -> com.inputbridge.core.model.MouseButton.LEFT
-            1 -> com.inputbridge.core.model.MouseButton.RIGHT
-            2 -> com.inputbridge.core.model.MouseButton.MIDDLE
-            3 -> com.inputbridge.core.model.MouseButton.BACK
-            4 -> com.inputbridge.core.model.MouseButton.FORWARD
-            else -> com.inputbridge.core.model.MouseButton.LEFT
+            0 -> MouseButton.LEFT
+            1 -> MouseButton.RIGHT
+            2 -> MouseButton.MIDDLE
+            3 -> MouseButton.BACK
+            4 -> MouseButton.FORWARD
+            else -> MouseButton.LEFT
         }
-        val packet = packetFactory.createMouseButtonUp(mouseButton)
+        val event = InputEvent.MouseButtonUp(mouseButton)
+        val packet = packetFactory.fromEvent(event) ?: return
         udpTransport.sendDirect(packet)
     }
 
     override fun onScroll(x: Float, y: Float) {
-        val packet = packetFactory.createScroll(x, y)
+        val event = InputEvent.Scroll(x, y)
+        val packet = packetFactory.fromEvent(event) ?: return
         udpTransport.sendDirect(packet)
     }
 }
@@ -138,51 +132,57 @@ class UnifiedTrackpadTransport(
             // For now, skip - HID doesn't support absolute well
         } else {
             packetFactory?.let { factory ->
-                udpTransport?.sendDirect(factory.createCursorGoto(x, y))
+                val event = InputEvent.CursorGoto(x, y)
+                val packet = factory.fromEvent(event) ?: return
+                udpTransport?.sendDirect(packet)
             }
         }
     }
 
     override fun onButtonDown(button: Int) {
         val mouseButton = when (button) {
-            0 -> com.inputbridge.core.model.MouseButton.LEFT
-            1 -> com.inputbridge.core.model.MouseButton.RIGHT
-            2 -> com.inputbridge.core.model.MouseButton.MIDDLE
-            3 -> com.inputbridge.core.model.MouseButton.BACK
-            4 -> com.inputbridge.core.model.MouseButton.FORWARD
-            else -> com.inputbridge.core.model.MouseButton.LEFT
+            0 -> MouseButton.LEFT
+            1 -> MouseButton.RIGHT
+            2 -> MouseButton.MIDDLE
+            3 -> MouseButton.BACK
+            4 -> MouseButton.FORWARD
+            else -> MouseButton.LEFT
         }
 
         if (useHid) {
             hidTransport?.let { hid ->
-                val report = com.inputbridge.transport.bt.HidReportBuilder().onMouseButtonDown(mouseButton)
-                hid.sendReport(report)
+                val event = InputEvent.MouseButtonDown(mouseButton)
+                hid.sendInputEvent(event)
             }
         } else {
             packetFactory?.let { factory ->
-                udpTransport?.sendDirect(factory.createMouseButtonDown(mouseButton))
+                val event = InputEvent.MouseButtonDown(mouseButton)
+                val packet = factory.fromEvent(event) ?: return
+                udpTransport?.sendDirect(packet)
             }
         }
     }
 
     override fun onButtonUp(button: Int) {
         val mouseButton = when (button) {
-            0 -> com.inputbridge.core.model.MouseButton.LEFT
-            1 -> com.inputbridge.core.model.MouseButton.RIGHT
-            2 -> com.inputbridge.core.model.MouseButton.MIDDLE
-            3 -> com.inputbridge.core.model.MouseButton.BACK
-            4 -> com.inputbridge.core.model.MouseButton.FORWARD
-            else -> com.inputbridge.core.model.MouseButton.LEFT
+            0 -> MouseButton.LEFT
+            1 -> MouseButton.RIGHT
+            2 -> MouseButton.MIDDLE
+            3 -> MouseButton.BACK
+            4 -> MouseButton.FORWARD
+            else -> MouseButton.LEFT
         }
 
         if (useHid) {
             hidTransport?.let { hid ->
-                val report = com.inputbridge.transport.bt.HidReportBuilder().onMouseButtonUp(mouseButton)
-                hid.sendReport(report)
+                val event = InputEvent.MouseButtonUp(mouseButton)
+                hid.sendInputEvent(event)
             }
         } else {
             packetFactory?.let { factory ->
-                udpTransport?.sendDirect(factory.createMouseButtonUp(mouseButton))
+                val event = InputEvent.MouseButtonUp(mouseButton)
+                val packet = factory.fromEvent(event) ?: return
+                udpTransport?.sendDirect(packet)
             }
         }
     }
@@ -190,12 +190,14 @@ class UnifiedTrackpadTransport(
     override fun onScroll(x: Float, y: Float) {
         if (useHid) {
             hidTransport?.let { hid ->
-                val report = com.inputbridge.transport.bt.HidReportBuilder().onScroll(x, y)
-                hid.sendReport(report)
+                val event = InputEvent.Scroll(x, y)
+                hid.sendInputEvent(event)
             }
         } else {
             packetFactory?.let { factory ->
-                udpTransport?.sendDirect(factory.createScroll(x, y))
+                val event = InputEvent.Scroll(x, y)
+                val packet = factory.fromEvent(event) ?: return
+                udpTransport?.sendDirect(packet)
             }
         }
     }

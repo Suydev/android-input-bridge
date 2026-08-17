@@ -23,7 +23,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.inputbridge.bridge.prefs.BridgePreferences
 import com.inputbridge.bridge.ui.PointerCaptureTrackpadView
-import com.inputbridge.bridge.ui.TrackpadTransportAdapters.UnifiedTrackpadTransport
+import com.inputbridge.bridge.ui.UnifiedTrackpadTransport
 import com.inputbridge.bridge.ui.theme.*
 import com.inputbridge.core.config.TransportConfig
 import com.inputbridge.protocol.EventPacketFactory

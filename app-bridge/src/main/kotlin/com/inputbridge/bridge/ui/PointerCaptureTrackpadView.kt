@@ -92,7 +92,7 @@ class PointerCaptureTrackpadView @JvmOverloads constructor(
             invalidate()
         }
         addListener(object : android.animation.AnimatorListenerAdapter() {
-            override fun onAnimationEnd(animation: android.animation.Animator?) {
+            override fun onAnimationEnd(animation: android.animation.Animator) {
                 isRippleActive = false
                 invalidate()
             }
@@ -174,7 +174,7 @@ class PointerCaptureTrackpadView @JvmOverloads constructor(
                 when (button) {
                     MotionEvent.BUTTON_PRIMARY -> transport?.onButtonDown(0) // Left
                     MotionEvent.BUTTON_SECONDARY -> transport?.onButtonDown(1) // Right
-                    MotionEvent.BUTTON_MIDDLE -> transport?.onButtonDown(2) // Middle
+                    4 -> transport?.onButtonDown(2) // Middle (MotionEvent.BUTTON_MIDDLE = 4)
                     MotionEvent.BUTTON_BACK -> transport?.onButtonDown(3) // Back
                     MotionEvent.BUTTON_FORWARD -> transport?.onButtonDown(4) // Forward
                 }
@@ -185,7 +185,7 @@ class PointerCaptureTrackpadView @JvmOverloads constructor(
                 when (button) {
                     MotionEvent.BUTTON_PRIMARY -> transport?.onButtonUp(0)
                     MotionEvent.BUTTON_SECONDARY -> transport?.onButtonUp(1)
-                    MotionEvent.BUTTON_MIDDLE -> transport?.onButtonUp(2)
+                    4 -> transport?.onButtonUp(2) // Middle
                     MotionEvent.BUTTON_BACK -> transport?.onButtonUp(3)
                     MotionEvent.BUTTON_FORWARD -> transport?.onButtonUp(4)
                 }
