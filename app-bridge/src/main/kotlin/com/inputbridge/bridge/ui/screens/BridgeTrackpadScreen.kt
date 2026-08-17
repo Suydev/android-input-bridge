@@ -47,6 +47,9 @@ import org.koin.androidx.compose.get
  * - Direct transport calls (sendDirect) for minimal latency
  * - Supports both Bluetooth HID and WiFi UDP transports
  * - Visual cursor with click ripple feedback
+ * 
+ * Note: Layout modifiers (onGloballyPositioned, onSizeChanged) are imported via
+ * androidx.compose.foundation.layout.* wildcard import.
  */
 @Composable
 fun BridgeTrackpadScreen(
