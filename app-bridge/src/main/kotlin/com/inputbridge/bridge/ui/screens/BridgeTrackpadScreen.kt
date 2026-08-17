@@ -131,7 +131,7 @@ fun BridgeTrackpadScreen(
     }
 
     // Bluetooth HID transport connection
-    val btService = koin.get<BluetoothHidTransport>()
+    val btService = get<BluetoothHidTransport>()
     DisposableEffect(Unit) {
         // Check if BT HID is available and connect
         val service = btService
