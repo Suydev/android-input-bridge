@@ -35,7 +35,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import org.koin.androidx.compose.inject
+import org.koin.core.koin
 
 /**
  * Bridge-side trackpad using Android's pointer capture API.
@@ -130,8 +130,8 @@ fun BridgeTrackpadScreen(
         }
     }
 
-    // Bluetooth HID transport connection - use by inject() for proper Koin delegation
-    val btService by inject<BluetoothHidTransport>()
+    // Bluetooth HID transport connection
+    val btService = koin.get<BluetoothHidTransport>()
     DisposableEffect(Unit) {
         // Check if BT HID is available and connect
         val service = btService
