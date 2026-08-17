@@ -5,7 +5,6 @@ import android.os.Build
 import android.view.View
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
@@ -135,7 +134,7 @@ fun BridgeTrackpadScreen(
     val btService: BluetoothHidTransport? by inject()
     DisposableEffect(Unit) {
         // Check if BT HID is available and connect
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && btService?.isFeatureSupported == true) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && btService != null) {
             coroutineScope.launch {
                 btService.connect()
             }
@@ -154,7 +153,7 @@ fun BridgeTrackpadScreen(
             factory = { context ->
                 PointerCaptureTrackpadView(context).apply {
                     transport = unifiedTransport
-                    sensitivity = prefs.cursorSpeed // Use existing pref
+                    sensitivity = prefs.bridgeSensitivity
                     // Request pointer capture for external mouse support
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         requestPointerCapture()
@@ -163,7 +162,7 @@ fun BridgeTrackpadScreen(
             },
             modifier = Modifier
                 .fillMaxSize()
-                .onSizeChanged { coordinates ->
+                .onGloballyPositioned { coordinates ->
                     // Trackpad size available here if needed
                 }
         )
