@@ -115,12 +115,16 @@ class WifiTrackpadAdapter(
  * Unified trackpad transport that can switch between HID and WiFi.
  */
 class UnifiedTrackpadTransport(
-    private val hidTransport: BluetoothHidTransport?,
-    private val udpTransport: UdpTransport?,
-    private val packetFactory: EventPacketFactory?
+    hidTransport: BluetoothHidTransport?,
+    udpTransport: UdpTransport?,
+    packetFactory: EventPacketFactory?
 ) : PointerCaptureTrackpadView.TrackpadTransport {
 
     private var useHid = false
+
+    var hidTransport: BluetoothHidTransport? = hidTransport
+    var udpTransport: UdpTransport? = udpTransport
+    var packetFactory: EventPacketFactory? = packetFactory
 
     fun setMode(useHid: Boolean) {
         this.useHid = useHid

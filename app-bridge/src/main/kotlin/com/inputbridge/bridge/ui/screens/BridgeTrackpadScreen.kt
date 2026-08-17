@@ -3,9 +3,9 @@ package com.inputbridge.bridge.ui.screens
 import android.app.Activity
 import android.os.Build
 import android.view.View
-import android.widget.Button
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
@@ -13,6 +13,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -34,6 +35,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.rememberCoroutineScope
 import org.koin.android.ext.android.inject
 
 /**
@@ -52,6 +54,8 @@ fun BridgeTrackpadScreen(
     prefs: BridgePreferences,
 ) {
     val view = LocalView.current
+    val density = LocalDensity.current
+    val coroutineScope = rememberCoroutineScope()
 
     // Hide system bars for immersive trackpad
     DisposableEffect(view) {
@@ -93,6 +97,7 @@ fun BridgeTrackpadScreen(
     DisposableEffect(transportState.value, hidTransportState.value) {
         unifiedTransport.hidTransport = hidTransportState.value
         unifiedTransport.udpTransport = transportState.value
+        onDispose {}
     }
 
     // Connect WiFi transport on mount
@@ -106,7 +111,6 @@ fun BridgeTrackpadScreen(
                     val transport = UdpTransport(config, isSender = true)
                     if (transport.connect()) {
                         transportState.value = transport
-                        unifiedTransport.udpTransport = transport
                         isConnected = true
                         break
                     }
@@ -128,23 +132,21 @@ fun BridgeTrackpadScreen(
     }
 
     // Bluetooth HID transport connection
-    val btService = inject<BluetoothHidTransport>()
+    val btService: BluetoothHidTransport? by inject()
     DisposableEffect(Unit) {
         // Check if BT HID is available and connect
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && btService.isFeatureSupported) {
-            scope.launch {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && btService?.isFeatureSupported == true) {
+            coroutineScope.launch {
                 btService.connect()
-                hidTransportState.value = btService
-                unifiedTransport.hidTransport = btService
             }
         }
+        onDispose {}
     }
 
     // Switch between HID and WiFi mode
     val modeSwitchText = if (useHidMode) "HID Mode" else "WiFi Mode"
 
     var showBar by remember { mutableStateOf(true) }
-    val density = LocalDensity.current
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         // ── Pointer Capture Trackpad View ─────────────────────────────────────
@@ -152,7 +154,7 @@ fun BridgeTrackpadScreen(
             factory = { context ->
                 PointerCaptureTrackpadView(context).apply {
                     transport = unifiedTransport
-                    sensitivity = prefs.trackpadSensitivity
+                    sensitivity = prefs.cursorSpeed // Use existing pref
                     // Request pointer capture for external mouse support
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         requestPointerCapture()
@@ -161,7 +163,7 @@ fun BridgeTrackpadScreen(
             },
             modifier = Modifier
                 .fillMaxSize()
-                .onGloballyPositioned { coordinates ->
+                .onSizeChanged { coordinates ->
                     // Trackpad size available here if needed
                 }
         )
@@ -197,9 +199,10 @@ fun BridgeTrackpadScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    val btConnected = hidTransportState.value?.isConnected == true
                     Text(
-                        if (isConnected || hidTransportState.value?.isConnected == true) "Connected" else "Connecting…",
-                        color = if (isConnected || hidTransportState.value?.isConnected == true) BridgePrimary else BridgeDim,
+                        if (isConnected || btConnected) "Connected" else "Connecting…",
+                        color = if (isConnected || btConnected) BridgePrimary else BridgeDim,
                         fontSize = 11.sp, fontFamily = FontFamily.Monospace,
                     )
                     // Mode switch button
@@ -210,7 +213,7 @@ fun BridgeTrackpadScreen(
                             contentColor = if (useHidMode) Color.White else BridgeDim
                         )
                     ) {
-                        Text(modeSwitchText, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                        Text(if (useHidMode) "HID Mode" else "WiFi Mode", fontSize = 10.sp, fontFamily = FontFamily.Monospace)
                     }
                 }
             }
