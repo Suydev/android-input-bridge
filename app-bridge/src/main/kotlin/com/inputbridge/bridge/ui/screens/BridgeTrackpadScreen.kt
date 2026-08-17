@@ -34,7 +34,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.rememberCoroutineScope
 import org.koin.android.ext.android.inject
 
 /**
@@ -131,7 +130,7 @@ fun BridgeTrackpadScreen(
     }
 
     // Bluetooth HID transport connection
-    val btService: BluetoothHidTransport? by inject()
+    val btService: BluetoothHidTransport? = inject()
     DisposableEffect(Unit) {
         // Check if BT HID is available and connect
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && btService != null) {
