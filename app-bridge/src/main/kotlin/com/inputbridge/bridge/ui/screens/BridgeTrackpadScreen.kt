@@ -163,7 +163,7 @@ fun BridgeTrackpadScreen(
             },
             modifier = Modifier
                 .fillMaxSize()
-                .onGloballyPositioned { coordinates ->
+                .onSizeChanged { size ->
                     // Trackpad size available here if needed
                 }
         )
