@@ -167,9 +167,6 @@ fun BridgeTrackpadScreen(
             },
             modifier = Modifier
                 .fillMaxSize()
-                .onSizeChanged { size ->
-                    // Trackpad size available here if needed
-                }
         )
 
         // ── Top bar ──────────────────────────────────────────────────────────
