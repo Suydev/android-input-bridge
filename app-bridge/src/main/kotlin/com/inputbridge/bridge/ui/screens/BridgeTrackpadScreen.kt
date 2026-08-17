@@ -9,6 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -129,13 +130,14 @@ fun BridgeTrackpadScreen(
         }
     }
 
-    // Bluetooth HID transport connection
-    val btService: BluetoothHidTransport? = inject()
+    // Bluetooth HID transport connection - use by inject() for proper Koin delegation
+    val btService: BluetoothHidTransport? by inject()
     DisposableEffect(Unit) {
         // Check if BT HID is available and connect
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && btService != null) {
+        val service = btService
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && service != null) {
             coroutineScope.launch {
-                btService.connect()
+                service.connect()
             }
         }
         onDispose {}
