@@ -97,12 +97,6 @@ class ReceiverModeActivity : ComponentActivity() {
     }
 
     // ── Volume-Down emergency stop ────────────────────────────────────────────
-    @Volatile private var volumeDownPressedAt = 0L
-    private var emergencyStopJob: Job? = null
-
-    private companion object {
-        const val EMERGENCY_HOLD_MS = 3_000L
-    }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN && event.repeatCount == 0) {

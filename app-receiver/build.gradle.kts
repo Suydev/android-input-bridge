@@ -1,5 +1,5 @@
 plugins {
-    id("inputbridge.android.app")
+    id("inputbridge.android.library")
     id("inputbridge.android.compose")
 }
 
@@ -7,7 +7,6 @@ android {
     namespace = "com.inputbridge.receiver"
 
     defaultConfig {
-        applicationId = "com.inputbridge.receiver"
         ndk {
             abiFilters += setOf("armeabi-v7a", "arm64-v8a")
         }

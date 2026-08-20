@@ -87,7 +87,7 @@
 
         <!-- Trackpad Activity (Bridge Mode) -->
         <activity
-            android:name=".ui.bridge.MouseTrackpadActivity"
+            android:name="com.inputbridge.bridge.ui.MouseTrackpadActivity"
             android:exported="false"
             android:theme="@style/Theme.InputBridge.Trackpad"
             android:screenOrientation="portrait"
@@ -103,29 +103,29 @@
 
         <!-- Bridge Service: USB capture + UDP/BT HID transport -->
         <service
-            android:name=".service.BridgeService"
+            android:name="com.inputbridge.bridge.service.BridgeService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice"
             android:enabled="true" />
 
         <!-- Receiver Service: UDP receiver + input injection -->
         <service
-            android:name=".service.ReceiverService"
+            android:name="com.inputbridge.receiver.service.ReceiverService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice"
             android:enabled="true" />
 
         <!-- Cursor Overlay Service -->
         <service
-            android:name=".service.CursorOverlayService"
+            android:name="com.inputbridge.receiver.service.CursorOverlayService"
             android:exported="false"
             android:enabled="true" />
 
         <!-- Bridge Accessibility Service: USB keyboard capture -->
         <service
-            android:name=".service.BridgeAccessibilityService"
+            android:name="com.inputbridge.bridge.service.BridgeAccessibilityService"
             android:exported="true"
-            android:label="@string/accessibility_service_label_bridge"
+            android:label="@string/app_name"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
@@ -151,7 +151,7 @@
 
         <!-- Cursor Overlay Service (overlay) -->
         <service
-            android:name=".service.CursorOverlayService"
+            android:name="com.inputbridge.receiver.service.CursorOverlayService"
             android:exported="false"
             android:enabled="true" />
 
@@ -166,7 +166,7 @@
 
         <!-- Auto-start on boot -->
         <receiver
-            android:name=".receiver.BootReceiver"
+            android:name="com.inputbridge.bridge.receiver.BootReceiver"
             android:exported="true"
             android:enabled="true">
             <intent-filter>
@@ -175,12 +175,12 @@
             </intent-filter>
         </receiver>
 
-        <!-- USB Permission Receiver -->
         <receiver
-            android:name=".receiver.UsbPermissionReceiver"
-            android:exported="false">
+            android:name="com.inputbridge.receiver.receiver.BootReceiver"
+            android:exported="true"
+            android:enabled="true">
             <intent-filter>
-                <action android:name="com.inputbridge.USB_PERMISSION" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
 

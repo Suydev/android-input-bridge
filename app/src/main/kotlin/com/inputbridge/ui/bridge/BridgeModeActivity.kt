@@ -43,19 +43,17 @@ class BridgeModeActivity : ComponentActivity() {
 
     private val prefs: BridgePreferences by inject()
 
-    // ── Emergency stop via Volume Down hold ───────────────────────────────────
-
-    @Volatile private var volumeDownPressedAt = 0L
-
-    private var emergencyStopJob: Job? = null
-
     private companion object {
-        private const val TAG = "MainActivity"
+        private const val TAG = "BridgeModeActivity"
         const val EMERGENCY_HOLD_MS = 3_000L
         private const val ACTION_USB_PERMISSION = "com.inputbridge.USB_PERMISSION"
     }
 
-    // ── Foreground USB permission requester ──────────────────────────
+    // ── Emergency stop via Volume Down hold ───────────────────────────────────
+    @Volatile private var volumeDownPressedAt = 0L
+    private var emergencyStopJob: Job? = null
+
+    // ── Foreground USB permission requester ───────────────────────────────────
     private val usbPermissionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action != ACTION_USB_PERMISSION) return
@@ -80,39 +78,6 @@ class BridgeModeActivity : ComponentActivity() {
         }
     }
 
-    private fun startBridgeService() {
-        try {
-            startForegroundService(Intent(this, BridgeService::class.java))
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start bridge service: ${e.message}")
-        }
-    }
-
-    private fun requestUsbPermissionFromActivity(device: UsbDevice) {
-        val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            PendingIntent.FLAG_MUTABLE
-        } else {
-            0
-        }
-        val pi = PendingIntent.getBroadcast(this, 1, Intent(ACTION_USB_PERMISSION), flags)
-        usbManager.requestPermission(device, pi)
-        Log.i(TAG, "USB permission requested from foreground Activity for ${device.deviceName}")
-    }
-
-    private fun handleUsbLaunchIntent(intent: Intent?) {
-        if (intent?.action != UsbManager.ACTION_USB_DEVICE_ATTACHED) return
-        val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
-        } else {
-            @Suppress("DEPRECATION")
-            intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
-        } ?: return
-        val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        if (usbManager.hasPermission(device)) startBridgeService()
-        else requestUsbPermissionFromActivity(device)
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -128,30 +93,30 @@ class BridgeModeActivity : ComponentActivity() {
                 ) {
                     composable(BridgeRoute.WELCOME) {
                         WelcomeScreen(
-                            onContinue    = { navController.navigate(BridgeRoute.BRIDGE) {
+                            onContinue = { navController.navigate(BridgeRoute.BRIDGE) {
                                 launchSingleTop = true
                             } },
-                            onSettings    = { navController.navigate(BridgeRoute.SETTINGS) {
+                            onSettings = { navController.navigate(BridgeRoute.SETTINGS) {
                                 launchSingleTop = true
                             } },
                             onPermissions = { navController.navigate(BridgeRoute.PERMISSIONS) {
                                 launchSingleTop = true
                             } },
-                            viewModel     = viewModel,
+                            viewModel = viewModel,
                         )
                     }
                     composable(BridgeRoute.BRIDGE) {
                         BridgeScreen(
-                            onSettings    = { navController.navigate(BridgeRoute.SETTINGS) {
+                            onSettings = { navController.navigate(BridgeRoute.SETTINGS) {
                                 launchSingleTop = true
                             } },
                             onDiagnostics = { navController.navigate(BridgeRoute.DIAGNOSTICS) {
                                 launchSingleTop = true
                             } },
-                            onMouse       = { navController.navigate(BridgeRoute.TRACKPAD) {
+                            onMouse = { navController.navigate(BridgeRoute.TRACKPAD) {
                                 launchSingleTop = true
                             } },
-                            viewModel     = viewModel,
+                            viewModel = viewModel,
                         )
                     }
                     composable(BridgeRoute.TRACKPAD) {
@@ -162,13 +127,13 @@ class BridgeModeActivity : ComponentActivity() {
                     }
                     composable(BridgeRoute.SETTINGS) {
                         SettingsScreen(
-                            onBack    = { navController.popBackStack() },
+                            onBack = { navController.popBackStack() },
                             viewModel = viewModel,
                         )
                     }
                     composable(BridgeRoute.DIAGNOSTICS) {
                         DiagnosticsScreen(
-                            onBack    = { navController.popBackStack() },
+                            onBack = { navController.popBackStack() },
                             viewModel = viewModel,
                         )
                     }
@@ -210,10 +175,44 @@ class BridgeModeActivity : ComponentActivity() {
         runCatching { unregisterReceiver(usbPermissionReceiver) }
     }
 
+    // ── USB permission & service start ────────────────────────────────────────
+
+    private fun startBridgeService() {
+        try {
+            startForegroundService(Intent(this, BridgeService::class.java))
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start bridge service: ${e.message}")
+        }
+    }
+
+    private fun requestUsbPermissionFromActivity(device: UsbDevice) {
+        val usbManager = getSystemService(USB_SERVICE) as UsbManager
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            PendingIntent.FLAG_MUTABLE
+        } else {
+            0
+        }
+        val pi = PendingIntent.getBroadcast(this, 1, Intent(ACTION_USB_PERMISSION), flags)
+        usbManager.requestPermission(device, pi)
+        Log.i(TAG, "USB permission requested from foreground Activity for ${device.deviceName}")
+    }
+
+    private fun handleUsbLaunchIntent(intent: Intent?) {
+        if (intent?.action != UsbManager.ACTION_USB_DEVICE_ATTACHED) return
+        val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+        } ?: return
+        val usbManager = getSystemService(USB_SERVICE) as UsbManager
+        if (usbManager.hasPermission(device)) startBridgeService()
+        else requestUsbPermissionFromActivity(device)
+    }
+
     private fun scanUsbAndStartIfNeeded() {
         val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        val deviceList = usbManager.deviceList
-        for ((name, device) in deviceList) {
+        for ((name, device) in usbManager.deviceList) {
             for (i in 0 until device.interfaceCount) {
                 if (device.getInterface(i).interfaceClass == UsbConstants.USB_CLASS_HID) {
                     Log.i(TAG, "Activity.onResume: HID device found — $name " +
@@ -230,15 +229,6 @@ class BridgeModeActivity : ComponentActivity() {
     }
 
     // ── Volume-Down emergency stop ────────────────────────────────────────────
-
-    @Volatile private var volumeDownPressedAt = 0L
-    private var emergencyStopJob: Job? = null
-
-    private companion object {
-        private const val TAG = "BridgeModeActivity"
-        const val EMERGENCY_HOLD_MS = 3_000L
-        private const val ACTION_USB_PERMISSION = "com.inputbridge.USB_PERMISSION"
-    }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN && event.repeatCount == 0) {
@@ -278,442 +268,6 @@ class BridgeModeActivity : ComponentActivity() {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        }
-    }
-
-    private fun startBridgeService() {
-        try {
-            startForegroundService(Intent(this, BridgeService::class.java))
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start bridge service: ${e.message}")
-        }
-    }
-
-    private fun requestUsbPermissionFromActivity(device: UsbDevice) {
-        val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            PendingIntent.FLAG_MUTABLE
-        } else {
-            0
-        }
-        val pi = PendingIntent.getBroadcast(this, 1, Intent(ACTION_USB_PERMISSION), flags)
-        usbManager.requestPermission(device, pi)
-        Log.i(TAG, "USB permission requested from foreground Activity for ${device.deviceName}")
-    }
-
-    private fun handleUsbLaunchIntent(intent: Intent?) {
-        if (intent?.action != UsbManager.ACTION_USB_DEVICE_ATTACHED) return
-        val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
-        } else {
-            @Suppress("DEPRECATION")
-            intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
-        } ?: return
-        val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        if (usbManager.hasPermission(device)) startBridgeService()
-        else requestUsbPermissionFromActivity(device)
-    }
-
-    private fun scanUsbAndStartIfNeeded() {
-        val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        val deviceList = usbManager.deviceList
-        for ((name, device) in deviceList) {
-            for (i in 0 until device.interfaceCount) {
-                if (device.getInterface(i).interfaceClass == UsbConstants.USB_CLASS_HID) {
-                    Log.i(TAG, "Activity.onResume: HID device found — $name " +
-                        "(vendor=${device.vendorId}, product=${device.productId})")
-                    if (usbManager.hasPermission(device)) {
-                        startBridgeService()
-                    } else {
-                        requestUsbPermissionFromActivity(device)
-                    }
-                    return
-                }
-            }
-        }
-    }
-
-    @Volatile private var volumeDownPressedAt = 0L
-    private var emergencyStopJob: kotlinx.coroutines.Job? = null
-
-    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN && event.repeatCount == 0) {
-            volumeDownPressedAt = SystemClock.elapsedRealtime()
-            emergencyStopJob?.cancel()
-            emergencyStopJob = lifecycleScope.launch {
-                delay(3000L)
-                viewModel.stopBridge()
-                Toast.makeText(
-                    this@BridgeModeActivity,
-                    "Emergency stop — bridge service stopped",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-            return true
-        }
-        return super.onKeyDown(keyCode, event)
-    }
-
-    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-            val heldMs = if (volumeDownPressedAt > 0L)
-                SystemClock.elapsedRealtime() - volumeDownPressedAt else 0L
-            emergencyStopJob?.cancel()
-            emergencyStopJob = null
-            volumeDownPressedAt = 0L
-            if (heldMs < 500L) {
-                return false
-            }
-            return true
-        }
-        return super.onKeyUp(keyCode, event)
-    }
-
-    private fun applyKeepScreenOn() {
-        if (prefs.keepScreenOn) {
-            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        } else {
-            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        }
-    }
-
-    private fun startBridgeService() {
-        try {
-            startForegroundService(Intent(this, BridgeService::class.java))
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start bridge service: ${e.message}")
-        }
-    }
-
-    private fun requestUsbPermissionFromActivity(device: UsbDevice) {
-        val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            PendingIntent.FLAG_MUTABLE
-        } else {
-            0
-        }
-        val pi = PendingIntent.getBroadcast(this, 1, Intent("com.inputbridge.USB_PERMISSION"), flags)
-        usbManager.requestPermission(device, pi)
-        Log.i(TAG, "USB permission requested from foreground Activity for ${device.deviceName}")
-    }
-
-    private fun handleUsbLaunchIntent(intent: Intent?) {
-        if (intent?.action != UsbManager.ACTION_USB_DEVICE_ATTACHED) return
-        val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
-        } else {
-            @Suppress("DEPRECATION")
-            intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
-        } ?: return
-        val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        if (usbManager.hasPermission(device)) startBridgeService()
-        else requestUsbPermissionFromActivity(device)
-    }
-
-    private fun scanUsbAndStartIfNeeded() {
-        val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        val deviceList = usbManager.deviceList
-        for ((name, device) in deviceList) {
-            for (i in 0 until device.interfaceCount) {
-                if (device.getInterface(i).interfaceClass == UsbConstants.USB_CLASS_HID) {
-                    Log.i(TAG, "Activity.onResume: HID device found — $name " +
-                        "(vendor=${device.vendorId}, product=${device.productId})")
-                    if (usbManager.hasPermission(device)) {
-                        startBridgeService()
-                    } else {
-                        requestUsbPermissionFromActivity(device)
-                    }
-                    return
-                }
-            }
-        }
-    }
-
-    @Volatile private var volumeDownPressedAt = 0L
-    private var emergencyStopJob: kotlinx.coroutines.Job? = null
-
-    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN && event.repeatCount == 0) {
-            volumeDownPressedAt = SystemClock.elapsedRealtime()
-            emergencyStopJob?.cancel()
-            emergencyStopJob = lifecycleScope.launch {
-                delay(3000L)
-                viewModel.stopBridge()
-                Toast.makeText(
-                    this@BridgeModeActivity,
-                    "Emergency stop — bridge service stopped",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-            return true
-        }
-        return super.onKeyDown(keyCode, event)
-    }
-
-    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-            val heldMs = if (volumeDownPressedAt > 0L)
-                SystemClock.elapsedRealtime() - volumeDownPressedAt else 0L
-            emergencyStopJob?.cancel()
-            emergencyStopJob = null
-            volumeDownPressedAt = 0L
-            if (heldMs < 500L) {
-                return false
-            }
-            return true
-        }
-        return super.onKeyUp(keyCode, event)
-    }
-
-    private fun applyKeepScreenOn() {
-        if (prefs.keepScreenOn) {
-            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        } else {
-            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        }
-    }
-
-    private fun startBridgeService() {
-        try {
-            startForegroundService(Intent(this, BridgeService::class.java))
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start bridge service: ${e.message}")
-        }
-    }
-
-    private fun requestUsbPermissionFromActivity(device: UsbDevice) {
-        val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            PendingIntent.FLAG_MUTABLE
-        } else {
-            0
-        }
-        val pi = PendingIntent.getBroadcast(this, 1, Intent("com.inputbridge.USB_PERMISSION"), flags)
-        usbManager.requestPermission(device, pi)
-        Log.i(TAG, "USB permission requested from foreground Activity for ${device.deviceName}")
-    }
-
-    private fun handleUsbLaunchIntent(intent: Intent?) {
-        if (intent?.action != UsbManager.ACTION_USB_DEVICE_ATTACHED) return
-        val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
-        } else {
-            @Suppress("DEPRECATION")
-            intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
-        } ?: return
-        val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        if (usbManager.hasPermission(device)) startBridgeService()
-        else requestUsbPermissionFromActivity(device)
-    }
-
-    private fun scanUsbAndStartIfNeeded() {
-        val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        val deviceList = usbManager.deviceList
-        for ((name, device) in deviceList) {
-            for (i in 0 until device.interfaceCount) {
-                if (device.getInterface(i).interfaceClass == UsbConstants.USB_CLASS_HID) {
-                    Log.i(TAG, "Activity.onResume: HID device found — $name " +
-                        "(vendor=${device.vendorId}, product=${device.productId})")
-                    if (usbManager.hasPermission(device)) {
-                        startBridgeService()
-                    } else {
-                        requestUsbPermissionFromActivity(device)
-                    }
-                    return
-                }
-            }
-        }
-    }
-
-    @Volatile private var volumeDownPressedAt = 0L
-    private var emergencyStopJob: kotlinx.coroutines.Job? = null
-
-    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN && event.repeatCount == 0) {
-            volumeDownPressedAt = SystemClock.elapsedRealtime()
-            emergencyStopJob?.cancel()
-            emergencyStopJob = lifecycleScope.launch {
-                delay(3000L)
-                viewModel.stopBridge()
-                Toast.makeText(
-                    this@BridgeModeActivity,
-                    "Emergency stop — bridge service stopped",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-            return true
-        }
-        return super.onKeyDown(keyCode, event)
-    }
-
-    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-            val heldMs = if (volumeDownPressedAt > 0L)
-                SystemClock.elapsedRealtime() - volumeDownPressedAt else 0L
-            emergencyStopJob?.cancel()
-            emergencyStopJob = null
-            volumeDownPressedAt = 0L
-            if (heldMs < 500L) {
-                return false
-            }
-            return true
-        }
-        return super.onKeyUp(keyCode, event)
-    }
-
-    private fun applyKeepScreenOn() {
-        if (prefs.keepScreenOn) {
-            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        } else {
-            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        }
-    }
-
-    private fun startBridgeService() {
-        try {
-            startForegroundService(Intent(this, BridgeService::class.java))
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start bridge service: ${e.message}")
-        }
-    }
-
-    private fun requestUsbPermissionFromActivity(device: UsbDevice) {
-        val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            PendingIntent.FLAG_MUTABLE
-        } else {
-            0
-        }
-        val pi = PendingIntent.getBroadcast(this, 1, Intent("com.inputbridge.USB_PERMISSION"), flags)
-        usbManager.requestPermission(device, pi)
-        Log.i(TAG, "USB permission requested from foreground Activity for ${device.deviceName}")
-    }
-
-    private fun handleUsbLaunchIntent(intent: Intent?) {
-        if (intent?.action != UsbManager.ACTION_USB_DEVICE_ATTACHED) return
-        val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
-        } else {
-            @Suppress("DEPRECATION")
-            intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
-        } ?: return
-        val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        if (usbManager.hasPermission(device)) startBridgeService()
-        else requestUsbPermissionFromActivity(device)
-    }
-
-    private fun scanUsbAndStartIfNeeded() {
-        val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        val deviceList = usbManager.deviceList
-        for ((name, device) in deviceList) {
-            for (i in 0 until device.interfaceCount) {
-                if (device.getInterface(i).interfaceClass == UsbConstants.USB_CLASS_HID) {
-                    Log.i(TAG, "Activity.onResume: HID device found — $name " +
-                        "(vendor=${device.vendorId}, product=${device.productId})")
-                    if (usbManager.hasPermission(device)) {
-                        startBridgeService()
-                    } else {
-                        requestUsbPermissionFromActivity(device)
-                    }
-                    return
-                }
-            }
-        }
-    }
-
-    @Volatile private var volumeDownPressedAt = 0L
-    private var emergencyStopJob: kotlinx.coroutines.Job? = null
-
-    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN && event.repeatCount == 0) {
-            volumeDownPressedAt = SystemClock.elapsedRealtime()
-            emergencyStopJob?.cancel()
-            emergencyStopJob = lifecycleScope.launch {
-                delay(3000L)
-                viewModel.stopBridge()
-                Toast.makeText(
-                    this@BridgeModeActivity,
-                    "Emergency stop — bridge service stopped",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-            return true
-        }
-        return super.onKeyDown(keyCode, event)
-    }
-
-    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-            val heldMs = if (volumeDownPressedAt > 0L)
-                SystemClock.elapsedRealtime() - volumeDownPressedAt else 0L
-            emergencyStopJob?.cancel()
-            emergencyStopJob = null
-            volumeDownPressedAt = 0L
-            if (heldMs < 500L) {
-                return false
-            }
-            return true
-        }
-        return super.onKeyUp(keyCode, event)
-    }
-
-    private fun applyKeepScreenOn() {
-        if (prefs.keepScreenOn) {
-            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        } else {
-            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        }
-    }
-
-    private fun startBridgeService() {
-        try {
-            startForegroundService(Intent(this, BridgeService::class.java))
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start bridge service: ${e.message}")
-        }
-    }
-
-    private fun requestUsbPermissionFromActivity(device: UsbDevice) {
-        val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            PendingIntent.FLAG_MUTABLE
-        } else {
-            0
-        }
-        val pi = PendingIntent.getBroadcast(this, 1, Intent("com.inputbridge.USB_PERMISSION"), flags)
-        usbManager.requestPermission(device, pi)
-        Log.i(TAG, "USB permission requested from foreground Activity for ${device.deviceName}")
-    }
-
-    private fun handleUsbLaunchIntent(intent: Intent?) {
-        if (intent?.action != UsbManager.ACTION_USB_DEVICE_ATTACHED) return
-        val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
-        } else {
-            @Suppress("DEPRECATION")
-            intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
-        } ?: return
-        val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        if (usbManager.hasPermission(device)) startBridgeService()
-        else requestUsbPermissionFromActivity(device)
-    }
-
-    private fun scanUsbAndStartIfNeeded() {
-        val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        val deviceList = usbManager.deviceList
-        for ((name, device) in deviceList) {
-            for (i in 0 until device.interfaceCount) {
-                if (device.getInterface(i).interfaceClass == UsbConstants.USB_CLASS_HID) {
-                    Log.i(TAG, "Activity.onResume: HID device found — $name " +
-                        "(vendor=${device.vendorId}, product=${device.productId})")
-                    if (usbManager.hasPermission(device)) {
-                        startBridgeService()
-                    } else {
-                        requestUsbPermissionFromActivity(device)
-                    }
-                    return
-                }
-            }
         }
     }
 }

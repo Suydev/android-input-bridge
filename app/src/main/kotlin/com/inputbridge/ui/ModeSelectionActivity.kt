@@ -2,7 +2,7 @@ package com.inputbridge.ui
 
 import android.content.Intent
 import android.os.Bundle
-import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.ComponentActivity
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
@@ -28,7 +28,7 @@ import com.inputbridge.ui.bridge.BridgeModeActivity
 import com.inputbridge.ui.receiver.ReceiverModeActivity
 import androidx.compose.ui.text.style.TextAlign
 
-class ModeSelectionActivity : AppCompatActivity() {
+class ModeSelectionActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

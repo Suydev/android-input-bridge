@@ -1,9 +1,10 @@
 package com.inputbridge
 
 import android.app.Application
-import android.os.Build
+import com.inputbridge.bridge.bridgeModule
 import com.inputbridge.core.logging.BridgeLogger
 import com.inputbridge.diagnostics.DiagnosticsManager
+import com.inputbridge.receiver.receiverModule
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.context.startKoin
 

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">InputBridge</string>
+    <string name="accessibility_service_label_bridge">Bridge Input Controller</string>
+    <string name="accessibility_service_label_receiver">Receiver Input Controller</string>
+</resources>

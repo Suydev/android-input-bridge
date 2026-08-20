@@ -1,9 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- USB Host: read the Portronics receiver over OTG -->
-    <uses-feature android:name="android.hardware.usb.host" android:required="true" />
-
     <!-- Network transport -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -39,82 +36,4 @@
     <!-- Notifications -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!--
-        NOTE: WRITE_SETTINGS removed — screen brightness is applied via WindowManager.LayoutParams
-        (per-window override), which does NOT require WRITE_SETTINGS. That permission is only
-        needed for Settings.System.putInt(SCREEN_BRIGHTNESS) which we never use.
-    -->
-
-    <application
-        android:name=".BridgeApplication"
-        android:allowBackup="false"
-        android:icon="@mipmap/ic_launcher"
-        android:label="@string/app_name"
-        android:roundIcon="@mipmap/ic_launcher_round"
-        android:supportsRtl="true"
-        android:theme="@style/Theme.InputBridgeBridge">
-
-        <!--
-            screenOrientation="portrait" kept for the bridge phone — intentional.
-            The bridge phone is typically held or placed face-down; portrait-only avoids
-            accidental rotation. keepScreenOn is now controlled at runtime via FLAG_KEEP_SCREEN_ON.
-        -->
-        <activity
-            android:name=".ui.MainActivity"
-            android:exported="true"
-            android:launchMode="singleTask"
-            android:screenOrientation="portrait">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-
-            <!-- BUG-013 FIX: device_filter.xml now uses class="3" (any HID device). -->
-            <intent-filter>
-                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
-            </intent-filter>
-            <meta-data
-                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
-                android:resource="@xml/device_filter" />
-        </activity>
-
-        <service
-            android:name=".service.BridgeService"
-            android:exported="false"
-            android:foregroundServiceType="connectedDevice"
-            android:enabled="true" />
-
-        <!-- Mouse trackpad overlay — transparent fullscreen, turns phone screen into trackpad -->
-        <activity
-            android:name=".ui.MouseTrackpadActivity"
-            android:exported="false"
-            android:theme="@style/Theme.InputBridgeTrackpad"
-            android:screenOrientation="portrait"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize" />
-
-        <!-- Accessibility service for USB keyboard capture — intercepts all key events -->
-        <service
-            android:name=".service.BridgeAccessibilityService"
-            android:exported="true"
-            android:label="@string/app_name"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/bridge_accessibility_service_config" />
-        </service>
-
-        <receiver
-            android:name=".receiver.BootReceiver"
-            android:exported="true"
-            android:enabled="true">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
-            </intent-filter>
-        </receiver>
-
-    </application>
 </manifest>

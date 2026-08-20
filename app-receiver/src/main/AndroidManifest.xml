@@ -10,14 +10,6 @@
 
     <!-- Foreground service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <!--
-        BUG-014 FIX: Changed from FOREGROUND_SERVICE_DATA_SYNC to FOREGROUND_SERVICE_CONNECTED_DEVICE.
-
-        FOREGROUND_SERVICE_DATA_SYNC carries a 6-hour/day runtime cap on Android 14+.
-        The receiver service may run for many hours during a typing/browsing session, so using
-        CONNECTED_DEVICE (no runtime cap) is correct. The receiver is "managing" the bridge
-        keyboard device over the network — this qualifies as a connected-device use case.
-    -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
@@ -33,85 +25,4 @@
     <!-- Notifications: shown in PermissionsScreen (API 33+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!--
-        Cursor dot overlay. Required by CursorOverlayService.
-        User grants this via Settings.ACTION_MANAGE_OVERLAY_PERMISSION from ReceiverPermissionsScreen
-        or ReceiverSettingsScreen. Guarded by canDrawOverlays() in the service itself.
-    -->
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-
-    <application
-        android:name=".ReceiverApplication"
-        android:allowBackup="false"
-        android:icon="@mipmap/ic_launcher"
-        android:label="@string/app_name"
-        android:roundIcon="@mipmap/ic_launcher_round"
-        android:supportsRtl="true"
-        android:theme="@style/Theme.InputBridgeReceiver">
-
-        <!-- Shizuku: privileged input injection via InputManager (1-5ms vs 10-30ms dispatchGesture) -->
-        <provider
-            android:name="rikka.shizuku.ShizukuProvider"
-            android:authorities="${applicationId}.shizuku"
-            android:multiprocess="false"
-            android:enabled="true"
-            android:exported="true"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
-
-        <!--
-            screenOrientation removed (was "portrait") — the receiver tablet supports both orientations.
-            configChanges handles rotation without restarting the activity.
-        -->
-        <activity
-            android:name=".ui.MainActivity"
-            android:exported="true"
-            android:launchMode="singleTask"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-
-        <!-- BUG-014 FIX: foregroundServiceType changed from dataSync to connectedDevice -->
-        <service
-            android:name=".service.ReceiverService"
-            android:exported="false"
-            android:foregroundServiceType="connectedDevice"
-            android:enabled="true" />
-
-        <!--
-            Cursor dot overlay service. Not a foreground service — lightweight WindowManager overlay.
-            Only started when showCursorOverlay pref is true AND canDrawOverlays() is true.
-        -->
-        <service
-            android:name=".service.CursorOverlayService"
-            android:exported="false"
-            android:enabled="true" />
-
-        <!-- Accessibility service for input injection -->
-        <service
-            android:name="com.inputbridge.accessibility.InputBridgeAccessibilityService"
-            android:exported="true"
-            android:label="@string/accessibility_service_label"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/accessibility_service_config" />
-        </service>
-
-        <!-- Auto-start on reboot -->
-        <receiver
-            android:name=".receiver.BootReceiver"
-            android:exported="true"
-            android:enabled="true">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-            </intent-filter>
-        </receiver>
-
-    </application>
 </manifest>

@@ -508,7 +508,7 @@ class ReceiverService : Service() {
             .setContentTitle("InputBridge Receiver")
             .setContentText(status)
             // BUG-076 FIX: system drawables may be absent on OEM ROMs; use app-owned resource.
-            .setSmallIcon(R.drawable.ic_notification)
+            .setSmallIcon(R.drawable.ic_notification_receiver)
             .setContentIntent(pi)
             .setOngoing(true)
             .setSilent(true)

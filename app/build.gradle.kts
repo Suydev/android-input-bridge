@@ -19,13 +19,10 @@ android {
         viewBinding = true
     }
 
-    packagingOptions {
+    packaging {
         resources {
             excludes += "META-INF/*"
         }
-    }
-
-    packaging {
         jniLibs {
             useLegacyPackaging = true
         }
@@ -33,6 +30,10 @@ android {
 }
 
 dependencies {
+    // App modules (converted to libraries)
+    implementation(project(":app-bridge"))
+    implementation(project(":app-receiver"))
+
     // Core modules
     implementation(project(":shared-core"))
     implementation(project(":protocol"))
