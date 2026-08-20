@@ -261,7 +261,7 @@ class BluetoothHidTransport(private val context: Context) : Transport {
                 is InputEvent.NavigationAction,
                 is InputEvent.CursorGoto -> true
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             BridgeLogger.w(TAG, "sendInputEvent failed: ${e.message}")
             false
         }

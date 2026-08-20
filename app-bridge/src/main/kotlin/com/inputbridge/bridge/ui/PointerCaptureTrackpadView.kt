@@ -140,6 +140,13 @@ class PointerCaptureTrackpadView @JvmOverloads constructor(
 
     @RequiresApi(Build.VERSION_CODES.O)
     private fun handleCapturedPointer(motionEvent: MotionEvent): Boolean {
+        // Defensive: guard against null transport to prevent crashes
+        val transport = this.transport
+        if (transport == null) {
+            Log.w(TAG, "Transport is null, dropping pointer event")
+            return true
+        }
+
         val action = motionEvent.action
         val x = motionEvent.x
         val y = motionEvent.y
@@ -149,7 +156,7 @@ class PointerCaptureTrackpadView @JvmOverloads constructor(
                 cursorX = x
                 cursorY = y
                 hasValidPosition = true
-                transport?.onCursorMove(x / width, y / height)
+                safeCall { transport.onCursorMove(x / width, y / height) }
                 invalidate()
             }
             MotionEvent.ACTION_MOVE -> {
@@ -161,7 +168,7 @@ class PointerCaptureTrackpadView @JvmOverloads constructor(
                     // Apply sensitivity
                     val sx = (x / width) * sensitivity
                     val sy = (y / height) * sensitivity
-                    transport?.onCursorMove(sx.coerceIn(0f, 1f), sy.coerceIn(0f, 1f))
+                    safeCall { transport.onCursorMove(sx.coerceIn(0f, 1f), sy.coerceIn(0f, 1f)) }
                     lastMoveTime = now
                     invalidate()
                 }
@@ -172,33 +179,44 @@ class PointerCaptureTrackpadView @JvmOverloads constructor(
             MotionEvent.ACTION_BUTTON_PRESS -> {
                 val button = motionEvent.actionButton
                 when (button) {
-                    MotionEvent.BUTTON_PRIMARY -> transport?.onButtonDown(0) // Left
-                    MotionEvent.BUTTON_SECONDARY -> transport?.onButtonDown(1) // Right
-                    4 -> transport?.onButtonDown(2) // Middle (MotionEvent.BUTTON_MIDDLE = 4)
-                    MotionEvent.BUTTON_BACK -> transport?.onButtonDown(3) // Back
-                    MotionEvent.BUTTON_FORWARD -> transport?.onButtonDown(4) // Forward
+                    MotionEvent.BUTTON_PRIMARY -> safeCall { transport.onButtonDown(0) } // Left
+                    MotionEvent.BUTTON_SECONDARY -> safeCall { transport.onButtonDown(1) } // Right
+                    4 -> safeCall { transport.onButtonDown(2) } // Middle (MotionEvent.BUTTON_MIDDLE = 4)
+                    MotionEvent.BUTTON_BACK -> safeCall { transport.onButtonDown(3) } // Back
+                    MotionEvent.BUTTON_FORWARD -> safeCall { transport.onButtonDown(4) } // Forward
                 }
                 triggerClickRipple(x, y)
             }
             MotionEvent.ACTION_BUTTON_RELEASE -> {
                 val button = motionEvent.actionButton
                 when (button) {
-                    MotionEvent.BUTTON_PRIMARY -> transport?.onButtonUp(0)
-                    MotionEvent.BUTTON_SECONDARY -> transport?.onButtonUp(1)
-                    4 -> transport?.onButtonUp(2) // Middle
-                    MotionEvent.BUTTON_BACK -> transport?.onButtonUp(3)
-                    MotionEvent.BUTTON_FORWARD -> transport?.onButtonUp(4)
+                    MotionEvent.BUTTON_PRIMARY -> safeCall { transport.onButtonUp(0) }
+                    MotionEvent.BUTTON_SECONDARY -> safeCall { transport.onButtonUp(1) }
+                    4 -> safeCall { transport.onButtonUp(2) } // Middle
+                    MotionEvent.BUTTON_BACK -> safeCall { transport.onButtonUp(3) }
+                    MotionEvent.BUTTON_FORWARD -> safeCall { transport.onButtonUp(4) }
                 }
             }
             MotionEvent.ACTION_SCROLL -> {
                 val vScroll = motionEvent.getAxisValue(MotionEvent.AXIS_VSCROLL)
                 val hScroll = motionEvent.getAxisValue(MotionEvent.AXIS_HSCROLL)
                 if (vScroll != 0f || hScroll != 0f) {
-                    transport?.onScroll(hScroll, -vScroll)
+                    safeCall { transport.onScroll(hScroll, -vScroll) }
                 }
             }
         }
         return true
+    }
+
+    /**
+     * Safely call a transport method with exception handling to prevent app crashes.
+     */
+    private inline fun safeCall(block: () -> Unit) {
+        try {
+            block()
+        } catch (e: Exception) {
+            Log.e(TAG, "Transport call failed", e)
+        }
     }
 
     private fun triggerClickRipple(x: Float, y: Float) {

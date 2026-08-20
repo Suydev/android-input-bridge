@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.inputbridge">
+
+    <!-- USB Host: read the Portronics receiver over OTG -->
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+
+    <!-- Network transport -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+
+    <!-- Wi-Fi Direct (future) -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
+
+    <!-- Foreground service: keep bridge alive -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Battery optimization: ask user to exempt us -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!-- Auto-start on boot -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- Bluetooth HID (optional, feature-flagged) -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+
+    <!-- Vibrate on tap (mouse trackpad haptic feedback) -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- Notifications -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Clipboard for text injection -->
+    <uses-permission android:name="android.permission.READ_CLIPBOARD" />
+
+    <!-- Cursor dot overlay. Required by CursorOverlayService. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!-- Shizuku: privileged input injection via InputManager -->
+    <uses-permission android:name="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
+    <application
+        android:name=".InputBridgeApplication"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.InputBridge">
+
+        <!-- Mode Selection Activity - Entry point -->
+        <activity
+            android:name=".ui.ModeSelectionActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Bridge Mode Activity -->
+        <activity
+            android:name=".ui.bridge.BridgeModeActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.InputBridge.Bridge">
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/device_filter" />
+        </activity>
+
+        <!-- Trackpad Activity (Bridge Mode) -->
+        <activity
+            android:name=".ui.bridge.MouseTrackpadActivity"
+            android:exported="false"
+            android:theme="@style/Theme.InputBridge.Trackpad"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize" />
+
+        <!-- Receiver Mode Activity -->
+        <activity
+            android:name=".ui.receiver.ReceiverModeActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize"
+            android:theme="@style/Theme.InputBridge.Receiver" />
+
+        <!-- Bridge Service: USB capture + UDP/BT HID transport -->
+        <service
+            android:name=".service.BridgeService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice"
+            android:enabled="true" />
+
+        <!-- Receiver Service: UDP receiver + input injection -->
+        <service
+            android:name=".service.ReceiverService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice"
+            android:enabled="true" />
+
+        <!-- Cursor Overlay Service -->
+        <service
+            android:name=".service.CursorOverlayService"
+            android:exported="false"
+            android:enabled="true" />
+
+        <!-- Bridge Accessibility Service: USB keyboard capture -->
+        <service
+            android:name=".service.BridgeAccessibilityService"
+            android:exported="true"
+            android:label="@string/accessibility_service_label_bridge"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/bridge_accessibility_service_config" />
+        </service>
+
+        <!-- Receiver Accessibility Service: Input injection via Shizuku/dispatchGesture -->
+        <service
+            android:name="com.inputbridge.accessibility.InputBridgeAccessibilityService"
+            android:exported="true"
+            android:label="@string/accessibility_service_label_receiver"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- Cursor Overlay Service (overlay) -->
+        <service
+            android:name=".service.CursorOverlayService"
+            android:exported="false"
+            android:enabled="true" />
+
+        <!-- Shizuku Provider for privileged input injection -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
+        <!-- Auto-start on boot -->
+        <receiver
+            android:name=".receiver.BootReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <!-- USB Permission Receiver -->
+        <receiver
+            android:name=".receiver.UsbPermissionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.inputbridge.USB_PERMISSION" />
+            </intent-filter>
+        </receiver>
+
+    </application>
+</manifest>

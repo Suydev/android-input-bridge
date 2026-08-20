@@ -9,6 +9,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import android.util.Log
 
 /**
  * Transport adapters for PointerCaptureTrackpadView.
@@ -155,14 +156,22 @@ class UnifiedTrackpadTransport(
 
         if (useHid) {
             hidTransport?.let { hid ->
-                val event = InputEvent.MouseButtonDown(mouseButton)
-                hid.sendInputEvent(event)
+                try {
+                    val event = InputEvent.MouseButtonDown(mouseButton)
+                    hid.sendInputEvent(event)
+                } catch (e: Exception) {
+                    Log.e("TrackpadTransport", "HID button down failed", e)
+                }
             }
         } else {
             packetFactory?.let { factory ->
                 val event = InputEvent.MouseButtonDown(mouseButton)
                 val packet = factory.fromEvent(event) ?: return
-                udpTransport?.sendDirect(packet)
+                try {
+                    udpTransport?.sendDirect(packet)
+                } catch (e: Exception) {
+                    Log.e("TrackpadTransport", "WiFi button down failed", e)
+                }
             }
         }
     }
@@ -179,14 +188,22 @@ class UnifiedTrackpadTransport(
 
         if (useHid) {
             hidTransport?.let { hid ->
-                val event = InputEvent.MouseButtonUp(mouseButton)
-                hid.sendInputEvent(event)
+                try {
+                    val event = InputEvent.MouseButtonUp(mouseButton)
+                    hid.sendInputEvent(event)
+                } catch (e: Exception) {
+                    Log.e("TrackpadTransport", "HID button up failed", e)
+                }
             }
         } else {
             packetFactory?.let { factory ->
                 val event = InputEvent.MouseButtonUp(mouseButton)
                 val packet = factory.fromEvent(event) ?: return
-                udpTransport?.sendDirect(packet)
+                try {
+                    udpTransport?.sendDirect(packet)
+                } catch (e: Exception) {
+                    Log.e("TrackpadTransport", "WiFi button up failed", e)
+                }
             }
         }
     }
@@ -194,14 +211,22 @@ class UnifiedTrackpadTransport(
     override fun onScroll(x: Float, y: Float) {
         if (useHid) {
             hidTransport?.let { hid ->
-                val event = InputEvent.Scroll(x, y)
-                hid.sendInputEvent(event)
+                try {
+                    val event = InputEvent.Scroll(x, y)
+                    hid.sendInputEvent(event)
+                } catch (e: Exception) {
+                    Log.e("TrackpadTransport", "HID scroll failed", e)
+                }
             }
         } else {
             packetFactory?.let { factory ->
                 val event = InputEvent.Scroll(x, y)
                 val packet = factory.fromEvent(event) ?: return
-                udpTransport?.sendDirect(packet)
+                try {
+                    udpTransport?.sendDirect(packet)
+                } catch (e: Exception) {
+                    Log.e("TrackpadTransport", "WiFi scroll failed", e)
+                }
             }
         }
     }

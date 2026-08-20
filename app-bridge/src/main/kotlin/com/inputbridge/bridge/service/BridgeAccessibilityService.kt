@@ -214,8 +214,12 @@ class BridgeAccessibilityService : AccessibilityService() {
                 val y = (event.y * screenHeight).coerceIn(0f, screenHeight.toFloat())
                 cursorX = event.x
                 cursorY = event.y
-                dispatchTapGesture(x, y)
-                BridgeLogger.d(TAG, "CursorGoto → tap at (${x.toInt()}, ${y.toInt()})")
+                try {
+                    dispatchTapGesture(x, y)
+                    BridgeLogger.d(TAG, "CursorGoto → tap at (${x.toInt()}, ${y.toInt()})")
+                } catch (e: Exception) {
+                    BridgeLogger.e(TAG, "Failed to dispatch cursor goto", e)
+                }
             }
             is InputEvent.MouseMove -> {
                 // Relative delta: update virtual cursor position
@@ -226,12 +230,16 @@ class BridgeAccessibilityService : AccessibilityService() {
                 // Click at current virtual cursor position
                 val x = (cursorX * screenWidth).coerceIn(0f, screenWidth.toFloat())
                 val y = (cursorY * screenHeight).coerceIn(0f, screenHeight.toFloat())
-                if (event.button == MouseButton.LEFT) {
-                    dispatchTapGesture(x, y)
-                } else {
-                    dispatchLongPressGesture(x, y)
+                try {
+                    if (event.button == MouseButton.LEFT) {
+                        dispatchTapGesture(x, y)
+                    } else {
+                        dispatchLongPressGesture(x, y)
+                    }
+                    BridgeLogger.d(TAG, "MouseButton ${event.button} at (${x.toInt()}, ${y.toInt()})")
+                } catch (e: Exception) {
+                    BridgeLogger.e(TAG, "Failed to dispatch click gesture", e)
                 }
-                BridgeLogger.d(TAG, "MouseButton ${event.button} at (${x.toInt()}, ${y.toInt()})")
             }
             is InputEvent.MouseButtonUp -> {
                 // No-op for now (tap is already dispatched on down)
@@ -241,8 +249,12 @@ class BridgeAccessibilityService : AccessibilityService() {
                 val centerX = screenWidth / 2f
                 val startY = screenHeight / 2f
                 val endY = startY - event.dy * 100f  // scroll direction
-                dispatchSwipeGesture(centerX, startY, centerX, endY, 100L)
-                BridgeLogger.d(TAG, "Scroll dy=${event.dy}")
+                try {
+                    dispatchSwipeGesture(centerX, startY, centerX, endY, 100L)
+                    BridgeLogger.d(TAG, "Scroll dy=${event.dy}")
+                } catch (e: Exception) {
+                    BridgeLogger.e(TAG, "Failed to dispatch scroll gesture", e)
+                }
             }
             // Unsupported reverse-trackpad events (keyboard, text, navigation)
             is InputEvent.KeyDown,
@@ -256,17 +268,25 @@ class BridgeAccessibilityService : AccessibilityService() {
     }
 
     private fun dispatchTapGesture(x: Float, y: Float) {
-        val path = Path().apply { moveTo(x, y) }
-        val stroke = GestureDescription.StrokeDescription(path, 0L, TAP_DURATION_MS)
-        val gesture = GestureDescription.Builder().addStroke(stroke).build()
-        dispatchGesture(gesture, null, null)
+        try {
+            val path = Path().apply { moveTo(x, y) }
+            val stroke = GestureDescription.StrokeDescription(path, 0L, TAP_DURATION_MS)
+            val gesture = GestureDescription.Builder().addStroke(stroke).build()
+            dispatchGesture(gesture, null, null)
+        } catch (e: Exception) {
+            BridgeLogger.e(TAG, "Failed to dispatch tap gesture", e)
+        }
     }
 
     private fun dispatchLongPressGesture(x: Float, y: Float) {
-        val path = Path().apply { moveTo(x, y) }
-        val stroke = GestureDescription.StrokeDescription(path, 0L, 600L)
-        val gesture = GestureDescription.Builder().addStroke(stroke).build()
-        dispatchGesture(gesture, null, null)
+        try {
+            val path = Path().apply { moveTo(x, y) }
+            val stroke = GestureDescription.StrokeDescription(path, 0L, 600L)
+            val gesture = GestureDescription.Builder().addStroke(stroke).build()
+            dispatchGesture(gesture, null, null)
+        } catch (e: Exception) {
+            BridgeLogger.e(TAG, "Failed to dispatch long press gesture", e)
+        }
     }
 
     private fun dispatchSwipeGesture(
@@ -274,13 +294,17 @@ class BridgeAccessibilityService : AccessibilityService() {
         endX: Float, endY: Float,
         durationMs: Long,
     ) {
-        val path = Path().apply {
-            moveTo(startX, startY)
-            lineTo(endX, endY)
+        try {
+            val path = Path().apply {
+                moveTo(startX, startY)
+                lineTo(endX, endY)
+            }
+            val stroke = GestureDescription.StrokeDescription(path, 0L, durationMs)
+            val gesture = GestureDescription.Builder().addStroke(stroke).build()
+            dispatchGesture(gesture, null, null)
+        } catch (e: Exception) {
+            BridgeLogger.e(TAG, "Failed to dispatch swipe gesture", e)
         }
-        val stroke = GestureDescription.StrokeDescription(path, 0L, durationMs)
-        val gesture = GestureDescription.Builder().addStroke(stroke).build()
-        dispatchGesture(gesture, null, null)
     }
 
     // ── Transport ───────────────────────────────────────────────────────────

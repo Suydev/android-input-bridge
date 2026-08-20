@@ -926,9 +926,19 @@ class BridgeService : Service() {
                     val sent = if (event is com.inputbridge.core.model.InputEvent.MouseMove ||
                         event is com.inputbridge.core.model.InputEvent.Scroll
                     ) {
-                        udpTransport?.sendDirect(packet) ?: false
+                        try {
+                            udpTransport?.sendDirect(packet) ?: false
+                        } catch (e: Exception) {
+                            BridgeLogger.w(TAG, "UDP sendDirect failed", e)
+                            false
+                        }
                     } else {
-                        udpTransport?.send(packet) ?: false
+                        try {
+                            udpTransport?.send(packet) ?: false
+                        } catch (e: Exception) {
+                            BridgeLogger.w(TAG, "UDP send failed", e)
+                            false
+                        }
                     }
                     if (sent) {
                         DiagnosticsManager.onPacketSent()
