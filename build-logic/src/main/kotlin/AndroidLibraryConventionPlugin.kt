@@ -20,6 +20,8 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
 
                 defaultConfig {
                     minSdk = 29
+                    versionCode = 1
+                    versionName = "0.1.0"
                     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
                     consumerProguardFiles("consumer-rules.pro")
                 }
