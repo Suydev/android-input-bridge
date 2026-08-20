@@ -66,7 +66,7 @@ jobs:
 
       # ── Debug APKs (always built) ────────────────────────────────────────────
       - name: Build Debug APKs
-        run: ./gradlew :app-bridge:assembleDebug :app-receiver:assembleDebug --stacktrace
+        run: ./gradlew :app:assembleDebug --stacktrace
 
       # ── Release APKs (only when signing secrets are present) ─────────────────
       - name: Decode Keystore
@@ -83,7 +83,7 @@ jobs:
           SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
           SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
           SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
-        run: ./gradlew :app-bridge:assembleRelease :app-receiver:assembleRelease --stacktrace
+        run: ./gradlew :app:assembleRelease --stacktrace
 
       # ── Release metadata ─────────────────────────────────────────────────────
       - name: Compute release metadata
@@ -118,9 +118,7 @@ jobs:
           # Release APK globs are silently skipped when signing is not configured.
           fail_on_unmatched_files: false
           files: |
-            app-bridge/build/outputs/apk/debug/app-bridge-debug.apk
-            app-receiver/build/outputs/apk/debug/app-receiver-debug.apk
-            app-bridge/build/outputs/apk/release/*.apk
-            app-receiver/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/release/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
