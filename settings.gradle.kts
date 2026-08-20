@@ -24,6 +24,8 @@ dependencyResolutionManagement {
 rootProject.name = "android-input-bridge"
 
 include(":app")
+include(":app-bridge")
+include(":app-receiver")
 include(":shared-core")
 include(":protocol")
 include(":input-capture")
