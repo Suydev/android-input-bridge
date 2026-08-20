@@ -1,3 +1,7 @@
+## Session 047 — Persistent crash capture (BUG-156)
+
+- [x] Add CrashLog persistence + launcher "Last crash" display so crashes can be reported without ADB
+
 ## Session 046 — Stale red "No IP configured" while connected (BUG-155)
 
 - [x] Clear `lastError` on discovery / socket-connect / PONG / pairing-accepted in BridgeService (BUG-155)

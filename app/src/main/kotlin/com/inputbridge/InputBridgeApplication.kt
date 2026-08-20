@@ -3,6 +3,7 @@ package com.inputbridge
 import android.app.Application
 import com.inputbridge.bridge.bridgeModule
 import com.inputbridge.core.logging.BridgeLogger
+import com.inputbridge.core.logging.CrashLog
 import com.inputbridge.diagnostics.DiagnosticsManager
 import com.inputbridge.receiver.receiverModule
 import org.koin.android.ext.koin.androidContext
@@ -25,10 +26,13 @@ class InputBridgeApplication : Application() {
         BridgeLogger.init(isDebug = BuildConfig.DEBUG)
 
         // Register global crash handler before Koin starts so DI failures are caught too.
-        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             try {
+                // Bug 156: persist the crash so it survives the process death and can
+                // be shown on the launcher after relaunch (no ADB needed to report it).
+                CrashLog.save(this, throwable)
                 BridgeLogger.e(
-                    "CRASH",
+                    "InputBridgeCrash",
                     "Uncaught exception on thread '${thread.name}'",
                     throwable,
                 )

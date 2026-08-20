@@ -26,6 +26,7 @@ import androidx.core.view.WindowCompat
 import com.inputbridge.R
 import com.inputbridge.core.config.AppRole
 import com.inputbridge.core.config.AppRoleStore
+import com.inputbridge.core.logging.CrashLog
 import com.inputbridge.ui.bridge.BridgeModeActivity
 import com.inputbridge.ui.receiver.ReceiverModeActivity
 import androidx.compose.ui.text.style.TextAlign
@@ -35,7 +36,9 @@ class ModeSelectionActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
+            val lastCrash = remember { CrashLog.last(this) }
             ModeSelectionScreen(
+                lastCrash = lastCrash,
                 onBridgeClick = {
                     // BUG-141 FIX: persist the role so BootReceivers only ever auto-start the
                     // service for this device's chosen mode (single-APK merge fix:
@@ -56,7 +59,8 @@ class ModeSelectionActivity : ComponentActivity() {
 @Composable
 fun ModeSelectionScreen(
     onBridgeClick: () -> Unit,
-    onReceiverClick: () -> Unit
+    onReceiverClick: () -> Unit,
+    lastCrash: String? = null,
 ) {
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -75,6 +79,19 @@ fun ModeSelectionScreen(
                 letterSpacing = 4.sp,
                 textAlign = TextAlign.Center
             )
+            if (lastCrash != null) {
+                // BUG-156: show the last recorded crash here so it can be read after a
+                // relaunch without a computer/ADB. Overwritten on the next crash.
+                Spacer(Modifier.padding(top = 12.dp))
+                Text(
+                    text = "⚠ Last crash:\n$lastCrash",
+                    color = Color(0xFFFF5252),
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 24.dp),
+                )
+            }
             androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(32.dp))
             Column(
                 modifier = Modifier

@@ -1,3 +1,25 @@
+## Session 047 — Persistent on-device crash capture for field diagnosis (BUG-156)
+**Date:** 2026-08-20
+**Agent:** opencode
+**Status:** ✅ Complete
+
+### Goals
+- User reports "both apps connect but crash on some instance" with no error details available; logs were logcat-only and died with the process. Add on-device, relaunch-surviving crash capture so the exact exception can be reported without ADB.
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|----|----------|-------------|---------|
+| BUG-156 | Medium | Crashes leave no on-device record; cannot diagnose without ADB | ✅ FIXED |
+
+### What Was Changed
+- `shared-core/.../core/logging/CrashLog.kt` (new): persists crash class + message + top stack frames + timestamp to SharedPreferences (`crash_log` prefs).
+- `app/.../InputBridgeApplication.kt`: uncaught-exception handler now calls `CrashLog.save(...)` before the diagnostics update.
+- `app/.../ui/ModeSelectionActivity.kt`: launcher shows "⚠ Last crash:" in red when a crash was recorded, so a user can read it after relaunch and report it back.
+
+### How the user should use it
+- Reproduce the crash on either device, relaunch the app, read the red "Last crash" text on the mode-selection screen, and report it verbatim.
+
+---
 ## Session 046 — Stale "No IP configured" error persists while connected (BUG-155)
 **Date:** 2026-08-20
 **Agent:** opencode

@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 046 — BUG-155: stale red "No IP configured" cleared on connect (2026-08-20)
+> **Last updated:** Session 047 — BUG-156: persistent on-device crash capture ("Last crash" on launcher)
 
 ---
 

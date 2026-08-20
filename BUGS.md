@@ -2805,3 +2805,15 @@ the fix restricts the inline fast path to KeyDown only.
 **Priority**: Medium
 **Status**: ✅ FIXED (Session 046)
 **Fix**: Clear `lastError` on every connection-progress event: auto-discovery finding the receiver, UDP socket connect success, PONG received, and accepted pairing.
+
+## BUG-156 — Crashes leave no on-device record; can't diagnose without ADB
+
+**Description**: The global crash handler writes to logcat (BridgeLogger) and in-memory DiagnosticsManager only — both die with the process. After a crash there is no way to read the exception text on the device, so field reports are limited to "it crashed".
+**Steps to reproduce**: Any uncaught exception → process dies → relaunch shows nothing about why.
+**Expected behavior**: The last crash reason is readable on-device after relaunch.
+**Actual behavior**: Crash details are lost on process death.
+**Suspected cause**: No persisted crash storage.
+**Files involved**: `shared-core/.../core/logging/CrashLog.kt` (new), `app/src/main/kotlin/com/inputbridge/InputBridgeApplication.kt`, `app/.../ui/ModeSelectionActivity.kt`
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 047)
+**Fix**: New `CrashLog` persists the crash class/message/top stack frames with a timestamp to SharedPreferences; the crash handler saves it; ModeSelectionScreen renders "⚠ Last crash:" in red on the launcher after relaunch.
