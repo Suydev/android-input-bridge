@@ -24,6 +24,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.inputbridge.bridge.prefs.BridgePreferences
 import com.inputbridge.bridge.service.BridgeService
+import com.inputbridge.bridge.ui.BridgeRoute
 import com.inputbridge.bridge.ui.screens.*
 import com.inputbridge.bridge.ui.theme.BridgeTheme
 import com.inputbridge.bridge.viewmodel.BridgeViewModel
