@@ -20,10 +20,12 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
 
                 defaultConfig {
                     minSdk = 29
-                    versionCode = 1
-                    versionName = "0.1.0"
                     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
                     consumerProguardFiles("consumer-rules.pro")
+                    // Library modules have no versionName/versionCode DSL; expose via BuildConfig
+                    // so UI screens that display app version (e.g. AboutScreen) keep working.
+                    buildConfigField("String", "VERSION_NAME", "\"0.1.0\"")
+                    buildConfigField("int", "VERSION_CODE", "1")
                 }
 
                 buildFeatures {
