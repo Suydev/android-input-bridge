@@ -39,21 +39,13 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Build Debug APKs
-        run: ./gradlew :app-bridge:assembleDebug :app-receiver:assembleDebug --stacktrace --no-configuration-cache
+        run: ./gradlew :app:assembleDebug --stacktrace --no-configuration-cache
 
       - name: Upload Bridge APK
         uses: actions/upload-artifact@v4
         with:
           name: bridge-debug-apk-${{ github.run_number }}
-          path: app-bridge/build/outputs/apk/debug/app-bridge-debug.apk
-          retention-days: 30
-          if-no-files-found: error
-
-      - name: Upload Receiver APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: receiver-debug-apk-${{ github.run_number }}
-          path: app-receiver/build/outputs/apk/debug/app-receiver-debug.apk
+          path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
           if-no-files-found: error
 
@@ -136,15 +128,14 @@ jobs:
           SIGNING_KEY_ALIAS: inputbridge
           SIGNING_KEY_PASSWORD: inputbridge123
           SIGNING_STORE_PASSWORD: inputbridge123
-        run: ./gradlew :app-bridge:assembleRelease :app-receiver:assembleRelease --stacktrace --no-configuration-cache
+        run: ./gradlew :app:assembleRelease --stacktrace --no-configuration-cache
 
       - name: Upload Release APKs
         uses: actions/upload-artifact@v4
         with:
           name: release-apks-${{ github.run_number }}
           path: |
-            app-bridge/build/outputs/apk/release/app-bridge-release.apk
-            app-receiver/build/outputs/apk/release/app-receiver-release.apk
+            app/build/outputs/apk/release/app-release.apk
           retention-days: 90
           if-no-files-found: error
 
@@ -157,17 +148,14 @@ jobs:
             ## InputBridge build-${{ github.run_number }}
 
             ### Downloads
-            - **app-bridge-release.apk** — Bridge app (phone with USB keyboard/mouse)
-            - **app-receiver-release.apk** — Receiver app (tablet)
+            - **app-release.apk** — Unified Bridge + Receiver app
 
             ### Setup
-            1. Install both APKs
-            2. Enable accessibility service for both apps
-            3. Set receiver IP in bridge app Settings
-            4. Open MOUSE button in bridge app for trackpad
+            1. Install the APK
+            2. Enable accessibility service for the app
+            3. Open the app and choose Bridge (phone) or Receiver (tablet) mode
           files: |
-            app-bridge/build/outputs/apk/release/app-bridge-release.apk
-            app-receiver/build/outputs/apk/release/app-receiver-release.apk
+            app/build/outputs/apk/release/app-release.apk
           draft: false
           prerelease: false
         env:
