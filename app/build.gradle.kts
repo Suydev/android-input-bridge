@@ -1,7 +1,6 @@
 plugins {
-    alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
-    alias(libs.plugins.kotlin.compose)
+    id("inputbridge.android.app")
+    id("inputbridge.android.compose")
 }
 
 android {
@@ -9,46 +8,14 @@ android {
 
     defaultConfig {
         applicationId = "com.inputbridge"
-        minSdk = 29
-        targetSdk = 35
         versionCode = 1
         versionName = "1.0.0"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
         }
     }
 
-    buildTypes {
-        release {
-            isMinifyEnabled = false
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
-            signingConfig = signingConfigs.getByName("release")
-        }
-        debug {
-            isMinifyEnabled = false
-            isDebuggable = true
-        }
-    }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
-    }
-
-    kotlinOptions {
-        jvmTarget = "1.8"
-    }
-
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.14"
-    }
-
     buildFeatures {
-        compose = true
         viewBinding = true
     }
 
@@ -110,7 +77,8 @@ dependencies {
     implementation(libs.ktor.client.okhttp)
 
     // Shizuku
-    implementation(libs.shizuku)
+    implementation(libs.shizuku.api)
+    implementation(libs.shizuku.provider)
 
     // Testing
     testImplementation(libs.junit)
