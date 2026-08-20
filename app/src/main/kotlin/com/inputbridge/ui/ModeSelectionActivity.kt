@@ -24,6 +24,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.WindowCompat
 import com.inputbridge.R
+import com.inputbridge.core.config.AppRole
+import com.inputbridge.core.config.AppRoleStore
 import com.inputbridge.ui.bridge.BridgeModeActivity
 import com.inputbridge.ui.receiver.ReceiverModeActivity
 import androidx.compose.ui.text.style.TextAlign
@@ -33,11 +35,20 @@ class ModeSelectionActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            ModeSelectionScreen(onBridgeClick = {
-                startActivity(Intent(this, BridgeModeActivity::class.java))
-            }, onReceiverClick = {
-                startActivity(Intent(this, ReceiverModeActivity::class.java))
-            })
+            ModeSelectionScreen(
+                onBridgeClick = {
+                    // BUG-141 FIX: persist the role so BootReceivers only ever auto-start the
+                    // service for this device's chosen mode (single-APK merge fix:
+                    // without this, both BridgeService and ReceiverService could run
+                    // in the same process and collide on discovery port 54322).
+                    AppRoleStore.set(this, AppRole.BRIDGE)
+                    startActivity(Intent(this, BridgeModeActivity::class.java))
+                },
+                onReceiverClick = {
+                    AppRoleStore.set(this, AppRole.RECEIVER)
+                    startActivity(Intent(this, ReceiverModeActivity::class.java))
+                },
+            )
         }
     }
 }

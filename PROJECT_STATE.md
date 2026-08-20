@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 043 — BUG-140: receiver-side latency — drop Pair/Triple allocs + inline Shizuku injection (2026-08-16)
+> **Last updated:** Session 045 — BUG-141→BUG-154: single-APK role locking + service survival overhaul (2026-08-20)
 
 ---
 

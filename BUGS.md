@@ -2625,3 +2625,171 @@ Scroll/right-click use Shizuku SUSPEND functions and therefore stay on the comma
 `handleEvent`; left-button drag/click, text and navigation also stay on the a11y queue (gesture strokes need Main).
 Note: first CI attempt failed to compile because `swipe`/`longPress` are suspend — they must NOT be called inline;
 the fix restricts the inline fast path to KeyDown only.
+
+## BUG-141 — Single-APK merge: both roles' services can run in one process and race discovery port 54322
+
+**Description**: After merging app-bridge and app-receiver into one APK, the package no longer implies the role, so the OS never prevents both BootReceivers from auto-starting on the same device. Both BridgeService and ReceiverService then bind UDP 54322 in the same app process (second bind fails or they cross-talk), and the bridge can "auto-discover" its own in-process receiver over loopback — the classic "connected but nothing works" failure.
+**Steps to reproduce**: Install the merged APK, set auto-start on boot on both roles, reboot.
+**Expected behavior**: Exactly one role's service runs per device, per the user's mode choice.
+**Actual behavior**: Both services run; discovery port 54322 races; bridge self-discovers over loopback.
+**Suspected cause**: No persisted notion of role; BootReceivers unconditional; mode activities never stop the other role's service.
+**Files involved**: `shared-core/.../config/AppRoleStore.kt` (new), `app/src/main/kotlin/com/inputbridge/ui/ModeSelectionActivity.kt`, `app-bridge/.../bridge/receiver/BootReceiver.kt`, `app-receiver/.../receiver/receiver/BootReceiver.kt`, `app/.../ui/bridge/BridgeModeActivity.kt`, `app/.../ui/receiver/ReceiverModeActivity.kt`
+**Priority**: Critical
+**Status**: ✅ FIXED (Session 045)
+**Fix**: New `AppRoleStore` persists the user's mode choice (BRIDGE/RECEIVER/NONE); ModeSelectionActivity persists it on click; both BootReceivers bail out unless the device's role matches; BridgeModeActivity stops ReceiverService and ReceiverModeActivity stops BridgeService onCreate; dead library Application classes deleted so only `InputBridgeApplication` starts Koin.
+
+## BUG-142 — Service notifications target removed MainActivity classes
+
+**Description**: BridgeService and ReceiverService built their notification PendingIntents as `Intent(this, MainActivity::class.java)`. In the merged APK the old library MainActivities are not in the merged manifest, so the PendingIntent resolves to nothing — and on API 34 `startForeground()` can throw when the notification's PendingIntent is unresolvable, killing the foreground service before its sockets ever bind.
+**Steps to reproduce**: Start BridgeService from the merged APK and tap its notification.
+**Expected behavior**: Notification opens the bridge/receiver mode activity.
+**Actual behavior**: Dead PendingIntent; on some API levels `startForeground()` throws and the service dies silently before discovery binds.
+**Suspected cause**: Library modules still referenced their own launcher activities after the app merge.
+**Files involved**: `app-bridge/.../bridge/service/BridgeService.kt`, `app-receiver/.../receiver/service/ReceiverService.kt`
+**Priority**: Critical
+**Status**: ✅ FIXED (Session 045)
+**Fix**: PendingIntents now use `Intent().setClassName(this, "com.inputbridge.ui.bridge.BridgeModeActivity")` / `"com.inputbridge.ui.receiver.ReceiverModeActivity"` (resolved by name — libraries cannot compile against :app).
+
+## BUG-143 — USB permission-grant deadlock: poll only claimed NEW devices and re-requested permission every 3 s
+
+**Description**: Polling detection ran `requestUsbPermission()` every 3 s for a known, permission-less device (dialog spam / ANR), and when the grant finally landed mid-session the capture was not (re)started because the poll claimed only NEW devices and onStartCommand's idempotency guard swallowed the re-start.
+**Steps to reproduce**: Start the bridge (START button or boot) before granting USB permission, then grant it from the activity.
+**Expected behavior**: Capture starts as soon as permission exists.
+**Actual behavior**: Device stays detected-but-not-capturing forever; permission dialog re-spawns on every poll.
+**Suspected cause**: Poll state machine keyed only on device identity, not permission + capture state.
+**Files involved**: `app-bridge/.../bridge/service/BridgeService.kt`
+**Priority**: High
+**Status**: ✅ FIXED (Session 045)
+**Fix**: Poll now re-enters `startCapture(device)` when the known device has permission but capture is inactive, and never re-requests for a known device without permission (that stays the foreground activity's job, per §5.6 / BUG-129).
+
+## BUG-144 — ACTION_REPAIR ignores configured IP when no transport exists
+
+**Description**: On a fresh install the pipeline never starts (blank targetIp), so the re-pair action found a null transport and returned early — the manual-IP fallback could never connect.
+**Steps to reproduce**: Fresh install → Settings → type a target IP → tap Re-pair.
+**Expected behavior**: Pipeline starts and connects to the typed IP.
+**Actual behavior**: Re-pair logs "pipeline not running yet" and nothing connects.
+**Suspected cause**: Re-pair handler only worked on an already-live transport.
+**Files involved**: `app-bridge/.../bridge/service/BridgeService.kt`
+**Priority**: High
+**Status**: ✅ FIXED (Session 045)
+**Fix**: When transport is null but `prefs.targetIp` is set, reset `pipelineStarted` and (re)start the pipeline inside the service scope.
+
+## BUG-145 — Receiver drops EVERY packet unless accessibility service is connected (Shizuku path killed)
+
+**Description**: The receive loop gated `AccessibilityCommandBus.post(event)` on `isServiceConnected()`. Shizuku's `injectInputEvent` needs no accessibility service, so with Shizuku running + granted (the primary low-latency path, §4.8) the receiver still dropped all input.
+**Steps to reproduce**: Run receiver with Shizuku granted but a11y disabled → type on bridge.
+**Expected behavior**: Keyboard input injects via Shizuku.
+**Actual behavior**: Every packet logged "Accessibility service not connected" and was dropped.
+**Suspected cause**: The gate ignored the Shizuku path entirely.
+**Files involved**: `app-receiver/.../receiver/service/ReceiverService.kt`, `accessibility-receiver/.../accessibility/AccessibilityCommandBus.kt`
+**Priority**: Critical
+**Status**: ✅ FIXED (Session 045)
+**Fix**: New `AccessibilityCommandBus.isInjectionAvailable()` = service connected OR `ShizukuInputInjector.checkAvailability()`; the receiver routes through it.
+
+## BUG-146 — BluetoothHidTransport unregistered in Koin; trackpad screen crashes
+
+**Description**: `BridgeTrackpadScreen` resolves `BluetoothHidTransport` via `get<BluetoothHidTransport>()`, but the bridge Koin module never registered it → `NoDefinitionFoundException` on the trackpad screen.
+**Steps to reproduce**: Open the BT Trackpad screen.
+**Expected behavior**: Transport instance resolves.
+**Actual behavior**: Koin NoDefinitionFoundException crashes the screen.
+**Suspected cause**: Module registration missing after refactor.
+**Files involved**: `app-bridge/.../bridge/di/BridgeModule.kt`
+**Priority**: High
+**Status**: ✅ FIXED (Session 045)
+**Fix**: Registered `single { BluetoothHidTransport(androidContext()) }`.
+
+## BUG-147 — setTargetIp re-pairs on every keystroke; transport never settles
+
+**Description**: The Settings IP field calls `setTargetIp(ip)` on each keystroke; each call did `triggerRepair()`, restarting an in-flight pipeline for "1", "19", "192"… so the transport churned and never connected.
+**Steps to reproduce**: Type a target IP in Settings while the service is running.
+**Expected behavior**: Re-pair only when the value is a complete address (or cleared).
+**Actual behavior**: Continuous pipeline restarts; connection never settles.
+**Suspected cause**: No debounce/validation before triggering a repair.
+**Files involved**: `app-bridge/.../bridge/viewmodel/BridgeViewModel.kt`
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 045)
+**Fix**: `triggerRepair()` runs only when the trimmed value is empty or parses as a full 4-octet IPv4.
+
+## BUG-148 — AutoDiscovery listener loops die permanently on one transient socket error
+
+**Description**: Both the query listener and the bridge's response listener `break`ed their loops on any non-timeout socket exception; one ICMP/network hiccup left discovery permanently dead until service restart, so "no connections at all" persisted until reboot of the service.
+**Steps to reproduce**: Any transient socket error during discovery (interface flap, ICMP port-unreachable).
+**Expected behavior**: Loop keeps listening.
+**Actual behavior**: Discovery loop exits; bridge and receiver never find each other again.
+**Suspected cause**: `break` on transient errors treated as fatal.
+**Files involved**: `shared-core/.../discovery/AutoDiscovery.kt`
+**Priority**: High
+**Status**: ✅ FIXED (Session 045)
+**Fix**: Both catch-blocks re-throw CancellationException, log, and `delay(1000)` to keep listening (query listener already had the running fix; response listener got it too).
+
+## BUG-149 — Duplicate PERMISSIONS composable in ReceiverModeActivity NavHost
+
+**Description**: `composable(ReceiverRoute.PERMISSIONS)` was registered twice in the receiver NavHost, and the duplicate route also shadowed the shared navigation from the AccessibilitySetup flow.
+**Steps to reproduce**: Open Receiver Mode and navigate.
+**Expected behavior**: One PERMISSIONS destination.
+**Actual behavior**: Duplicate route registration; risk of wrong destination / composition crash on navigate.
+**Suspected cause**: Merge artifact during the app-combine.
+**Files involved**: `app/src/main/kotlin/com/inputbridge/ui/receiver/ReceiverModeActivity.kt`
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 045)
+**Fix**: Removed the second `composable(ReceiverRoute.PERMISSIONS)` block.
+
+## BUG-150 — CursorOverlayService declared twice in merged manifest
+
+**Description**: The app manifest declared `com.inputbridge.receiver.service.CursorOverlayService` twice (identical blocks), a manifest-merger duplicate-entity error risk.
+**Steps to reproduce**: Any manifest merge/build of :app.
+**Expected behavior**: Single declaration.
+**Actual behavior**: Duplicate entity; merger failure on some toolchains.
+**Suspected cause**: Merge artifact.
+**Files involved**: `app/src/main/AndroidManifest.xml`
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 045)
+**Fix**: Removed the second declaration; one entry kept.
+
+## BUG-151 — No launcher icon for API 29 (only mipmap-anydpi-v33 existed)
+
+**Description**: The merged app shipped adaptive launcher icons only in `mipmap-anydpi-v33`; on the Redmi 9 (API 29) the launcher shows a generic/default icon.
+**Steps to reproduce**: Install on API 29 device, open launcher.
+**Expected behavior**: Adaptive icon on API 26+.
+**Actual behavior**: Default system icon on API 29.
+**Suspected cause**: Icon resources folded into the v33 density/API bucket only.
+**Files involved**: `app-bridge/src/main/res/mipmap-anydpi-v26/` (new)
+**Priority**: Low
+**Status**: ✅ FIXED (Session 045)
+**Fix**: Copied `ic_launcher.xml` and `ic_launcher_round.xml` into `mipmap-anydpi-v26` (covers API 26–32).
+
+## BUG-152 — FeatureFlags.isDebugBuild probes the wrong BuildConfig namespace after merge
+
+**Description**: `isDebugBuild()` tried `com.inputbridge.bridge.BuildConfig` / `com.inputbridge.receiver.BuildConfig` first; in the merged APK the authoritative class is `com.inputbridge.BuildConfig`, so DEBUG-dependent behavior fell into stale fallbacks.
+**Steps to reproduce**: Run the merged debug APK with any `isDebugBuild()`-gated feature.
+**Expected behavior**: Debug features on for debug builds.
+**Actual behavior**: Wrong/flaky resolution depending on which library code path runs.
+**Suspected cause**: Probe order was pre-merge.
+**Files involved**: `shared-core/.../config/FeatureFlags.kt`
+**Priority**: Low
+**Status**: ✅ FIXED (Session 045)
+**Fix**: Probe `com.inputbridge.BuildConfig` first, then bridge/receiver fallbacks.
+
+## BUG-153 — Debug builds used applicationIdSuffix ".debug" (two package identities)
+
+**Description**: `AndroidAppConventionPlugin` appended `.debug` to debug variants, so the debug APK installed as `com.inputbridge.debug` while release was `com.inputbridge` — permission state, boot receiver records, and role persistence diverged between test and release installs, and the two packages could even both be installed at once.
+**Steps to reproduce**: Install debug APK, grant USB/a11y, then install release over it.
+**Expected behavior**: One package identity for testing what ships.
+**Actual behavior**: Two packages; tested state does not carry to release.
+**Suspected cause**: Legacy suffix kept after the merge.
+**Files involved**: `build-logic/src/main/kotlin/AndroidAppConventionPlugin.kt`
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 045)
+**Fix**: Removed the `applicationIdSuffix = ".debug"` block; debug and release share `com.inputbridge`.
+
+## BUG-154 — Accessibility setup screen names a non-existent service label
+
+**Description**: Step 2 of the receiver setup said "Find 'InputBridge Input Controller'" but the registered accessibility service is labelled "Receiver Input Controller", so users couldn't find it.
+**Steps to reproduce**: Open Receiver permissions → Accessibility setup.
+**Expected behavior**: Screen names the actual service.
+**Actual behavior**: Wrong label; user can't locate the service to enable.
+**Suspected cause**: Label changed, UI not updated.
+**Files involved**: `app-receiver/.../receiver/ui/screens/AccessibilitySetupScreen.kt`
+**Priority**: Low
+**Status**: ✅ FIXED (Session 045)
+**Fix**: Step 2 now reads "Receiver Input Controller".

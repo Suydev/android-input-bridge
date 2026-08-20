@@ -312,3 +312,27 @@ Manual hardware test (Portronics Key2 Combo) not yet performed.
   and the receiver listens for it and replies `INPUTBRIDGE_RECEIVER:<port>` directly to the bridge's
   discovery listen port (DISCOVERY_PORT = 54322) — NOT the query's ephemeral source port, or the
   bridge's listener never sees the reply. The receiver also keeps broadcasting its presence.
+
+## Session 045 single-APK invariants (BUG-141 → BUG-154)
+
+- **One role per device, enforced by persisted state, not by package.** Since the merge, the installed
+  package no longer implies the role. The user's choice from ModeSelectionActivity is persisted in
+  `shared-core/.../config/AppRoleStore.kt` (prefs file `app_role`), and BOTH BootReceivers bail out unless
+  the device's role matches. Each mode activity also stops the opposite role's service in onCreate.
+  Bridge + receiver services MUST NOT run in the same process: they race for discovery port 54322 and
+  the bridge "auto-discovers" its own in-process receiver over loopback.
+- **Notification PendingIntents must use the merged app's activities by class name.** The old library
+  launcher MainActivities are not in the merged manifest; `Intent...setClassName(this,
+  "com.inputbridge.ui.bridge.BridgeModeActivity")` / `"...ui.receiver.ReceiverModeActivity"` opens the
+  right screen. Libraries cannot compile against `:app`, so resolve by name.
+- **USB permission-grant mid-session must re-enter capture.** The USB poll treats
+  "known device, permission now granted, capture inactive" as a re-trigger for `startCapture()`, and
+  never re-requests permission for a known device (that is the foreground activity's job, §5.6).
+- **transportConnected is only proven by a PONG** (BUG-090); creating a socket proves nothing.
+- **A `setTargetIp` keystroke is not a repair trigger.** Re-pair only on empty or full 4-octet IPv4.
+- **AutoDiscovery listener loops never break on transient socket errors** — log, `delay(1000)`, keep
+  listening (BUG-148).
+- **Injection availability = a11y connected OR Shizuku available** (`isInjectionAvailable()`). A gate on
+  `isServiceConnected()` alone silently killed the primary Shizuku path (§4.8).
+- **Debug and release share `com.inputbridge`.** Debug builds must not use an `applicationIdSuffix` —
+  permission state, boot records, and the role store would diverge between test and release installs.

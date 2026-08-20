@@ -157,11 +157,22 @@ class BridgeViewModel(
     }
 
     fun setTargetIp(ip: String) {
-        _config.update { it.copy(transport = it.transport.copy(targetIp = ip)) }
-        prefs.targetIp = ip
+        val trimmed = ip.trim()
+        _config.update { it.copy(transport = it.transport.copy(targetIp = trimmed)) }
+        prefs.targetIp = trimmed
         if (prefs.isPaired) prefs.isPaired = false
-        // BUG-128 FIX: a new target IP must re-pair immediately if the service is running.
-        triggerRepair()
+        // BUG-128 FIX: a new target IP must re-pair if the service is running.
+        // BUG-147 FIX: the Settings field calls this on every keystroke. Only trigger a
+        // re-pair once the value looks like a complete IPv4 address (or was just cleared),
+        // otherwise an in-progress pipeline restart happens for "1", "19", "192", … and
+        // the transport never settles.
+        if (trimmed.isEmpty() || isLikelyIpv4(trimmed)) triggerRepair()
+    }
+
+    private fun isLikelyIpv4(value: String): Boolean {
+        val octets = value.split('.')
+        if (octets.size != 4) return false
+        return octets.all { part -> part.isNotEmpty() && part.all { it.isDigit() } && part.toIntOrNull()?.let { it in 0..255 } == true }
     }
 
     fun setPort(port: Int) {

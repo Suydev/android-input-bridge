@@ -149,12 +149,6 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- Cursor Overlay Service (overlay) -->
-        <service
-            android:name="com.inputbridge.receiver.service.CursorOverlayService"
-            android:exported="false"
-            android:enabled="true" />
-
         <!-- Shizuku Provider for privileged input injection -->
         <provider
             android:name="rikka.shizuku.ShizukuProvider"

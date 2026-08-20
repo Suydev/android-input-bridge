@@ -24,7 +24,7 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
                     consumerProguardFiles("consumer-rules.pro")
                     // Library modules have no versionName/versionCode DSL; expose via BuildConfig
                     // so UI screens that display app version (e.g. AboutScreen) keep working.
-                    buildConfigField("String", "VERSION_NAME", "\"0.1.0\"")
+                    buildConfigField("String", "VERSION_NAME", "\"1.0.0\"")
                     buildConfigField("int", "VERSION_CODE", "1")
                 }
 

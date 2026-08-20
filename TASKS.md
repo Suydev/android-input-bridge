@@ -1,3 +1,21 @@
+## Session 045 — Single-APK total-failure overhaul (BUG-141 → BUG-154)
+
+- [x] Persist chosen role via new `AppRoleStore`; ModeSelectionActivity stores BRIDGE/RECEIVER (BUG-141)
+- [x] Gate BootReceivers on `AppRoleStore` so only the chosen role auto-starts (BUG-141)
+- [x] Mode activities stop the opposite role's service in onCreate (BUG-141)
+- [x] Re-point service notification PendingIntents at merged UI activities by class name (BUG-142)
+- [x] USB poll: re-enter capture once a known device gains permission; stop 3 s permission re-request spam (BUG-143)
+- [x] ACTION_REPAIR (re)starts pipeline when target IP configured but transport null (BUG-144)
+- [x] Receiver routes packets via `isInjectionAvailable()` = a11y OR Shizuku (BUG-145)
+- [x] Register `BluetoothHidTransport` in BridgeModule (BUG-146)
+- [x] `setTargetIp` re-pairs only on empty/full-IPv4 (BUG-147)
+- [x] AutoDiscovery listeners keep listening with 1000 ms backoff instead of breaking (BUG-148)
+- [x] Remove duplicate PERMISSIONS composable (BUG-149) and duplicate CursorOverlayService manifest entry (BUG-150)
+- [x] Add mipmap-anydpi-v26 launcher icons (BUG-151); feature-flag BuildConfig probe order (BUG-152)
+- [x] Drop `.debug` applicationIdSuffix (BUG-153); fix setup-screen service label (BUG-154)
+- [x] Delete dead library Applications so only `InputBridgeApplication` starts Koin
+- [ ] Real-device validation by user (Redmi 9 bridge + OnePlus Pad Go receiver) once CI-green APK is released
+
 # TASKS.md
 
 Complete checklist of all project tasks. Never delete completed tasks. Always append new ones.

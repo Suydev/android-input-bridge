@@ -66,7 +66,6 @@ class AndroidAppConventionPlugin : Plugin<Project> {
                 }
                 debug {
                     isDebuggable = true
-                    applicationIdSuffix = ".debug"
                 }
             }
             }

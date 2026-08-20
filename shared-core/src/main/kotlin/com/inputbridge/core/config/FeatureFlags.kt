@@ -55,15 +55,23 @@ object FeatureFlags {
     const val MACROS_ENABLED = false
 
     private fun isDebugBuild(): Boolean {
+        // BUG-152 FIX: single-APK merge — the app module.s BuildConfig lives in
+        // com.inputbridge (the old bridge/receiver BuildConfig namespaces still exist
+        // as libraries, but the merged app is the authoritative one). Probe it first.
         return try {
-            val buildConfigClass = Class.forName("com.inputbridge.bridge.BuildConfig")
+            val buildConfigClass = Class.forName("com.inputbridge.BuildConfig")
             buildConfigClass.getField("DEBUG").getBoolean(null)
         } catch (_: Exception) {
             try {
-                val buildConfigClass = Class.forName("com.inputbridge.receiver.BuildConfig")
+                val buildConfigClass = Class.forName("com.inputbridge.bridge.BuildConfig")
                 buildConfigClass.getField("DEBUG").getBoolean(null)
             } catch (_: Exception) {
-                false
+                try {
+                    val buildConfigClass = Class.forName("com.inputbridge.receiver.BuildConfig")
+                    buildConfigClass.getField("DEBUG").getBoolean(null)
+                } catch (_: Exception) {
+                    false
+                }
             }
         }
     }

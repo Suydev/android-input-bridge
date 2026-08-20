@@ -143,8 +143,12 @@ object AutoDiscovery {
                     // Normal timeout, continue listening
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
+                    // BUG-148 FIX: one transient socket error previously terminated the
+                    // whole discovery loop (break), so a single ICMP/network hiccup made
+                    // discovery permanently dead until service restart. Keep listening,
+                    // but back off briefly so a persistently-broken socket can't busy-loop.
                     BridgeLogger.w(TAG, "Query listen failed: ${e.message}")
-                    break
+                    kotlinx.coroutines.delay(1000)
                 }
             }
         } finally {
@@ -193,8 +197,11 @@ object AutoDiscovery {
                 } catch (_: java.net.SocketTimeoutException) {
                     // Normal timeout, continue listening
                 } catch (e: Exception) {
+                    // BUG-148 FIX: same as the query listener — a transient socket error
+                    // must not permanently kill the bridge's discovery listener.
+                    if (e is kotlinx.coroutines.CancellationException) throw e
                     BridgeLogger.w(TAG, "Socket receive failed: ${e.message}")
-                    break
+                    kotlinx.coroutines.delay(1000)
                 }
             }
         } catch (e: Exception) {

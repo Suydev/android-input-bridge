@@ -192,6 +192,18 @@ object AccessibilityCommandBus {
     /** Check whether the accessibility service is currently connected. */
     fun isServiceConnected(): Boolean = service != null
 
+    /**
+     * Whether ANY injection path is usable right now.
+     *
+     * BUG-145 FIX: the receiver previously dropped every input packet unless the
+     * accessibility service was connected. Shizuku's InputManager.injectInputEvent
+     * needs no accessibility service, so a receiver with Shizuku running + granted
+     * injected nothing (AGENTS.md §4.8: Shizuku is the PRIMARY low-latency path and
+     * dispatchGesture is the fallback — the gate must not reverse that).
+     */
+    fun isInjectionAvailable(): Boolean =
+        service != null || ShizukuInputInjector.checkAvailability()
+
     fun setScreenSize(width: Int, height: Int) {
         screenWidth  = width.toFloat()
         screenHeight = height.toFloat()

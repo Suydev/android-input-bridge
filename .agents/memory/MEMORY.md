@@ -9,3 +9,4 @@
 - [Keyboard injection needs Shizuku](keyboard-needs-shizuku.md) — receiver keyboard requires Shizuku/InputManager; AccessibilityService can't inject key events, only drive a focused EditText
 - [UDP discovery must be bidirectional](udp-discovery-bidirectional.md) — bridge must query AND receiver must answer on port 54322; one-way broadcast is dropped on real Wi-Fi (BUG-133)
 - [Bluetooth HID needs discoverable mode](bt-hid-discoverable.md) — Redmi 9 DOES support HID Device; our transport failed because it never requested ACTION_REQUEST_DISCOVERABLE (ref app proves it works)
+- [Single-APK role locking + service survival](single-apk-role-lock.md) — merged APK: persisted role via AppRoleStore; PendingIntents to merged activities by name; PONG-only connected; injection gate a11y-OR-Shizuku

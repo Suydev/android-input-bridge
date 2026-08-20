@@ -28,6 +28,7 @@ import com.inputbridge.bridge.ui.BridgeRoute
 import com.inputbridge.bridge.ui.screens.*
 import com.inputbridge.bridge.ui.theme.BridgeTheme
 import com.inputbridge.bridge.viewmodel.BridgeViewModel
+import com.inputbridge.receiver.service.ReceiverService
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -84,6 +85,12 @@ class BridgeModeActivity : ComponentActivity() {
         enableEdgeToEdge()
         applyKeepScreenOn()
         handleUsbLaunchIntent(intent)
+        // BUG-141 FIX (single-APK merge): only ONE role may run per device. If the receiver
+        // service was auto-started on this bridge phone (e.g. by boot or a previous
+        // session on the same app), stop it so it can't hold discovery port 54322
+        // and make the bridge "discover" its own device over loopback.
+        runCatching { stopService(Intent(this, ReceiverService::class.java)) }
+            .onFailure { Log.w(TAG, "Failed to stop ReceiverService: ${it.message}") }
 
         setContent {
             BridgeTheme {

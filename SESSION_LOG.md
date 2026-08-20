@@ -1,3 +1,44 @@
+## Session 045 — Single-APK reconnect overhaul: role locking, service survival, USB/injection gates (BUG-141 → BUG-154)
+**Date:** 2026-08-20
+**Agent:** opencode
+**Status:** ✅ Complete
+
+### Goals
+- Fix the merged single-APK build's total "no connections" failure: dual-role service collision, service-startup deaths, USB permission deadlock, dead re-pair path, and the a11y-only injection gate.
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|----|----------|-------------|---------|
+| BUG-141 | Critical | Both roles' services can run in one process; port 54322 race + loopback self-discovery | ✅ FIXED |
+| BUG-142 | Critical | Notifications target removed MainActivity classes (dead PendingIntent; startForeground risk) | ✅ FIXED |
+| BUG-143 | High | USB permission grant deadlock; poll re-requested permission every 3 s, never re-entered capture | ✅ FIXED |
+| BUG-144 | High | ACTION_REPAIR ignored configured IP when transport == null | ✅ FIXED |
+| BUG-145 | Critical | Receiver dropped ALL packets unless a11y connected (killed Shizuku path) | ✅ FIXED |
+| BUG-146 | High | BluetoothHidTransport unregistered in Koin → trackpad screen crash | ✅ FIXED |
+| BUG-147 | Medium | setTargetIp re-paired on every keystroke; transport never settled | ✅ FIXED |
+| BUG-148 | High | AutoDiscovery loops broke permanently on one transient socket error | ✅ FIXED |
+| BUG-149 | Medium | Duplicate PERMISSIONS composable in receiver NavHost | ✅ FIXED |
+| BUG-150 | Medium | CursorOverlayService declared twice in merged manifest | ✅ FIXED |
+| BUG-151 | Low | No launcher icon before API 33 | ✅ FIXED |
+| BUG-152 | Low | FeatureFlags probed wrong BuildConfig namespace after merge | ✅ FIXED |
+| BUG-153 | Medium | Debug builds used .debug applicationIdSuffix (two package identities) | ✅ FIXED |
+| BUG-154 | Low | Setup screen named wrong accessibility service label | ✅ FIXED |
+
+### What Was Changed
+- `shared-core/.../config/AppRoleStore.kt` (new): persisted role (BRIDGE/RECEIVER/NONE) in prefs file `app_role`.
+- `app/.../ui/ModeSelectionActivity.kt`: persists role before launching mode; both mode activities stop the opposite role's service in onCreate; duplicate PERMISSIONS composable removed from receiver NavHost.
+- Both `BootReceiver`s gate auto-start on `AppRoleStore.get(...)`.
+- `BridgeService.kt`: notification PendingIntent → `com.inputbridge.ui.bridge.BridgeModeActivity` by name; ACTION_REPAIR (re)starts pipeline when IP configured but transport null; reconnect no longer sets `transportConnected` optimistically (PONG only); USB poll re-enters capture when known device gains permission and skips re-requesting while permission-less.
+- `ReceiverService.kt`: notification PendingIntent → `com.inputbridge.ui.receiver.ReceiverModeActivity`; packet gate via `isInjectionAvailable()`.
+- `AccessibilityCommandBus.kt`: added `isInjectionAvailable()` (service OR Shizuku).
+- `BridgeModule.kt`: registered `BluetoothHidTransport`.
+- `BridgeViewModel.kt`: `setTargetIp` re-pairs only for empty/full-IPv4 values.
+- `AutoDiscovery.kt`: both listener catch-blocks keep listening + 1000 ms backoff instead of `break`.
+- `FeatureFlags.kt`: probes `com.inputbridge.BuildConfig` first.
+- `AndroidAppConventionPlugin.kt`: removed `.debug` suffix; `AndroidLibraryConventionPlugin.kt`: VERSION_NAME `1.0.0`.
+- Manifest: duplicate CursorOverlayService removed; `app-bridge` mipmap-anydpi-v26 icons added; dead library Applications (BridgeApplication/ReceiverApplication) deleted.
+
+---
 ## Session 043 — Receiver-side latency: drop Pair/Triple allocs + inline Shizuku injection (BUG-140)
 **Date:** 2026-08-16
 **Agent:** opencode

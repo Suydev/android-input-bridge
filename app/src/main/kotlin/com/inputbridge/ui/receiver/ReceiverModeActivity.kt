@@ -1,5 +1,6 @@
 package com.inputbridge.ui.receiver
 
+import android.content.Intent
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.KeyEvent
@@ -11,6 +12,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.inputbridge.bridge.service.BridgeService
 import com.inputbridge.receiver.ui.screens.*
 import com.inputbridge.receiver.ui.theme.ReceiverTheme
 import com.inputbridge.receiver.viewmodel.ReceiverViewModel
@@ -41,6 +43,11 @@ class ReceiverModeActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // BUG-141 FIX (single-APK merge): only ONE role may run per device. If the bridge
+        // service was auto-started on this receiver tablet, stop it so it can't
+        // race for discovery port 54322 or read this device's USB as the bridge.
+        runCatching { stopService(Intent(this, BridgeService::class.java)) }
+            .onFailure { android.util.Log.w("ReceiverModeActivity", "Failed to stop BridgeService: ${it.message}") }
 
         setContent {
             ReceiverTheme {
@@ -87,9 +94,6 @@ class ReceiverModeActivity : ComponentActivity() {
                             onBack    = { navController.popBackStack() },
                             viewModel = viewModel,
                         )
-                    }
-                    composable(ReceiverRoute.PERMISSIONS) {
-                        ReceiverPermissionsScreen(onBack = { navController.popBackStack() })
                     }
                 }
             }

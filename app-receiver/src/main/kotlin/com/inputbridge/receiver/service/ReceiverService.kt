@@ -16,7 +16,6 @@ import com.inputbridge.protocol.PacketToEventConverter
 import com.inputbridge.protocol.PacketType
 import com.inputbridge.receiver.R
 import com.inputbridge.receiver.prefs.ReceiverPreferences
-import com.inputbridge.receiver.ui.MainActivity
 import com.inputbridge.transport.wifi.UdpTransport
 import kotlinx.coroutines.*
 import org.koin.android.ext.android.inject
@@ -481,11 +480,16 @@ class ReceiverService : Service() {
                             return@collect
                         }
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                            if (AccessibilityCommandBus.isServiceConnected()) {
+                            // BUG-145 FIX: previously this gate required the accessibility
+                            // service to be connected, which silently dropped ALL packets —
+                            // even the Shizuku path (no a11y needed) — whenever the user had
+                            // not enabled a11y. Route through on (service connected) OR
+                            // (Shizuku available) so keyboard input works with Shizuku alone.
+                            if (AccessibilityCommandBus.isInjectionAvailable()) {
                                 AccessibilityCommandBus.post(event)
                             } else {
-                                BridgeLogger.w(TAG, "Accessibility service not connected — " +
-                                    "dropping ${event::class.simpleName}")
+                                BridgeLogger.w(TAG, "No injector available (a11y disconnected, " +
+                                    "Shizuku unavailable) — dropping ${event::class.simpleName}")
                             }
                         } else {
                             BridgeLogger.w(TAG, "Android N+ required for accessibility injection — skipping")
@@ -499,9 +503,12 @@ class ReceiverService : Service() {
     // ── Notification ──────────────────────────────────────────────────────────
 
     private fun buildNotification(status: String): Notification {
+        // BUG-142 FIX (single-APK merge): app-receiver is a library now, so the old launcher
+        // MainActivity is gone from the manifest. Open the merged app's receiver
+        // activity instead, resolved by name (the library cannot compile against :app).
         val pi = PendingIntent.getActivity(
             this, 0,
-            Intent(this, MainActivity::class.java),
+            Intent().setClassName(this, "com.inputbridge.ui.receiver.ReceiverModeActivity"),
             PendingIntent.FLAG_IMMUTABLE,
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)

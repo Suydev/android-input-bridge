@@ -8,7 +8,6 @@ import android.os.*
 import androidx.core.app.NotificationCompat
 import com.inputbridge.bridge.R
 import com.inputbridge.bridge.prefs.BridgePreferences
-import com.inputbridge.bridge.ui.MainActivity
 import com.inputbridge.core.config.TransportConfig
 import com.inputbridge.core.config.TransportMode
 import com.inputbridge.core.discovery.AutoDiscovery
@@ -202,7 +201,25 @@ class BridgeService : Service() {
                 BridgeLogger.i(TAG, "Re-pair action received — re-running handshake")
                 serviceScope.launch { rePair(transport) }
             } else {
-                BridgeLogger.d(TAG, "Re-pair ignored — pipeline not running yet")
+                // BUG-134 FIX: the manual-IP fallback was dead here. On a fresh install
+                // the pipeline never started (blank targetIp), so ACTION_REPAIR found a
+                // null transport, returned early, and the user's typed IP never connected.
+                // When an IP is configured but no transport exists yet, (re)start the
+                // pipeline so the configured IP actually takes effect.
+                val ip = prefs.targetIp
+                if (ip.isNotBlank()) {
+                    BridgeLogger.i(TAG, "Re-pair with no live transport — (re)starting pipeline to $ip")
+                    pipelineStarted.set(false)
+                    serviceScope.launch {
+                        try {
+                            startPipeline()
+                        } catch (t: Throwable) {
+                            if (t !is CancellationException) handleRuntimeFailure("bridge re-pair", t)
+                        }
+                    }
+                } else {
+                    BridgeLogger.d(TAG, "Re-pair ignored — no target IP configured yet")
+                }
             }
             return START_STICKY
         }
@@ -710,7 +727,10 @@ class BridgeService : Service() {
 
             if (transport.connect()) {
                 udpTransport = transport
-                DiagnosticsManager.update { copy(transportConnected = true, isReconnecting = false) }
+                // BUG-090 FIX: creating a local socket proves nothing about the peer —
+                // the PONG handler (startIncomingLoop) flips transportConnected once the
+                // receiver is actually reachable. Report the reconnection state only.
+                DiagnosticsManager.update { copy(isReconnecting = false) }
                 updateNotification("Reconnected → $targetIp:$port")
                 BridgeLogger.i(TAG, "Reconnect successful")
 
@@ -801,15 +821,36 @@ class BridgeService : Service() {
                         dev.getInterface(i).interfaceClass == UsbConstants.USB_CLASS_HID
                     }
                 }
-                if (device != null && device != lastKnownUsbDevice) {
-                    BridgeLogger.i(TAG, "USB poll #$pollCount found NEW HID device: " +
-                        "${device.deviceName} (vendor=${device.vendorId}, product=${device.productId})")
-                    lastKnownUsbDevice = device
-                    onUsbAttached(device)
-                } else if (device == null && pollCount % 10L == 0L) {
-                    // Log periodically when no device is found (helps diagnose blacklist issue)
-                    BridgeLogger.d(TAG, "USB poll #$pollCount: no HID device in deviceList " +
-                        "(${usbManager.deviceList.size} total)")
+                when {
+                    device == null -> {
+                        if (pollCount % 10L == 0L) {
+                            // Log periodically when no device is found (helps diagnose blacklist issue)
+                            BridgeLogger.d(TAG, "USB poll #$pollCount: no HID device in deviceList " +
+                                "(${usbManager.deviceList.size} total)")
+                        }
+                    }
+                    // A known device that STILL lacks permission: do NOT re-request here —
+                    // re-requesting every 3 s spams the permission dialog. The foreground
+                    // activity's requester handles this case (§5.6 / BUG-129).
+                    (device == lastKnownUsbDevice && !usbManager.hasPermission(device)) -> Unit
+                    // BUG-143 FIX: a known device that NOW has permission but isn.t capturing.
+                    // This is the permission-grant deadlock: the service was started (START
+                    // button / boot) before the user granted USB permission in the activity,
+                    // and onStartCommand's idempotency guard swallowed the later grant. Re-enter
+                    // capture here now that the grant finally landed.
+                    (device == lastKnownUsbDevice && usbManager.hasPermission(device)
+                            && usbCapture?.isActive != true) -> {
+                        BridgeLogger.i(TAG, "USB poll #$pollCount: permission granted for " +
+                            "${device.deviceName} — (re)starting capture")
+                        serviceScope.launch { startCapture(device) }
+                    }
+                    // A genuinely new device: track it and run the normal attach path.
+                    else -> {
+                        BridgeLogger.i(TAG, "USB poll #$pollCount found NEW HID device: " +
+                            "${device.deviceName} (vendor=${device.vendorId}, product=${device.productId})")
+                        lastKnownUsbDevice = device
+                        onUsbAttached(device)
+                    }
                 }
             }
         }
@@ -1009,9 +1050,13 @@ class BridgeService : Service() {
     // ── Notification ──────────────────────────────────────────────────────────
 
     private fun buildNotification(status: String): Notification {
+        // BUG-142 FIX (single-APK merge): the old launcher MainActivity was removed from the
+        // manifest when app-bridge became a library. The bridge's persistent
+        // notification must open the merged app's bridge activity instead, resolved
+        // by name (the library cannot compile against the :app module).
         val pi = PendingIntent.getActivity(
             this, 0,
-            Intent(this, MainActivity::class.java),
+            Intent().setClassName(this, "com.inputbridge.ui.bridge.BridgeModeActivity"),
             PendingIntent.FLAG_IMMUTABLE,
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)

@@ -63,7 +63,7 @@ fun AccessibilitySetupScreen(onBack: () -> Unit) {
             Text("Setup steps:", color = ReceiverOnSurface, fontFamily = FontFamily.Monospace)
             listOf(
                 "1. Tap 'Open Accessibility Settings' below.",
-                "2. Find 'InputBridge Input Controller' in the list.",
+                "2. Find 'Receiver Input Controller' in the list.",
                 "3. Tap it and enable the service.",
                 "4. Accept the permission dialog.",
                 "5. Return here — the status will update automatically.",
