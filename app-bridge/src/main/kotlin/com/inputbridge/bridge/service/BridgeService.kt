@@ -366,7 +366,9 @@ class BridgeService : Service() {
             launch { AutoDiscovery.startQuerying() }
             AutoDiscovery.listenForReceiver { ip, port ->
                 BridgeLogger.i(TAG, "Auto-discovered receiver: $ip:$port")
-                DiagnosticsManager.update { copy(targetIp = ip) }
+                // BUG-155 FIX: discovery proves an IP exists — the stale red
+                // "No IP configured" from startup would otherwise persist forever.
+                DiagnosticsManager.update { copy(targetIp = ip, lastError = null) }
                 if (prefs.targetIp == ip && udpTransport?.isConnected == true) return@listenForReceiver
                 prefs.targetIp = ip
                 prefs.port = port
@@ -402,8 +404,10 @@ class BridgeService : Service() {
 
         BridgeLogger.i(TAG, "UDP transport ready → $targetIp:$port")
         // BUG-090 FIX: a UDP socket opening proves only local availability.
+        // BUG-155 FIX: it does prove an IP is now configured — drop the stale
+        // "No IP configured" startup error.
         DiagnosticsManager.update {
-            copy(transportMode = "UDP", transportConnected = false, targetIp = targetIp)
+            copy(transportMode = "UDP", transportConnected = false, targetIp = targetIp, lastError = null)
         }
 
         // Register incoming-packet collector BEFORE sending any packet.
@@ -527,7 +531,8 @@ class BridgeService : Service() {
                                 DiagnosticsManager.recordLatency(latency)
                                 // BUG-090 FIX: a PONG proves the configured receiver is
                                 // reachable, unlike merely creating a local UDP socket.
-                                DiagnosticsManager.update { copy(transportConnected = true) }
+                                // BUG-155 FIX: also clear the stale "No IP configured" error.
+                                DiagnosticsManager.update { copy(transportConnected = true, lastError = null) }
                                 BridgeLogger.d(TAG, "PONG received — latency=${latency}ms")
                             }
                         }
@@ -611,6 +616,10 @@ class BridgeService : Service() {
                 }
                 BridgeLogger.i(TAG, "Pairing confirmed")
                 updateNotification("Paired — waiting for USB device…")
+                // BUG-155 FIX: accepted pairing proves the link is live — clear stale errors.
+                DiagnosticsManager.update {
+                    copy(isPaired = true, pairedPeerIp = prefs.targetIp, transportConnected = true, lastError = null)
+                }
                 true
             }
             false -> {

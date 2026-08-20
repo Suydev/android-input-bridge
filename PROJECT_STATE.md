@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 045 — BUG-141→BUG-154: single-APK role locking + service survival overhaul (2026-08-20)
+> **Last updated:** Session 046 — BUG-155: stale red "No IP configured" cleared on connect (2026-08-20)
 
 ---
 

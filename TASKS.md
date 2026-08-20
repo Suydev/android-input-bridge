@@ -1,3 +1,7 @@
+## Session 046 — Stale red "No IP configured" while connected (BUG-155)
+
+- [x] Clear `lastError` on discovery / socket-connect / PONG / pairing-accepted in BridgeService (BUG-155)
+
 ## Session 045 — Single-APK total-failure overhaul (BUG-141 → BUG-154)
 
 - [x] Persist chosen role via new `AppRoleStore`; ModeSelectionActivity stores BRIDGE/RECEIVER (BUG-141)

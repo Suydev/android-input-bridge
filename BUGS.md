@@ -2793,3 +2793,15 @@ the fix restricts the inline fast path to KeyDown only.
 **Priority**: Low
 **Status**: ✅ FIXED (Session 045)
 **Fix**: Step 2 now reads "Receiver Input Controller".
+
+## BUG-155 — Stale "No IP configured" error stays red on the bridge screen while actually connected
+
+**Description**: When the UDP pipeline starts before auto-discovery completes, the bridge sets `lastError = "No IP configured — listening for receiver broadcast"` and never clears it once the receiver is found. The user sees a persistent red error on BridgeScreen while both apps report connected.
+**Steps to reproduce**: Fresh install → Bridge Mode → START → receiver found and connected.
+**Expected behavior**: Red error disappears once an IP is configured / peer is reachable.
+**Actual behavior**: Red "No IP configured — listening for receiver broadcast" persists indefinitely even though PING/PONG flow and both UIs show connected.
+**Suspected cause**: `lastError` only got set at startup; no success path ever reset it.
+**Files involved**: `app-bridge/.../bridge/service/BridgeService.kt`
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 046)
+**Fix**: Clear `lastError` on every connection-progress event: auto-discovery finding the receiver, UDP socket connect success, PONG received, and accepted pairing.

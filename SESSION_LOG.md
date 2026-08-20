@@ -1,3 +1,20 @@
+## Session 046 — Stale "No IP configured" error persists while connected (BUG-155)
+**Date:** 2026-08-20
+**Agent:** opencode
+**Status:** ✅ Complete
+
+### Goals
+- User report: with build-175, both apps show connected but the Redmi bridge screen still shows a red "IP not configured" message.
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|----|----------|-------------|---------|
+| BUG-155 | Medium | Bridge shows stale red "No IP configured — listening for receiver broadcast" forever, even after discovery/PONG prove the peer is reachable | ✅ FIXED |
+
+### What Was Changed
+- `app-bridge/.../bridge/service/BridgeService.kt`: clear `lastError` at every connection-progress point — auto-discovery callback, UDP socket-connect success, PONG received, and accepted pairing. Reconnect path already leaves the field alone and the PONG clear now removes any stale error after a reconnect.
+
+---
 ## Session 045 — Single-APK reconnect overhaul: role locking, service survival, USB/injection gates (BUG-141 → BUG-154)
 **Date:** 2026-08-20
 **Agent:** opencode
