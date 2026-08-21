@@ -30,6 +30,10 @@ class BluetoothHidTrackpadAdapter(
         // For now, skip - HID mode uses relative moves
     }
 
+    override fun onMouseMoveRelative(dx: Float, dy: Float) {
+        hidTransport.sendInputEvent(InputEvent.MouseMove(dx, dy))
+    }
+
     override fun onButtonDown(button: Int) {
         val hidButton = when (button) {
             0 -> MouseButton.LEFT
@@ -74,6 +78,11 @@ class WifiTrackpadAdapter(
     override fun onCursorMove(x: Float, y: Float) {
         val event = InputEvent.CursorGoto(x, y)
         val packet = packetFactory.fromEvent(event) ?: return
+        udpTransport.sendDirect(packet)
+    }
+
+    override fun onMouseMoveRelative(dx: Float, dy: Float) {
+        val packet = packetFactory.fromEvent(InputEvent.MouseMove(dx, dy)) ?: return
         udpTransport.sendDirect(packet)
     }
 
