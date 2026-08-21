@@ -422,15 +422,13 @@ if (event is InputEvent.KeyUp) { shizukuInjectKeyUp(event); return true }
             // BUG-186 FIX: Shizuku-only mode — Scroll and right-click longPress need no
             // accessibility service, so handle them instead of dropping everything.
             if (ShizukuInputInjector.checkAvailability()) {
-                when (event) {
-                    is InputEvent.Scroll -> injectScroll(event, null)
-                    is InputEvent.MouseButtonDown ->
-                        if (event.button == MouseButton.RIGHT) {
-                            scope.launch(Dispatchers.IO) { ShizukuInputInjector.longPress(cursorX, cursorY) }
-                        }
-                    // Remaining subtypes genuinely require the a11y service — dropped with log below.
-                }
-                if (event !is InputEvent.Scroll && event !is InputEvent.MouseButtonDown) {
+                // if/else instead of `when`: a non-exhaustive when over a sealed type is an
+                // error in Kotlin 2.0, and `else ->` is forbidden here (AGENTS.md §4.2).
+                if (event is InputEvent.Scroll) {
+                    injectScroll(event, null)
+                } else if (event is InputEvent.MouseButtonDown && event.button == MouseButton.RIGHT) {
+                    scope.launch(Dispatchers.IO) { ShizukuInputInjector.longPress(cursorX, cursorY) }
+                } else {
                     BridgeLogger.w(TAG, "Event dropped — Shizuku-only mode cannot inject: $event")
                 }
             } else {
