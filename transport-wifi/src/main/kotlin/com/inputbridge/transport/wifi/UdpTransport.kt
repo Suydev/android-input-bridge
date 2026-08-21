@@ -138,6 +138,7 @@ class UdpTransport(
             // some OEM kernels; that is acceptable.
             runCatching { sock.sendBufferSize    = SOCKET_BUFFER_BYTES }
             runCatching { sock.receiveBufferSize = SOCKET_BUFFER_BYTES }
+            runCatching { sock.sendBufferSize = SOCKET_BUFFER_BYTES } // BUG-191
             runCatching { sock.trafficClass      = TRAFFIC_CLASS_LOWDELAY }
             socket = sock
             // BUG-087 FIX: disconnect closes its queues. Every new connection gets

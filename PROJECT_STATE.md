@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 055 — BUG-190: live '● Key/Mouse/Click' confirmation line on the bridge screen
+> **Last updated:** Session 056 — BUG-191: WiFi high-perf + wake locks for low latency; missed BUG-183 bridge guard applied
 
 ---
 

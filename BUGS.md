@@ -3185,3 +3185,17 @@ them throttled to ~8 Hz with a human-readable description ("Key KEYCODE_A", "Mou
 **Files involved**: `diagnostics/.../DiagnosticsData.kt`, `app-bridge/.../BridgeService.kt`,
 `app-bridge/.../ui/screens/BridgeScreen.kt`.
 **Priority**: Medium **Status**: ✅ FIXED (Session 055)
+
+## BUG-191 — Input latency: WiFi power-save bursts + CPU suspend + small socket buffers
+**Description**: On the hotspot link, WiFi power-save mode adds 30–100 ms bursts; CPU can suspend
+between packets (idle→first-input spike); only the socket receive buffer was enlarged.
+**Fix**: Both services now hold a WIFI_MODE_FULL_HIGH_PERF WifiLock + PARTIAL_WAKE_LOCK for their
+whole lifetime (acquired in onCreate, released in onDestroy); UdpTransport also sets sendBufferSize.
+**Files involved**: both services, `transport-wifi/.../UdpTransport.kt`.
+**Priority**: High **Status**: ✅ FIXED (Session 056)
+
+## BUG-183a — BridgeService was missing the BUG-183 notification guard
+**Description**: The Session 050 patch script died before applying the isDestroyed guard to
+BridgeService (only ReceiverService got it), leaving a possible orphaned bridge notification.
+**Fix**: Applied the missed field/onDestroy/updateNotification guard.
+**Priority**: Medium **Status**: ✅ FIXED (Session 056)

@@ -95,6 +95,7 @@ class BridgeService : Service() {
      * on every poll cycle.
      */
     @Volatile private var lastKnownUsbDevice: UsbDevice? = null
+    @Volatile private var isDestroyed = false // BUG-183: suppress notify() after teardown
 
     /** Timestamp when the last PING was sent. */
     @Volatile private var lastPingSentAtMs = 0L
@@ -205,6 +206,8 @@ class BridgeService : Service() {
         // BUG-187 FIX: framework-level capture runs unconditionally — it needs NO USB
         // permission because Android's own input stack already owns the dongle.
         startFrameworkCapture()
+        // BUG-191: kill WiFi power-save + CPU suspend for the whole service lifetime
+        acquireLatencyLocks()
         DiagnosticsManager.update { copy(bridgeServiceRunning = true) }
         BridgeLogger.i(TAG, "BridgeService created")
     }
@@ -278,6 +281,8 @@ class BridgeService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        isDestroyed = true
+        releaseLatencyLocks()
         unregisterUsbReceiver()
 
         // 1. Cancel tracked jobs
@@ -965,6 +970,34 @@ val neverPonged = lastPong == 0L && lastPing > 0L && (now - lastPing) > PONG_TIM
         BridgeLogger.i(TAG, "USB permission requested for ${device.deviceName}")
     }
 
+
+    // ── BUG-191: latency locks ────────────────────────────────────────────────
+    // WiFi power-save is the single biggest latency source on a hotspot link
+    // (30–100 ms bursts); WIFI_MODE_FULL_HIGH_PERF disables it. A partial wake
+    // lock stops CPU suspend between packets (idle→first-input spike).
+    private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
+
+    private fun acquireLatencyLocks() {
+        runCatching {
+            val wm = applicationContext.getSystemService(android.content.Context.WIFI_SERVICE)
+                as android.net.wifi.WifiManager
+            wifiLock = wm.createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+                "InputBridge:wifi").apply { setReferenceCounted(false); acquire() }
+        }
+        runCatching {
+            val pm = getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+            wakeLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK,
+                "InputBridge:cpu").apply { setReferenceCounted(false); acquire() }
+        }
+        BridgeLogger.i(TAG, "Latency locks acquired (wifi high-perf + cpu)")
+    }
+
+    private fun releaseLatencyLocks() {
+        runCatching { wifiLock?.release() }; wifiLock = null
+        runCatching { wakeLock?.release() }; wakeLock = null
+    }
+
     /**
      * BUG-187: collect input events captured by the Android framework (hardware keyboard
      * keys + mouse moves/clicks/scroll delivered to BridgeModeActivity) and feed them
@@ -1217,6 +1250,7 @@ val neverPonged = lastPong == 0L && lastPing > 0L && (now - lastPing) > PONG_TIM
     }
 
     private fun updateNotification(status: String) {
+        if (isDestroyed) return // BUG-183
         val mgr = getSystemService(NOTIFICATION_SERVICE) as? NotificationManager ?: return
         mgr.notify(NOTIFICATION_ID, buildNotification(status))
     }

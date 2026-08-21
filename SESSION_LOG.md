@@ -1,3 +1,19 @@
+## Session 056 — Latency: WiFi high-perf lock, wake lock, send buffer (BUG-191)
+**Date:** 2026-08-21
+**Agent:** opencode
+**Status:** ✅ Complete
+
+### Goals
+- User: 'now fix latency issue'.
+
+### What Was Changed
+- Both services: WIFI_MODE_FULL_HIGH_PERF WifiLock + PARTIAL_WAKE_LOCK for service lifetime.
+- UdpTransport: sendBufferSize bumped alongside receiveBufferSize.
+- Regression found & fixed: BridgeService never received the Session 050 BUG-183 notification
+  guard (patch script had died early) — applied now.
+
+---
+
 ## Session 055 — Live input-captured confirmation (BUG-190)
 **Date:** 2026-08-21
 **Agent:** opencode
