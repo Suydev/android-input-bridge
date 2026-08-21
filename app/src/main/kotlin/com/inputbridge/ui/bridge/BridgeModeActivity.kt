@@ -90,6 +90,7 @@ class BridgeModeActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         applyKeepScreenOn()
+        requestBatteryOptimizationExemption()
         handleUsbLaunchIntent(intent)
         // BUG-141 FIX (single-APK merge): only ONE role may run per device. If the receiver
         // service was auto-started on this bridge phone (e.g. by boot or a previous
@@ -250,6 +251,25 @@ class BridgeModeActivity : ComponentActivity() {
                 else FrameworkInputBus.emit(InputEvent.MouseButtonUp(b))
             }
             bits = bits shr 1; id++
+        }
+    }
+
+    /**
+     * BUG-188: OEM battery managers (OxygenOS/MIUI) kill foreground services when the
+     * user swipes the app away. Ask once for the battery-optimization exemption so the
+     * receiver/bridge keeps running after exit.
+     */
+    private fun requestBatteryOptimizationExemption() {
+        runCatching {
+            val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                startActivity(
+                    android.content.Intent(
+                        android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                        android.net.Uri.parse("package:$packageName"),
+                    )
+                )
+            }
         }
     }
 

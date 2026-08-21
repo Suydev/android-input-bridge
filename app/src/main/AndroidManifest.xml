@@ -46,6 +46,9 @@
     <!-- Notifications -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- BUG-188: let the user exempt us from OEM battery killing so services survive app exit -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <!-- Cursor dot overlay. Required by CursorOverlayService. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 

@@ -49,6 +49,19 @@ class ReceiverModeActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // BUG-188: OEM battery managers kill the foreground service on swipe-away;
+        // request the exemption so the receiver survives exiting the app.
+        runCatching {
+            val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                startActivity(
+                    android.content.Intent(
+                        android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                        android.net.Uri.parse("package:$packageName"),
+                    )
+                )
+            }
+        }
         // BUG-141 FIX (single-APK merge): only ONE role may run per device. If the bridge
         // service was auto-started on this receiver tablet, stop it so it can't
         // race for discovery port 54322 or read this device's USB as the bridge.

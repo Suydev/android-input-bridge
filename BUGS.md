@@ -3152,3 +3152,15 @@ Raw UsbInputCapture remains as the fallback/complement when USB permission IS gr
 **Files involved**: `input-capture/.../FrameworkInputBus.kt`, `app/.../ui/bridge/BridgeModeActivity.kt`,
 `app-bridge/.../service/BridgeService.kt`.
 **Priority**: Critical **Status**: ✅ FIXED (Session 052)
+
+
+## BUG-188 — Reopening the app lands on mode selector; OEM kills the receiver service on exit
+**Description**: Two related UX failures after exiting the app: (1) reopening always shows
+ModeSelectionActivity even though the receiver/bridge service is still running; (2) OxygenOS/MIUI
+battery managers kill the foreground service on swipe-away, so the receiver "shuts down".
+**Fix**: ModeSelectionActivity now auto-redirects into the persisted role's activity when that
+role's service is still running (selector only shows when it is dead, so role switching stays
+possible). Both mode activities request the battery-optimization exemption once
+(REQUEST_IGNORE_BATTERY_OPTIMIZATIONS + manifest permission) so OEMs stop killing the service.
+**Files involved**: `app/.../ModeSelectionActivity.kt`, both mode activities, `AndroidManifest.xml`.
+**Priority**: High **Status**: ✅ FIXED (Session 053)

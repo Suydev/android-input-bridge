@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 052 — BUG-187: framework-level input capture (all keys/mouse, NO USB permission) + raw USB kept as fallback
+> **Last updated:** Session 053 — BUG-188: auto-enter chosen role on reopen + battery-optimization exemption so services survive app exit
 
 ---
 

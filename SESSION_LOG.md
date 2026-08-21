@@ -1,3 +1,18 @@
+## Session 053 — Auto-enter chosen role + battery-optimization exemption (BUG-188)
+**Date:** 2026-08-21
+**Agent:** opencode
+**Status:** ✅ Complete
+
+### Goals
+- User: 'as I exit app after connection receiver shuts down and the mode screen comes again'.
+
+### What Was Changed
+- ModeSelectionActivity: auto-redirect into Bridge/Receiver activity when that role's service is running.
+- Both mode activities: request ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS once so OxygenOS/MIUI
+  stop killing the foreground service on swipe-away; manifest permission added.
+
+---
+
 ## Session 052 — Framework input capture: no USB permission needed (BUG-187)
 **Date:** 2026-08-21
 **Agent:** opencode

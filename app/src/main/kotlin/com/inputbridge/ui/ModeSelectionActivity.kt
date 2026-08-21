@@ -34,6 +34,21 @@ import androidx.compose.ui.text.style.TextAlign
 class ModeSelectionActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // BUG-188 FIX: reopening the app must NOT dump the user back on this screen
+        // while their chosen role's service is still running — jump straight into it.
+        // When the service is dead (e.g. OEM killed it), fall through to the selector
+        // so switching roles stays possible.
+        val role = AppRoleStore.get(this)
+        val svcRunning = com.inputbridge.diagnostics.DiagnosticsManager.state.value.let {
+            if (role == AppRole.BRIDGE) it.bridgeServiceRunning else it.receiverServiceRunning
+        }
+        if (role != AppRole.NONE && svcRunning) {
+            val target = if (role == AppRole.BRIDGE) BridgeModeActivity::class.java
+                         else ReceiverModeActivity::class.java
+            startActivity(android.content.Intent(this, target))
+            finish()
+            return
+        }
         enableEdgeToEdge()
         setContent {
             val lastCrash = remember { CrashLog.last(this) }
