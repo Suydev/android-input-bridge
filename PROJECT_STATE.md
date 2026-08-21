@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 050 — BUG-170→186: deep sweep (UDP replay cache, BT HID CapsLock, a11y strokes, dual-connect race, monotonic watchdogs)
+> **Last updated:** Session 051 — BUG-184→186 fixed: role-switch stop in onNewIntent, rotation-safe bridge activity, Shizuku-only scroll/right-click + NaN guards
 
 ---
 

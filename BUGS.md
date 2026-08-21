@@ -3122,13 +3122,15 @@ throw an uncaught runtime exception that reaches the process default handler.
 
 ## BUG-184 — Role switch skips opposite-service stop when mode activity is reused (onNewIntent)
 **Description**: Opposite-role stop lives only in each mode activity's `onCreate`; with `singleTask` re-delivery (`onNewIntent`) both services run racing for UDP 54322, and the bridge can latch onto its in-process receiver's announcement (loopback pairing). 🔴 OPEN
-**Proposed fix**: Move the stop into ModeSelectionActivity click handlers + both activities' `onNewIntent`.
-**Priority**: Medium **Status**: 🔴 OPEN
+**Fix**: Stop opposite service in ModeSelectionActivity click handlers + `onNewIntent` of both mode activities.
+**Priority**: Medium **Status**: ✅ FIXED (Session 051)
 
 ## BUG-185 — Rotation kills Compose trackpad session; MouseTrackpadActivity is unreachable dead entry
 **Description**: `BridgeModeActivity` has no `configChanges` → rotation resets nav to WELCOME and `BridgeTrackpadScreen`'s DisposableEffect disconnects its transport mid-gesture. `MouseTrackpadActivity` is rotation-proof but nothing launches it.
-**Priority**: Medium **Status**: 🔴 OPEN
+**Fix**: Added `configChanges` to BridgeModeActivity so rotation no longer recreates it/tears down the trackpad.
+**Priority**: Medium **Status**: ✅ FIXED (Session 051)
 
 ## BUG-186 — Shizuku-only mode silently drops scroll/right-click; NaN coords unguarded; fast-path reorders vs queued events
 **Description**: With Shizuku granted but a11y disabled, `handleEvent` early-returns so Scroll/right-click (which need no service) are dropped; `coerceIn` passes NaN through to Path/MotionEvent; inline fast-path injection can reorder against commandFlow-queued events.
-**Priority**: Medium **Status**: 🔴 OPEN (needs design decision)
+**Fix**: Shizuku-only path now handles Scroll + right-click via injectScroll/longPress; NaN/Infinity coords rejected at both cursor-update sites. Fast-path reordering left as accepted trade-off.
+**Priority**: Medium **Status**: ✅ FIXED (Session 051)

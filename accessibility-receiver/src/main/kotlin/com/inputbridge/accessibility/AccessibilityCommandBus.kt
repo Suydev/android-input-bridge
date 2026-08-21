@@ -245,6 +245,8 @@ object AccessibilityCommandBus {
         // positioning latency. It only updates two floats + a thread-safe StateFlow.
         when (event) {
             is InputEvent.CursorGoto -> {
+                // BUG-186 FIX: coerceIn passes NaN through — reject non-finite coords outright
+                if (!event.x.isFinite() || !event.y.isFinite()) return
                 val newX = (event.x * screenWidth).coerceIn(0f, screenWidth - 1f)
                 val newY = (event.y * screenHeight).coerceIn(0f, screenHeight - 1f)
                 cursorX = newX
@@ -261,6 +263,8 @@ object AccessibilityCommandBus {
 
                 val newX = (cursorX + event.dx).coerceIn(0f, screenWidth - 1f)
                 val newY = (cursorY + event.dy).coerceIn(0f, screenHeight - 1f)
+                // BUG-186 FIX: a corrupted decode producing NaN/Infinity must not reach gestures
+                if (!newX.isFinite() || !newY.isFinite()) return
 
                 // If dragging, send continueStroke to keep the gesture alive
                 if (isDragging) {
@@ -379,6 +383,35 @@ if (event is InputEvent.KeyUp) { shizukuInjectKeyUp(event); return true }
         }
     }
 
+    // BUG-186 FIX: extracted so Shizuku-only mode (no accessibility service) can still scroll;
+    // svc is nullable because the Shizuku-only early path calls this without a service.
+    private fun injectScroll(event: InputEvent.Scroll, svc: InputBridgeAccessibilityService?) {
+        val scrollDx = event.dx * SCROLL_PIXEL_MULTIPLIER
+        val scrollDy = event.dy * SCROLL_PIXEL_MULTIPLIER
+        BridgeLogger.d(TAG, "Scroll: dx=${event.dx} dy=${event.dy} " +
+            "→ swipe(${cursorX.toInt()},${cursorY.toInt()} → " +
+            "${(cursorX - scrollDx).toInt()},${(cursorY - scrollDy).toInt()})")
+        if (ShizukuInputInjector.checkAvailability()) {
+            scope.launch(Dispatchers.IO) {
+                ShizukuInputInjector.swipe(
+                    x1 = cursorX,
+                    y1 = cursorY,
+                    x2 = (cursorX - scrollDx).coerceIn(0f, screenWidth - 1f),
+                    y2 = (cursorY - scrollDy).coerceIn(0f, screenHeight - 1f),
+                    durationMs = SCROLL_DURATION_MS,
+                )
+            }
+        } else {
+            svc?.swipe(
+                x1 = cursorX,
+                y1 = cursorY,
+                x2 = (cursorX - scrollDx).coerceIn(0f, screenWidth - 1f),
+                y2 = (cursorY - scrollDy).coerceIn(0f, screenHeight - 1f),
+                durationMs = SCROLL_DURATION_MS,
+            )
+        }
+    }
+
     // BUG-140 FIX: Shizuku `swipe`/`longPress` are SUSPEND functions (they must run inside a
     // coroutine), so they are intentionally NOT fast-pathed inline. Scroll and right-click keep
     // the commandFlow → Main → IO path below. Only `injectKeyEvent` (a plain binder call) is
@@ -386,7 +419,23 @@ if (event is InputEvent.KeyUp) { shizukuInjectKeyUp(event); return true }
 
     private fun handleEvent(event: InputEvent) {
         val svc = service ?: run {
-            BridgeLogger.w(TAG, "Event dropped — accessibility service not connected: $event")
+            // BUG-186 FIX: Shizuku-only mode — Scroll and right-click longPress need no
+            // accessibility service, so handle them instead of dropping everything.
+            if (ShizukuInputInjector.checkAvailability()) {
+                when (event) {
+                    is InputEvent.Scroll -> injectScroll(event, null)
+                    is InputEvent.MouseButtonDown ->
+                        if (event.button == MouseButton.RIGHT) {
+                            scope.launch(Dispatchers.IO) { ShizukuInputInjector.longPress(cursorX, cursorY) }
+                        }
+                    // Remaining subtypes genuinely require the a11y service — dropped with log below.
+                }
+                if (event !is InputEvent.Scroll && event !is InputEvent.MouseButtonDown) {
+                    BridgeLogger.w(TAG, "Event dropped — Shizuku-only mode cannot inject: $event")
+                }
+            } else {
+                BridgeLogger.w(TAG, "Event dropped — accessibility service not connected: $event")
+            }
             return
         }
 
@@ -453,32 +502,7 @@ if (event is InputEvent.KeyUp) { shizukuInjectKeyUp(event); return true }
             }
 
             // ── Scroll ────────────────────────────────────────────────────────
-            is InputEvent.Scroll -> {
-                val scrollDx = event.dx * SCROLL_PIXEL_MULTIPLIER
-                val scrollDy = event.dy * SCROLL_PIXEL_MULTIPLIER
-                BridgeLogger.d(TAG, "Scroll: dx=${event.dx} dy=${event.dy} " +
-                    "→ swipe(${cursorX.toInt()},${cursorY.toInt()} → " +
-                    "${(cursorX - scrollDx).toInt()},${(cursorY - scrollDy).toInt()})")
-                if (ShizukuInputInjector.checkAvailability()) {
-                    scope.launch(Dispatchers.IO) {
-                        ShizukuInputInjector.swipe(
-                            x1 = cursorX,
-                            y1 = cursorY,
-                            x2 = (cursorX - scrollDx).coerceIn(0f, screenWidth - 1f),
-                            y2 = (cursorY - scrollDy).coerceIn(0f, screenHeight - 1f),
-                            durationMs = SCROLL_DURATION_MS,
-                        )
-                    }
-                } else {
-                    svc.swipe(
-                        x1 = cursorX,
-                        y1 = cursorY,
-                        x2 = (cursorX - scrollDx).coerceIn(0f, screenWidth - 1f),
-                        y2 = (cursorY - scrollDy).coerceIn(0f, screenHeight - 1f),
-                        durationMs = SCROLL_DURATION_MS,
-                    )
-                }
-            }
+            is InputEvent.Scroll -> injectScroll(event, svc)
 
             // ── Keyboard ──────────────────────────────────────────────────────
             is InputEvent.KeyDown -> {

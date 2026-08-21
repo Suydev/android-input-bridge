@@ -45,10 +45,16 @@ class ModeSelectionActivity : ComponentActivity() {
                     // without this, both BridgeService and ReceiverService could run
                     // in the same process and collide on discovery port 54322).
                     AppRoleStore.set(this, AppRole.BRIDGE)
+                    // BUG-184 FIX: stop the opposite role NOW — onCreate of the target activity
+                    // is skipped on singleTask re-delivery, which let both services race for
+                    // discovery port 54322 and let the bridge pair with its own receiver.
+                    runCatching { stopService(Intent(this, com.inputbridge.receiver.service.ReceiverService::class.java)) }
                     startActivity(Intent(this, BridgeModeActivity::class.java))
                 },
                 onReceiverClick = {
                     AppRoleStore.set(this, AppRole.RECEIVER)
+                    // BUG-184 FIX: see onBridgeClick — stop the opposite role immediately.
+                    runCatching { stopService(Intent(this, com.inputbridge.bridge.service.BridgeService::class.java)) }
                     startActivity(Intent(this, ReceiverModeActivity::class.java))
                 },
             )

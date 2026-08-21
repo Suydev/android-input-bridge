@@ -164,6 +164,8 @@ class BridgeModeActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        // BUG-184 FIX: singleTask re-delivery skips onCreate — keep the opposite role stopped
+        runCatching { stopService(Intent(this, com.inputbridge.receiver.service.ReceiverService::class.java)) }
         handleUsbLaunchIntent(intent)
     }
 

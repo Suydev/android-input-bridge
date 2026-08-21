@@ -40,6 +40,12 @@ class ReceiverModeActivity : ComponentActivity() {
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // BUG-184 FIX: singleTask re-delivery skips onCreate — keep the opposite role stopped
+        runCatching { stopService(Intent(this, com.inputbridge.bridge.service.BridgeService::class.java)) }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

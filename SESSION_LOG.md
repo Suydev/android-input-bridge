@@ -1,3 +1,24 @@
+## Session 051 — Fix the three open design bugs (BUG-184 → BUG-186)
+**Date:** 2026-08-21
+**Agent:** opencode
+**Status:** ✅ Complete
+
+### Goals
+- User approved tackling BUG-184 (role-switch onNewIntent gap), BUG-185 (rotation kills Compose trackpad),
+  BUG-186 (Shizuku-only drops scroll/right-click; NaN coords).
+
+### What Was Changed
+- `ModeSelectionActivity.kt`: stop the opposite role's service in BOTH click handlers before startActivity.
+- `BridgeModeActivity.kt` / `ReceiverModeActivity.kt`: onNewIntent also stops the opposite role's service
+  (singleTask re-delivery skips onCreate — this was the race window).
+- `AndroidManifest.xml`: BridgeModeActivity now declares configChanges so rotation no longer resets nav
+  to WELCOME or disconnects the trackpad transport mid-gesture.
+- `AccessibilityCommandBus.kt`: scroll handling extracted into `injectScroll(event, svc?)`; Shizuku-only
+  mode (a11y disabled) now handles Scroll + right-click longPress instead of dropping all events;
+  non-finite coordinates rejected at both cursor-update sites (coerceIn passes NaN through).
+
+---
+
 ## Session 050 — Deep sweep: transports, a11y, cross-cutting (BUG-170 → BUG-186)
 **Date:** 2026-08-21
 **Agent:** opencode
