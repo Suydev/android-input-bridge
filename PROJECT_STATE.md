@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 053 — BUG-188: auto-enter chosen role on reopen + battery-optimization exemption so services survive app exit
+> **Last updated:** Session 054 — BUG-189: framework input events now drive the bridge status UI (MIUI hides dongles from UsbManager)
 
 ---
 

@@ -1,3 +1,19 @@
+## Session 054 — Framework capture reflects in UI status (BUG-189)
+**Date:** 2026-08-21
+**Agent:** opencode
+**Status:** ✅ Complete
+
+### Goals
+- User: 'USB permission alone will not give Redmi 9 USB access — it will show nothing connected only always.'
+- Confirmed: MIUI deny-lists boot-HID dongles from UsbManager. Framework capture (BUG-187) works
+  regardless, but the UI kept saying 'No USB device'.
+
+### What Was Changed
+- BridgeService.startFrameworkCapture: first received event now flips diagnostics to
+  usbDeviceConnected=true / usbDeviceName='HID (framework)' / inputCaptureActive=true.
+
+---
+
 ## Session 053 — Auto-enter chosen role + battery-optimization exemption (BUG-188)
 **Date:** 2026-08-21
 **Agent:** opencode

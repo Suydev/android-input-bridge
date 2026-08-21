@@ -3164,3 +3164,14 @@ possible). Both mode activities request the battery-optimization exemption once
 (REQUEST_IGNORE_BATTERY_OPTIMIZATIONS + manifest permission) so OEMs stop killing the service.
 **Files involved**: `app/.../ModeSelectionActivity.kt`, both mode activities, `AndroidManifest.xml`.
 **Priority**: High **Status**: ✅ FIXED (Session 053)
+
+## BUG-189 — MIUI hides boot-HID dongles from UsbManager; bridge UI shows "No USB device" forever
+**Description**: AOSP's UsbHostManager deny-lists HID boot keyboards/mice from app enumeration on
+some builds; on the Redmi 9 (MIUI) `UsbManager.deviceList` never shows the combo dongle, so the raw
+USB path can't see it and the UI permanently reports no device — even though build-184's framework
+capture path receives all input fine.
+**Fix**: When the first framework input event arrives, mark diagnostics
+(usbDeviceConnected=true, usbDeviceName="HID (framework)", inputCaptureActive=true) so the UI
+reflects reality. Raw-USB enumeration remains best-effort only.
+**Files involved**: `app-bridge/.../BridgeService.kt` (startFrameworkCapture).
+**Priority**: High **Status**: ✅ FIXED (Session 054)

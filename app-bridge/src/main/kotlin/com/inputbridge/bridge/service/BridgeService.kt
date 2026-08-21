@@ -977,8 +977,20 @@ val neverPonged = lastPong == 0L && lastPing > 0L && (now - lastPing) > PONG_TIM
             BridgeLogger.i(TAG, "Framework input capture active (no USB permission needed)")
             val sensitivity = prefs.bridgeSensitivity
             var n = 0L
+            var statusAnnounced = false
             FrameworkInputBus.events.collect { raw ->
                 val t0 = System.nanoTime()
+                // BUG-189 FIX: MIUI hides boot-HID dongles from UsbManager, so the USB fields
+                // stay false forever even though input flows. Announce real input activity the
+                // first time a framework event arrives so the UI stops saying "No USB device".
+                if (!statusAnnounced) {
+                    statusAnnounced = true
+                    DiagnosticsManager.update {
+                        copy(usbDeviceConnected = true, usbDeviceName = "HID (framework)",
+                             inputCaptureActive = true)
+                    }
+                    BridgeLogger.i(TAG, "First framework input event — marking capture active")
+                }
                 if (udpTransport?.isConnected != true && btTransport?.isConnected != true) return@collect
                 if (prefs.pairingPin.isNotEmpty() && !prefs.isPaired) {
                     if (n <= 5L || n % 100L == 0L) BridgeLogger.d(TAG, "FW event #$n dropped — waiting for pairing")
