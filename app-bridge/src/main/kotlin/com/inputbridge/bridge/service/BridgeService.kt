@@ -978,6 +978,7 @@ val neverPonged = lastPong == 0L && lastPing > 0L && (now - lastPing) > PONG_TIM
             val sensitivity = prefs.bridgeSensitivity
             var n = 0L
             var statusAnnounced = false
+            var lastStatusMs = 0L
             FrameworkInputBus.events.collect { raw ->
                 val t0 = System.nanoTime()
                 // BUG-189 FIX: MIUI hides boot-HID dongles from UsbManager, so the USB fields
@@ -992,6 +993,12 @@ val neverPonged = lastPong == 0L && lastPing > 0L && (now - lastPing) > PONG_TIM
                     BridgeLogger.i(TAG, "First framework input event — marking capture active")
                 }
                 if (udpTransport?.isConnected != true && btTransport?.isConnected != true) return@collect
+                // BUG-190: throttled (~8 Hz) live confirmation of what was just captured
+                val nowMs = SystemClock.elapsedRealtime()
+                if (nowMs - lastStatusMs > 125L) {
+                    lastStatusMs = nowMs
+                    DiagnosticsManager.update { copy(lastInputEvent = describeInputEvent(raw), lastInputEventMs = nowMs) }
+                }
                 if (prefs.pairingPin.isNotEmpty() && !prefs.isPaired) {
                     if (n <= 5L || n % 100L == 0L) BridgeLogger.d(TAG, "FW event #$n dropped — waiting for pairing")
                     return@collect
@@ -1020,6 +1027,25 @@ val neverPonged = lastPong == 0L && lastPing > 0L && (now - lastPing) > PONG_TIM
                 lastCaptureToSendUs.set((System.nanoTime() - t0) / 1_000L)
             }
         }
+    }
+
+    /** BUG-190: short human-readable description of the most recent captured input. */
+    private fun describeInputEvent(e: com.inputbridge.core.model.InputEvent): String = when (e) {
+        is com.inputbridge.core.model.InputEvent.KeyDown ->
+            "Key ${android.view.KeyEvent.keyCodeToString(e.keyCode)}"
+        is com.inputbridge.core.model.InputEvent.KeyUp   -> ""
+        is com.inputbridge.core.model.InputEvent.MouseMove ->
+            "Mouse Δ${e.dx.toInt()},${e.dy.toInt()}"
+        is com.inputbridge.core.model.InputEvent.MouseButtonDown ->
+            when (e.button) {
+                com.inputbridge.core.model.MouseButton.LEFT    -> "Click L"
+                com.inputbridge.core.model.MouseButton.RIGHT   -> "Click R"
+                com.inputbridge.core.model.MouseButton.MIDDLE  -> "Click M"
+                else -> "Click"
+            }
+        is com.inputbridge.core.model.InputEvent.Scroll  -> "Scroll ${e.dy.toInt()}"
+        is com.inputbridge.core.model.InputEvent.TextInput -> "Text \"${e.text.take(12)}\""
+        else -> e::class.simpleName ?: "Input"
     }
 
     private suspend fun startCapture(device: UsbDevice) {

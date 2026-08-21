@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 054 — BUG-189: framework input events now drive the bridge status UI (MIUI hides dongles from UsbManager)
+> **Last updated:** Session 055 — BUG-190: live '● Key/Mouse/Click' confirmation line on the bridge screen
 
 ---
 

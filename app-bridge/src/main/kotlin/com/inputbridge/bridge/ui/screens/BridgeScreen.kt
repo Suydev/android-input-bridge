@@ -138,6 +138,15 @@ fun BridgeScreen(
                 fontSize = 12.sp, fontFamily = FontFamily.Monospace,
             )
 
+            // BUG-190: live confirmation that mouse/key input is being captured
+            if (diagnostics.lastInputEvent.isNotEmpty()) {
+                Text(
+                    "● ${diagnostics.lastInputEvent}",
+                    color = BridgePrimary,
+                    fontSize = 12.sp, fontFamily = FontFamily.Monospace,
+                )
+            }
+
             // Latency overlay (optional)
             if (config.display.showLatencyOverlay && diagnostics.transportConnected) {
                 Text(

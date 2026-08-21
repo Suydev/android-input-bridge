@@ -1,3 +1,18 @@
+## Session 055 — Live input-captured confirmation (BUG-190)
+**Date:** 2026-08-21
+**Agent:** opencode
+**Status:** ✅ Complete
+
+### Goals
+- User asked for an on-screen message confirming mouse/key capture.
+
+### What Was Changed
+- DiagnosticsData: lastInputEvent / lastInputEventMs fields.
+- BridgeService: describeInputEvent() + ~8 Hz throttled updates from framework collector.
+- BridgeScreen: green '● <event>' line (Key / Mouse Δ / Click L/R / Scroll / Text).
+
+---
+
 ## Session 054 — Framework capture reflects in UI status (BUG-189)
 **Date:** 2026-08-21
 **Agent:** opencode

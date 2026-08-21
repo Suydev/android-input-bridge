@@ -3175,3 +3175,13 @@ capture path receives all input fine.
 reflects reality. Raw-USB enumeration remains best-effort only.
 **Files involved**: `app-bridge/.../BridgeService.kt` (startFrameworkCapture).
 **Priority**: High **Status**: ✅ FIXED (Session 054)
+
+## BUG-190 — No visible confirmation that mouse/key input is being captured
+**Description**: The bridge UI showed transport/USB status but nothing told the user their physical
+input was actually being captured and forwarded — critical on MIUI where USB enumeration lies.
+**Fix**: New diagnostics fields `lastInputEvent`/`lastInputEventMs`; the framework collector updates
+them throttled to ~8 Hz with a human-readable description ("Key KEYCODE_A", "Mouse Δ3,-2",
+"Click L", "Scroll -1", "Text …"). BridgeScreen shows a live "● <event>" line while input flows.
+**Files involved**: `diagnostics/.../DiagnosticsData.kt`, `app-bridge/.../BridgeService.kt`,
+`app-bridge/.../ui/screens/BridgeScreen.kt`.
+**Priority**: Medium **Status**: ✅ FIXED (Session 055)

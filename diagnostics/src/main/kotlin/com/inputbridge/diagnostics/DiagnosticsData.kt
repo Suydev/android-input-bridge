@@ -13,6 +13,9 @@ data class DiagnosticsData(
     val usbDeviceConnected: Boolean = false,
     val usbDeviceName: String = "None",
     val inputCaptureActive: Boolean = false,
+    // BUG-190: live "input captured" confirmation for the bridge UI
+    val lastInputEvent: String = "",
+    val lastInputEventMs: Long = 0L,
 
     // ── Transport ─────────────────────────────────────────────────────────────
     val transportMode: String = "UDP",
