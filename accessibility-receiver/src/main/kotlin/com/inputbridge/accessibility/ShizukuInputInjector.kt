@@ -183,7 +183,7 @@ object ShizukuInputInjector {
         if (!checkAvailability()) return false
         return try {
             @Suppress("UNCHECKED_CAST")
-            injectMethod!!.invoke(inputManager, event, 0) as Boolean
+            injectMethod?.invoke(inputManager, event, 0) as? Boolean ?: false
         } catch (t: Throwable) {
             BridgeLogger.e(TAG, "injectInputEvent failed", t)
             false

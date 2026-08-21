@@ -212,6 +212,11 @@ private suspend fun PointerInputScope.awaitTrackpadGestureScope(
             val event = awaitPointerEvent()
             val pressed = event.changes.filter { it.pressed }
 
+            // BUG-157 FIX: in multi-window / foldable / freeform the gesture area can be
+            // momentarily 0x0; dividing by it would throw ArithmeticException and crash
+            // the receiver. Skip the frame until it has a real size.
+            if (size.width == 0f || size.height == 0f) continue
+
             // All pointers lifted
             if (pressed.isEmpty()) {
                 // Tap: no movement, no long-press → left click

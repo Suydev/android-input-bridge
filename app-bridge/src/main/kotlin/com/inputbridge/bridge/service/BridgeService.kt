@@ -68,7 +68,7 @@ class BridgeService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
 
-    private lateinit var usbManager: UsbManager
+    private var usbManager: UsbManager? = null
     // BUG-075 FIX: use Koin singleton instead of creating a fresh instance with the Service context.
     private val prefs: BridgePreferences by inject()
 
@@ -157,21 +157,37 @@ class BridgeService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        usbManager = (getSystemService(USB_SERVICE) as? UsbManager)
-            ?: throw IllegalStateException("USB service unavailable")
+        // BUG-157 FIX: a device without the USB-host feature (the merged APK installs
+        // everywhere because usb.host is required="false") must not crash in onCreate,
+        // which would skip startForeground and get the process killed. Degrade to a
+        // network/Bluetooth-only bridge instead.
+        usbManager = getSystemService(USB_SERVICE) as? UsbManager
+        if (usbManager == null) {
+            BridgeLogger.w(TAG, "USB service unavailable on this device — USB capture disabled")
+        }
         createNotificationChannel()
         // BUG-063 FIX: Android 14 (API 34) throws MissingForegroundServiceTypeException when
         // the manifest declares android:foregroundServiceType but startForeground() omits the
         // type. Pass FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE on API 29+ (when the 3-arg
         // overload was introduced); fall back to the 2-arg form only on API < 29.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                buildNotification("Starting…"),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, buildNotification("Starting…"))
+        // BUG-157 FIX: on API 33+ a denied POST_NOTIFICATIONS makes startForeground throw
+        // RemoteServiceException and the system kills the process. We MUST still call it
+        // (the 5s startForeground deadline applies regardless), but catch the failure so a
+        // missing notification permission degrades to "running without a notification" instead
+        // of a crash.
+        val notification = buildNotification("Starting…")
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            BridgeLogger.w(TAG, "startForeground failed (notification permission denied?): ${e.message}")
         }
         acquireWakeLock()
         acquireWifiLock()
@@ -781,7 +797,8 @@ class BridgeService : Service() {
 
     /** Check for HID devices already connected when the service starts. */
     private fun checkPreAttachedUsb() {
-        val allDevices = usbManager.deviceList
+        val mgr = usbManager ?: return
+        val allDevices = mgr.deviceList
         BridgeLogger.i(TAG, "checkPreAttachedUsb: UsbManager.deviceList has ${allDevices.size} device(s)")
         for ((name, dev) in allDevices) {
             val ifaceClasses = (0 until dev.interfaceCount).map { i ->
@@ -819,13 +836,14 @@ class BridgeService : Service() {
      * Only triggers on new devices not already tracked by [lastKnownUsbDevice].
      */
     private fun startUsbPolling() {
+        val mgr = usbManager ?: return
         usbPollJob = serviceScope.launch {
             var pollCount = 0L
             while (isActive) {
                 delay(USB_POLL_INTERVAL_MS)
                 pollCount++
                 if (usbCapture?.isActive == true) continue  // already capturing — skip
-                val device = usbManager.deviceList.values.firstOrNull { dev ->
+                val device = mgr.deviceList.values.firstOrNull { dev ->
                     (0 until dev.interfaceCount).any { i ->
                         dev.getInterface(i).interfaceClass == UsbConstants.USB_CLASS_HID
                     }
@@ -835,19 +853,19 @@ class BridgeService : Service() {
                         if (pollCount % 10L == 0L) {
                             // Log periodically when no device is found (helps diagnose blacklist issue)
                             BridgeLogger.d(TAG, "USB poll #$pollCount: no HID device in deviceList " +
-                                "(${usbManager.deviceList.size} total)")
+                                "(${mgr.deviceList.size} total)")
                         }
                     }
                     // A known device that STILL lacks permission: do NOT re-request here —
                     // re-requesting every 3 s spams the permission dialog. The foreground
                     // activity's requester handles this case (§5.6 / BUG-129).
-                    (device == lastKnownUsbDevice && !usbManager.hasPermission(device)) -> Unit
+                    (device == lastKnownUsbDevice && !mgr.hasPermission(device)) -> Unit
                     // BUG-143 FIX: a known device that NOW has permission but isn.t capturing.
                     // This is the permission-grant deadlock: the service was started (START
                     // button / boot) before the user granted USB permission in the activity,
                     // and onStartCommand's idempotency guard swallowed the later grant. Re-enter
                     // capture here now that the grant finally landed.
-                    (device == lastKnownUsbDevice && usbManager.hasPermission(device)
+                    (device == lastKnownUsbDevice && mgr.hasPermission(device)
                             && usbCapture?.isActive != true) -> {
                         BridgeLogger.i(TAG, "USB poll #$pollCount: permission granted for " +
                             "${device.deviceName} — (re)starting capture")
@@ -866,19 +884,20 @@ class BridgeService : Service() {
     }
 
     private fun onUsbAttached(device: UsbDevice) {
+        val mgr = usbManager ?: return
         BridgeLogger.i(TAG, "USB HID device attached: ${device.deviceName}")
         // BUG-094 fix: hardware detection is useful before permission/capture succeeds.
         // Keep it separate from inputCaptureActive so the UI never claims no device exists.
         DiagnosticsManager.update {
             copy(
                 usbDeviceConnected = true,
-                usbDeviceName = device.deviceName,
-                usbPermissionGranted = usbManager.hasPermission(device),
+                usbDeviceName = device.deviceName ?: "Unknown",
+                usbPermissionGranted = mgr.hasPermission(device),
                 inputCaptureActive = false,
             )
         }
 
-        if (usbManager.hasPermission(device)) {
+        if (mgr.hasPermission(device)) {
             serviceScope.launch { startCapture(device) }
         } else {
             requestUsbPermission(device)
@@ -907,7 +926,7 @@ class BridgeService : Service() {
             0
         }
         val pi = PendingIntent.getBroadcast(this, 0, Intent(ACTION_USB_PERMISSION), flags)
-        usbManager.requestPermission(device, pi)
+        usbManager?.requestPermission(device, pi)
         BridgeLogger.i(TAG, "USB permission requested for ${device.deviceName}")
     }
 

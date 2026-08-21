@@ -336,3 +336,14 @@ Manual hardware test (Portronics Key2 Combo) not yet performed.
   `isServiceConnected()` alone silently killed the primary Shizuku path (§4.8).
 - **Debug and release share `com.inputbridge`.** Debug builds must not use an `applicationIdSuffix` —
   permission state, boot records, and the role store would diverge between test and release installs.
+
+## Session 048 crash-hardening invariants (BUG-157)
+
+- **Android 10 USB access requires `android.permission.USB_PERMISSION` in the manifest.** `UsbManager.requestPermission()` + `claimInterface(iface, true)` (force) is correct, but without the manifest permission the grant is ineffective and `openDevice()` returns null → bridge loops on "USB device not found" on API 29.
+- **Discovery `bind(54322)` is guarded** — a BindException (re-pair / role-switch race) must never escape and kill the service; wrap and bail the coroutine instead.
+- **`usbManager` (bridge) is nullable** — the merged APK installs on non-USB-host hardware; a null must degrade to network/Bluetooth-only, never throw in onCreate (that skips startForeground and kills the process).
+- **`startForeground` is wrapped in try/catch** on both services — API 33+ with POST_NOTIFICATIONS denied throws RemoteServiceException; catching degrades to "running without a notification" instead of a process kill (the 5s deadline is still met).
+- **Receiver packet handling is wrapped** — a malformed packet is logged and dropped, never propagated to the service exception handler (which calls stopSelf()).
+- **Trackpad divides by size.width/size.height only after a 0-size guard** (multi-window/foldable 0x0 frames).
+- **Composable context as Activity / getSystemService as X casts are as? + safe-return**, never unsafe.
+- **Heavy a11y injectText runs on Dispatchers.IO**, not the Main commandFlow collector (avoids ANR on deep a11y trees / long paste).

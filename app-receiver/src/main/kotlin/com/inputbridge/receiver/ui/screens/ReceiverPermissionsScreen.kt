@@ -210,7 +210,12 @@ fun ReceiverPermissionsScreen(onBack: () -> Unit) {
                 granted     = shizukuAlive && shizukuGranted,
                 alwaysShowAction = true,
                 action = {
-                    ShizukuInputInjector.requestPermissionIfNeeded(context as android.app.Activity)
+                    val act = context as? android.app.Activity
+                    if (act == null) {
+                        BridgeLogger.w("ReceiverPermissions", "Shizuku grant requested from non-Activity context")
+                        return@action
+                    }
+                    ShizukuInputInjector.requestPermissionIfNeeded(act)
                 },
                 actionLabel = if (shizukuGranted) "Re-check" else "Grant Shizuku Permission",
             )

@@ -10,3 +10,4 @@
 - [UDP discovery must be bidirectional](udp-discovery-bidirectional.md) — bridge must query AND receiver must answer on port 54322; one-way broadcast is dropped on real Wi-Fi (BUG-133)
 - [Bluetooth HID needs discoverable mode](bt-hid-discoverable.md) — Redmi 9 DOES support HID Device; our transport failed because it never requested ACTION_REQUEST_DISCOVERABLE (ref app proves it works)
 - [Single-APK role locking + service survival](single-apk-role-lock.md) — merged APK: persisted role via AppRoleStore; PendingIntents to merged activities by name; PONG-only connected; injection gate a11y-OR-Shizuku
+- [Android 10 USB + crash hardening](crash-hardening-android10.md) — merged APK: declare android.permission.USB_PERMISSION or openDevice() returns null on API29; guard discovery bind, nullable usbManager, wrap startForeground, wrap packet parsing

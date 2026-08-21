@@ -1,3 +1,9 @@
+## Session 048 — Crash-hardening (BUG-157)
+
+- [x] Harden all UI→code crash sources found by subagents (12 fixes) + Android-10 USB_PERMISSION
+- [x] AutoDiscovery bind guarded; BridgeService usbManager nullable; startForeground try/catch; TrackpadScreen 0-size guard; ReceiverPermissionsScreen safe cast; Shizuku injectMethod safe; ReceiverService packet try/catch; a11y injectText off Main; MouseTrackpadActivity safe finish
+- [x] Manifest: add android.permission.USB_PERMISSION so openDevice works on Android 10
+
 ## Session 047 — Persistent crash capture (BUG-156)
 
 - [x] Add CrashLog persistence + launcher "Last crash" display so crashes can be reported without ADB

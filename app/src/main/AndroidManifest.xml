@@ -5,6 +5,12 @@
     <!-- USB Host: read the Portronics receiver over OTG -->
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
 
+    <!-- BUG-157 FIX: on Android 10 (API 29) UsbManager.requestPermission() only actually
+         grants openDevice() access if the app declares this permission. Without it the
+         permission dialog appears but openDevice() still returns null, so the bridge loops
+         on "USB device not found". Declaring it is what makes the Android USB host API work. -->
+    <uses-permission android:name="android.permission.USB_PERMISSION" />
+
     <!-- Network transport -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />

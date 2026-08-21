@@ -474,7 +474,16 @@ class ReceiverService : Service() {
                         }
                         lastInputSeqNo = seq
 
-                        val event = PacketToEventConverter.toInputEvent(packet)
+                        // BUG-157 FIX: a malformed/short packet or a throw inside toInputEvent
+                        // or post() must never take down the whole receiver (which would look
+                        // like "connected then crashed"). Log and drop the packet instead.
+                        val event = try {
+                            PacketToEventConverter.toInputEvent(packet)
+                        } catch (t: Throwable) {
+                            if (t is kotlinx.coroutines.CancellationException) throw t
+                            BridgeLogger.e(TAG, "Failed to parse ${packet.type}: ${t.message}")
+                            return@collect
+                        }
                         if (event == null) {
                             BridgeLogger.w(TAG, "PacketToEventConverter returned null for ${packet.type}")
                             return@collect

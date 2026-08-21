@@ -194,7 +194,7 @@ class BridgeModeActivity : ComponentActivity() {
     }
 
     private fun requestUsbPermissionFromActivity(device: UsbDevice) {
-        val usbManager = getSystemService(USB_SERVICE) as UsbManager
+        val usbManager = getSystemService(USB_SERVICE) as? UsbManager ?: return
         val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             PendingIntent.FLAG_MUTABLE
         } else {
@@ -213,13 +213,13 @@ class BridgeModeActivity : ComponentActivity() {
             @Suppress("DEPRECATION")
             intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
         } ?: return
-        val usbManager = getSystemService(USB_SERVICE) as UsbManager
+        val usbManager = getSystemService(USB_SERVICE) as? UsbManager ?: return
         if (usbManager.hasPermission(device)) startBridgeService()
         else requestUsbPermissionFromActivity(device)
     }
 
     private fun scanUsbAndStartIfNeeded() {
-        val usbManager = getSystemService(USB_SERVICE) as UsbManager
+        val usbManager = getSystemService(USB_SERVICE) as? UsbManager ?: return
         for ((name, device) in usbManager.deviceList) {
             for (i in 0 until device.interfaceCount) {
                 if (device.getInterface(i).interfaceClass == UsbConstants.USB_CLASS_HID) {

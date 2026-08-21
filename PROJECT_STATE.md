@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 047 — BUG-156: persistent on-device crash capture ("Last crash" on launcher)
+> **Last updated:** Session 048 — BUG-157: crash-hardening from UI-trace subagents + Android-10 USB_PERMISSION fix
 
 ---
 

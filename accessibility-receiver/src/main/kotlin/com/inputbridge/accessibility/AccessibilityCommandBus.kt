@@ -476,7 +476,12 @@ object AccessibilityCommandBus {
             // ── Text injection ────────────────────────────────────────────────
             is InputEvent.TextInput -> {
                 BridgeLogger.d(TAG, "TextInput: ${event.text.take(20)}…")
-                svc.injectText(event.text)
+                // BUG-157 FIX: injectText does a recursive editable-node tree walk plus
+                // ACTION_SET_TEXT / clipboard round-trips — heavy work that would block the
+                // Main thread (the commandFlow collector runs on Main) and risk an ANR on a
+                // deep a11y tree or long paste. Dispatch it to a background dispatcher.
+                val svcRef = svc
+                scope.launch(Dispatchers.IO) { svcRef.injectText(event.text) }
             }
 
             // ── Navigation ────────────────────────────────────────────────────

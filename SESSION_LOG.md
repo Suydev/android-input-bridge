@@ -1,3 +1,30 @@
+## Session 048 — Crash-hardening pass from UI-trace subagents + Android-10 USB fix (BUG-157)
+**Date:** 2026-08-20
+**Agent:** opencode
+**Status:** ✅ Complete
+
+### Goals
+- User: "fix all [crash sites the subagents found]; also USB permission doesn't grant device access on Android 10 — you need the Android USB API for that; the app will loop on 'USB device not found'."
+- Launched 3 parallel UI-trace subagents (bridge UI, receiver UI, shared/lifecycle); consolidated their findings into 12 crash/ANR fixes.
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|----|----------|-------------|---------|
+| BUG-157 | Critical | 12 crash/ANR sources found by tracing UI→code (discovery bind, USB null, divide-by-zero, casts, notification perm, packet parsing, a11y injectText, Android-10 USB_PERMISSION) | ✅ FIXED |
+
+### What Was Changed
+- `AutoDiscovery.kt`: wrap `bind(54322)` in try/catch (no crash on re-bind race).
+- `BridgeService.kt`: `usbManager` nullable; `onCreate` no longer throws; USB call-sites guard; `startForeground` wrapped (API33+ permission); `usbDeviceName ?: "Unknown"`.
+- `BridgeModeActivity.kt`: `as? UsbManager ?: return` (3 sites).
+- `MouseTrackpadActivity.kt`: `as? WindowManager ?: finish()`.
+- `app/src/main/AndroidManifest.xml`: added `android.permission.USB_PERMISSION` (Android-10 openDevice fix).
+- `TrackpadScreen.kt`: skip frame when size 0×0.
+- `ReceiverPermissionsScreen.kt`: `as? Activity ?: return`.
+- `ShizukuInputInjector.kt`: `injectMethod?.invoke(...) as? Boolean ?: false`.
+- `ReceiverService.kt`: wrap packet parsing in try/catch (drop bad packet, don't kill service).
+- `AccessibilityCommandBus.kt`: dispatch heavy `injectText` to Dispatchers.IO.
+
+---
 ## Session 047 — Persistent on-device crash capture for field diagnosis (BUG-156)
 **Date:** 2026-08-20
 **Agent:** opencode

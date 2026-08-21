@@ -234,7 +234,11 @@ class MouseTrackpadActivity : ComponentActivity() {
         }
 
         val wm = getSystemService(WINDOW_SERVICE) as? WindowManager
-            ?: throw IllegalStateException("WindowManager unavailable")
+            ?: run {
+                Log.e(TAG, "WindowManager unavailable")
+                finish()
+                return
+            }
         @Suppress("DEPRECATION")
         val metrics = DisplayMetrics()
         @Suppress("DEPRECATION")

@@ -108,10 +108,18 @@ object AutoDiscovery {
      * never received our periodic broadcast (dropped packet on the Wi-Fi stack).
      */
     suspend fun listenForQueriesAndRespond(listenPort: Int) = coroutineScope {
-        val socket = DatagramSocket(null).apply {
-            reuseAddress = true
-            soTimeout = 2000
-            bind(InetSocketAddress(DISCOVERY_PORT))
+        // BUG-157 FIX: a BindException here (port still held by a prior listener, or both
+        // roles momentarily alive) would escape the coroutine and kill the receiver service.
+        // Wrap the bind and bail out of this coroutine scope instead of crashing.
+        val socket = try {
+            DatagramSocket(null).apply {
+                reuseAddress = true
+                soTimeout = 2000
+                bind(InetSocketAddress(DISCOVERY_PORT))
+            }
+        } catch (e: Exception) {
+            BridgeLogger.e(TAG, "listenForQueriesAndRespond: failed to bind $DISCOVERY_PORT — ${e.message}")
+            return@coroutineScope
         }
         launch {
             try {
@@ -164,10 +172,18 @@ object AutoDiscovery {
      * per timeout cycle. Now uses coroutineScope + launch to close socket on cancel.
      */
     suspend fun listenForReceiver(onFound: (ip: String, port: Int) -> Unit) = coroutineScope {
-        val socket = DatagramSocket(null).apply {
-            reuseAddress = true
-            soTimeout = 3000
-            bind(InetSocketAddress(DISCOVERY_PORT))
+        // BUG-157 FIX: same as above — an unguarded BindException here (e.g. a re-pair /
+        // manual-IP flow rebinding 54322 before the previous listener socket closed) would
+        // kill the bridge service. Wrap and bail instead of crashing.
+        val socket = try {
+            DatagramSocket(null).apply {
+                reuseAddress = true
+                soTimeout = 3000
+                bind(InetSocketAddress(DISCOVERY_PORT))
+            }
+        } catch (e: Exception) {
+            BridgeLogger.e(TAG, "listenForReceiver: failed to bind $DISCOVERY_PORT — ${e.message}")
+            return@coroutineScope
         }
 
         // Close socket when coroutine is cancelled so blocking receive() unblocks

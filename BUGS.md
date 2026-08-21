@@ -2817,3 +2817,58 @@ the fix restricts the inline fast path to KeyDown only.
 **Priority**: Medium
 **Status**: ✅ FIXED (Session 047)
 **Fix**: New `CrashLog` persists the crash class/message/top stack frames with a timestamp to SharedPreferences; the crash handler saves it; ModeSelectionScreen renders "⚠ Last crash:" in red on the launcher after relaunch.
+
+## BUG-157 — Hardening pass: real crash sources found by UI-trace subagents (merged-APK)
+
+**Description**: A UI-trace audit of all the merged app's screens → services → transports surfaced a set
+of genuine runtime-crash sources that survived CI (CI only checks compilation). Field reports were
+"both connect but crash on some instance" with no on-device error (fixed separately by BUG-156).
+
+Sub-fixes (one root-cause family each):
+
+1. **Discovery `bind(54322)` unguarded (AutoDiscovery.kt `listenForQueriesAndRespond` + `listenForReceiver`).**
+   A `BindException` (port still held by a prior listener, or the re-pair/manual-IP path rebinding
+   before the old socket closed) escaped the coroutine and killed the service. Fix: wrap the bind in
+   try/catch and `return@coroutineScope` instead of crashing.
+2. **Bridge `onCreate` threw `IllegalStateException("USB service unavailable")`** on devices without the
+   USB-host feature (the merged APK installs everywhere because `usb.host` is `required="false"`),
+   which skipped `startForeground` and got the process killed. Fix: `usbManager` is now nullable and
+   degrades to a network/Bluetooth-only bridge; USB call-sites guard with `usbManager ?: return`.
+3. **`device.deviceName` (nullable) assigned to `usbDeviceName: String`** → `copy()` threw
+   `IllegalArgumentException` on attach for devices reporting a null name. Fix: `?: "Unknown"`.
+4. **`BridgeModeActivity` used `getSystemService(USB_SERVICE) as UsbManager`** (3 sites) →
+   `ClassCastException` on devices without USB host. Fix: `as? UsbManager ?: return`.
+5. **`startForeground` threw on API 33+ when `POST_NOTIFICATIONS` not granted** (boot path starts the
+   service before the permission prompt) → `RemoteServiceException` killed the process. Fix: wrap
+   `startForeground` in try/catch (the 5s deadline is still met; a denied notification degrades to
+   "running without a notification" instead of a crash) in both services.
+6. **TrackpadScreen divided by `size.width`/`size.height`** → `ArithmeticException` when the gesture
+   area was momentarily 0×0 (multi-window/foldable). Fix: skip the frame if either is 0.
+7. **`ReceiverPermissionsScreen` used `context as android.app.Activity`** → `ClassCastException` when
+   the composable context wasn't an Activity. Fix: `as? Activity ?: return`.
+8. **`ShizukuInputInjector.injectInputEvent` used `injectMethod!!`** → NPE if the binder died between
+   the availability check and the invoke. Fix: `injectMethod?.invoke(...) as? Boolean ?: false`.
+9. **Receiver dropped a whole packet's processing without a try/catch** — any throw in
+   `toInputEvent`/`post` (e.g. a malformed packet) propagated to the service exception handler and
+   called `stopSelf()` (looked like "connected then crashed"). Fix: wrap parsing in try/catch and drop
+   the packet.
+10. **`MouseTrackpadActivity` threw `IllegalStateException("WindowManager unavailable")`** if
+    `getSystemService(WINDOW_SERVICE)` was null. Fix: `as? WindowManager ?: run { finish(); return }`.
+11. **Heavy `a11y` `injectText` ran on `Dispatchers.Main`** (the commandFlow collector) → ANR/freeze on
+    a deep a11y tree or long paste. Fix: dispatch `injectText` to `Dispatchers.IO`.
+12. **Android 10 USB access (user-reported):** `UsbManager.requestPermission()` does not actually grant
+    `openDevice()` on API 29 unless the app declares `android.permission.USB_PERMISSION`. Without it the
+    permission dialog appears but `openDevice()` still returns null → the bridge looped on "USB device
+    not found". Fix: added `<uses-permission android:name="android.permission.USB_PERMISSION" />` to the
+    merged manifest (the existing `claimInterface(iface, true)` force-claim was already correct).
+
+**Files involved**: `shared-core/.../discovery/AutoDiscovery.kt`, `app-bridge/.../bridge/service/BridgeService.kt`,
+`app/src/main/kotlin/com/inputbridge/ui/bridge/BridgeModeActivity.kt`, `app-bridge/.../ui/MouseTrackpadActivity.kt`,
+`app/src/main/AndroidManifest.xml`, `app-receiver/.../receiver/ui/screens/TrackpadScreen.kt`,
+`app-receiver/.../receiver/ui/screens/ReceiverPermissionsScreen.kt`,
+`accessibility-receiver/.../accessibility/ShizukuInputInjector.kt`, `app-receiver/.../receiver/service/ReceiverService.kt`,
+`accessibility-receiver/.../accessibility/AccessibilityCommandBus.kt`.
+**Priority**: Critical (each is a real crash/ANR in the field)
+**Status**: ✅ FIXED (Session 048)
+**Fix**: See the 12 sub-fixes above — each wrapped, guarded, or made nullable so no code path can
+throw an uncaught runtime exception that reaches the process default handler.
