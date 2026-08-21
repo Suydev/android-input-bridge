@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 057 — BUG-192: real trackpad gestures (tap-to-click, 2-finger scroll/right-click) + relative mouse axes
+> **Last updated:** Session 058 — BUG-193: broadened physical-mouse source detection + pointer-capture recovery on focus change
 
 ---
 

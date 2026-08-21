@@ -3212,3 +3212,14 @@ sendDirect/HID); captured-pointer path now prefers AXIS_RELATIVE_X/Y.
 **Files involved**: `app-bridge/.../PointerCaptureTrackpadView.kt`, `.../TrackpadTransportAdapters.kt`,
 `.../screens/BridgeTrackpadScreen.kt`.
 **Priority**: High **Status**: ✅ FIXED (Session 057)
+
+## BUG-193 — Physical mouse dropped on dongles reporting non-MOUSE pointer sources
+**Description**: The bridge only treated `SOURCE_MOUSE`/generic pointer events as mouse; some
+dongle+MIUI combinations report `SOURCE_TOUCHPAD` or vendor pointer sources, silently dropping
+every mouse move/click. Also, pointer capture was lost after focus changes (dialogs, trackpad
+screen release) and never re-acquired until next onResume.
+**Fix**: Broadened detection to ANY `SOURCE_CLASS_POINTER` device that is not the touchscreen
+(moves, scrolls, buttons, captured-touch clicks); re-request decorView pointer capture in
+`onWindowFocusChanged(true)`.
+**Files involved**: `app/.../ui/bridge/BridgeModeActivity.kt`.
+**Priority**: High **Status**: ✅ FIXED (Session 058)

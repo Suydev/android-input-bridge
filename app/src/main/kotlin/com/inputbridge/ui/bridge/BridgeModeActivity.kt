@@ -178,6 +178,14 @@ class BridgeModeActivity : ComponentActivity() {
         super.onPause()
     }
 
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // BUG-193: focus changes (dialogs, trackpad screen releasing capture) drop the
+        // decorView capture — re-request whenever we regain focus so the physical mouse
+        // keeps sending relative deltas.
+        if (hasFocus) runCatching { window.decorView.requestPointerCapture() }
+    }
+
     private var lastHoverX = Float.NaN
     private var lastHoverY = Float.NaN
 
@@ -194,9 +202,14 @@ class BridgeModeActivity : ComponentActivity() {
         return true // consume so the phone UI does not also receive it
     }
 
-    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
-        val isMouse = event.source and InputDevice.SOURCE_CLASS_POINTER != 0 &&
+    private fun isPointerDevice(event: MotionEvent): Boolean =
+        event.source and InputDevice.SOURCE_CLASS_POINTER != 0 &&
             event.source and InputDevice.SOURCE_TOUCHSCREEN == 0
+
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        // BUG-193: some dongles/MIUI builds report SOURCE_TOUCHPAD or vendor sources;
+        // accept ANY pointer-class device that is not the built-in touchscreen.
+        val isMouse = isPointerDevice(event)
         if (!isMouse) return super.dispatchGenericMotionEvent(event)
         when (event.actionMasked) {
             MotionEvent.ACTION_SCROLL -> {
@@ -231,7 +244,10 @@ class BridgeModeActivity : ComponentActivity() {
         // Under pointer capture, mouse clicks arrive as touch events carrying a
         // buttonState. Finger touches (trackpad screen) have buttonState == 0 and
         // pass through untouched so Compose still receives them.
-        if (event.source and InputDevice.SOURCE_MOUSE != 0 && event.buttonState != 0) {
+        // BUG-193: same broadened source check as generic-motion above.
+        if (event.source and InputDevice.SOURCE_TOUCHSCREEN == 0 &&
+            event.source and InputDevice.SOURCE_CLASS_POINTER != 0 &&
+            event.buttonState != 0) {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> emitButtons(event, true)
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP     -> emitButtons(event, false)

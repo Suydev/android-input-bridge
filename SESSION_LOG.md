@@ -1,3 +1,14 @@
+## Session 058 — Robust physical-mouse detection + capture recovery (BUG-193)
+**Date:** 2026-08-21
+**Agent:** opencode
+**Status:** ✅ Complete
+
+### What Was Changed
+- BridgeModeActivity: pointer-class (non-touchscreen) sources all treated as mouse;
+  pointer capture re-requested on window focus regain.
+
+---
+
 ## Session 057 — Real trackpad gestures + UI fixes (BUG-192)
 **Date:** 2026-08-21
 **Agent:** opencode
