@@ -210,12 +210,12 @@ fun ReceiverPermissionsScreen(onBack: () -> Unit) {
                 granted     = shizukuAlive && shizukuGranted,
                 alwaysShowAction = true,
                 action = {
-                    val act = context as? android.app.Activity
-                    if (act == null) {
-                        BridgeLogger.w("ReceiverPermissions", "Shizuku grant requested from non-Activity context")
-                        return@action
+                    // BUG-157 FIX: the composable context is not always the Activity; an
+                    // unsafe cast crashed on Shizuku grant. Use a safe cast and only act
+                    // when we actually have an Activity.
+                    (context as? android.app.Activity)?.let { act ->
+                        ShizukuInputInjector.requestPermissionIfNeeded(act)
                     }
-                    ShizukuInputInjector.requestPermissionIfNeeded(act)
                 },
                 actionLabel = if (shizukuGranted) "Re-check" else "Grant Shizuku Permission",
             )

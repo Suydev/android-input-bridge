@@ -215,7 +215,7 @@ private suspend fun PointerInputScope.awaitTrackpadGestureScope(
             // BUG-157 FIX: in multi-window / foldable / freeform the gesture area can be
             // momentarily 0x0; dividing by it would throw ArithmeticException and crash
             // the receiver. Skip the frame until it has a real size.
-            if (size.width == 0f || size.height == 0f) continue
+            if (size.width == 0 || size.height == 0) continue
 
             // All pointers lifted
             if (pressed.isEmpty()) {

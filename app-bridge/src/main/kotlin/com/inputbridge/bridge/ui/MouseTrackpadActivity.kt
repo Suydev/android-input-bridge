@@ -235,7 +235,7 @@ class MouseTrackpadActivity : ComponentActivity() {
 
         val wm = getSystemService(WINDOW_SERVICE) as? WindowManager
             ?: run {
-                Log.e(TAG, "WindowManager unavailable")
+                BridgeLogger.e(TAG, "WindowManager unavailable")
                 finish()
                 return
             }
