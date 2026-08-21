@@ -766,8 +766,9 @@ class MouseTrackpadActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         handler.removeCallbacks(longPressRunnable)
-        scope.launch {
-            withContext(NonCancellable + Dispatchers.IO) {
+        runCatching {
+                    // BUG-162: send DISCONNECT synchronously before scope.cancel() drops it
+runBlocking(NonCancellable + Dispatchers.IO) {
                 runCatching { udpTransport?.send(packetFactory.makeDisconnect()) }
                 delay(50L)
                 runCatching { udpTransport?.disconnect() }

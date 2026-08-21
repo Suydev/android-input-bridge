@@ -148,9 +148,6 @@ fun BridgeTrackpadScreen(
     }
 
     // Switch between HID and WiFi mode
-    val modeSwitchText = if (useHidMode) "HID Mode" else "WiFi Mode"
-
-    var showBar by remember { mutableStateOf(true) }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         // ── Pointer Capture Trackpad View ─────────────────────────────────────
@@ -201,9 +198,11 @@ fun BridgeTrackpadScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     val btConnected = hidTransportState.value?.isConnected == true
+                                        // BUG-161: status must reflect the active transport, not either-up
+val activeConnected = if (useHidMode) btConnected else isConnected
                     Text(
-                        if (isConnected || btConnected) "Connected" else "Connecting…",
-                        color = if (isConnected || btConnected) BridgePrimary else BridgeDim,
+                        if (activeConnected) "Connected" else "Connecting…",
+                        color = if (activeConnected) BridgePrimary else BridgeDim,
                         fontSize = 11.sp, fontFamily = FontFamily.Monospace,
                     )
                     // Mode switch button

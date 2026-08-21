@@ -46,9 +46,6 @@
     <!-- Notifications -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Clipboard for text injection -->
-    <uses-permission android:name="android.permission.READ_CLIPBOARD" />
-
     <!-- Cursor dot overlay. Required by CursorOverlayService. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
@@ -77,9 +74,10 @@
         </activity>
 
         <!-- Bridge Mode Activity -->
+        <!-- BUG-169: exported=true so the system can auto-launch on USB_DEVICE_ATTACHED -->
         <activity
             android:name=".ui.bridge.BridgeModeActivity"
-            android:exported="false"
+            android:exported="true"
             android:launchMode="singleTask"
             android:screenOrientation="portrait"
             android:theme="@style/Theme.InputBridge.Bridge">

@@ -115,6 +115,8 @@ class BridgeService : Service() {
      */
     private val reconnectInProgress = AtomicBoolean(false)
 
+    private val discoveryConnecting = AtomicBoolean(false)
+
     /**
      * Hot-path latency trace: time from InputEvent emission to transport send() return
      * in microseconds. Written by the captureJob on IO thread; flushed to DiagnosticsData
@@ -389,11 +391,22 @@ class BridgeService : Service() {
                 prefs.targetIp = ip
                 prefs.port = port
                 updateNotification("Found receiver at $ip:$port — connecting…")
+                                // BUG-158: guard so repeated receiver broadcasts don't spawn parallel connects/leak sockets
+if (!discoveryConnecting.compareAndSet(false, true)) return@listenForReceiver
                 serviceScope.launch {
-                    runCatching { udpTransport?.disconnect() }
-                    udpTransport = null
-                    pipelineStarted.set(false)
-                    connectToReceiver(ip, port)
+                    try {
+                        pingJob?.cancel();         pingJob = null
+                        pongResponseJob?.cancel(); pongResponseJob = null
+                        watchdogJob?.cancel();     watchdogJob = null
+                        runCatching { udpTransport?.disconnect() }
+                        udpTransport = null
+                        lastPingSentAtMs = 0L
+                        lastPongReceivedMs = 0L
+                        pipelineStarted.set(false)
+                        connectToReceiver(ip, port)
+                    } finally {
+                        discoveryConnecting.set(false)
+                    }
                 }
             }
         }
@@ -705,8 +718,11 @@ class BridgeService : Service() {
                 delay(WATCHDOG_CHECK_MS)
                 val now = System.currentTimeMillis()
                 val lastPong = lastPongReceivedMs
-                // Only fire if we've seen at least one PONG (i.e. receiver was reachable)
-                if (lastPong > 0L && (now - lastPong) > PONG_TIMEOUT_MS) {
+                val lastPing = lastPingSentAtMs
+                val pongStale = lastPong > 0L && (now - lastPong) > PONG_TIMEOUT_MS
+                                // BUG-159: also reconnect if no PONG ever arrived (dead peer before first PONG)
+val neverPonged = lastPong == 0L && lastPing > 0L && (now - lastPing) > PONG_TIMEOUT_MS
+                if (pongStale || neverPonged) {
                     BridgeLogger.w(TAG, "Watchdog: no PONG for ${now - lastPong}ms — triggering reconnect")
                     launch { triggerReconnect() }
                     break

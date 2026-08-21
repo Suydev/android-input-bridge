@@ -2872,3 +2872,135 @@ Sub-fixes (one root-cause family each):
 **Status**: ✅ FIXED (Session 048)
 **Fix**: See the 12 sub-fixes above — each wrapped, guarded, or made nullable so no code path can
 throw an uncaught runtime exception that reaches the process default handler.
+
+## BUG-158 — Bridge spawns duplicate connects / leaks sockets on repeated discovery broadcasts
+**Description**: `AutoDiscovery.listenForReceiver`'s onFound fires ~every 3s. Each fire launched a fresh `connectToReceiver` without cancelling the prior ping/pong/watchdog jobs or disconnecting the stale `UdpTransport`, so parallel connects leaked sockets and duplicated loops.
+**Steps to reproduce**: Leave a bridge running within discovery range of a receiver; observe multiple ping loops / socket leaks over time.
+**Expected behavior**: Only one discovery-driven connect runs at a time; prior loops are cancelled first.
+**Actual behavior**: Repeated broadcasts stacked connects and leaked transports.
+**Suspected cause**: Missing guard + missing cancellation of prior jobs before reconnect.
+**Files involved**: `app-bridge/.../bridge/service/BridgeService.kt` (startAutoDiscovery onFound).
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 049)
+**Fix**: Added `discoveryConnecting` AtomicBoolean guard (early-return via `return@listenForReceiver`) and cancel prior ping/pong/watchdog jobs + disconnect stale transport before `connectToReceiver`.
+
+## BUG-159 — Watchdog never reconnects if no PONG ever arrived
+**Description**: Watchdog only fired on `lastPong > 0`. If the receiver died before the first PONG, `lastPong` stayed 0 and the bridge sat "Connected" forever with no reconnect (UDP half-open socket never flips isConnected).
+**Steps to reproduce**: Receiver crashes right after bridge `connect()`; bridge never recovers.
+**Expected behavior**: Reconnect when no PONG has ever arrived within `PONG_TIMEOUT_MS`.
+**Actual behavior**: No reconnect; stuck connected.
+**Suspected cause**: `lastPong > 0` gate ignored the never-ponged case.
+**Files involved**: `app-bridge/.../bridge/service/BridgeService.kt` (startWatchdog).
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 049)
+**Fix**: Added `neverPonged = lastPong == 0L && lastPing > 0L && (now - lastPing) > PONG_TIMEOUT_MS` to the reconnect trigger.
+
+## BUG-160 — Dead code in BridgeTrackpadScreen
+**Description**: `modeSwitchText` was declared but never read; an outer `var showBar by remember { … }` was shadowed by an inner one, making the outer dead.
+**Steps to reproduce**: Read BridgeTrackpadScreen; both declarations are unused.
+**Expected behavior**: No dead state.
+**Actual behavior**: Confusing dead variables.
+**Suspected cause**: Merge leftover.
+**Files involved**: `app-bridge/.../bridge/ui/screens/BridgeTrackpadScreen.kt`.
+**Priority**: Low
+**Status**: ✅ FIXED (Session 049)
+**Fix**: Removed `modeSwitchText` and the outer `showBar`.
+
+## BUG-161 — Bridge trackpad shows "Connected" if either transport is up
+**Description**: Connection label/dot used `isConnected || btConnected`, so in HID mode with WiFi down it still reported "Connected" just because the WiFi transport happened to be up.
+**Steps to reproduce**: Use HID mode; WiFi transport connected but BT not; UI shows Connected.
+**Expected behavior**: Status reflects the active transport (`useHidMode ? btConnected : isConnected`).
+**Actual behavior**: Shows Connected regardless of active transport.
+**Suspected cause**: OR-ing both transport states.
+**Files involved**: `app-bridge/.../bridge/ui/screens/BridgeTrackpadScreen.kt`.
+**Priority**: Low/Medium
+**Status**: ✅ FIXED (Session 049)
+**Fix**: Derived `activeConnected = if (useHidMode) btConnected else isConnected`.
+
+## BUG-162 — MouseTrackpadActivity onDestroy cancels DISCONNECT before it sends
+**Description**: `onDestroy` launched the graceful `DISCONNECT` on `scope` then immediately called `scope.cancel()`, cancelling the child coroutine before it ran — the receiver kept showing "Connected".
+**Steps to reproduce**: Close the trackpad overlay; receiver still shows Connected.
+**Expected behavior**: DISCONNECT packet sent before teardown.
+**Actual behavior**: DISCONNECT dropped; receiver stuck Connected.
+**Suspected cause**: `scope.cancel()` raced the `scope.launch`.
+**Files involved**: `app-bridge/.../bridge/ui/MouseTrackpadActivity.kt`.
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 049)
+**Fix**: Replaced `scope.launch { withContext(NonCancellable+IO){…} }` with a blocking `runBlocking(NonCancellable+IO){…}` so the packet is reliably sent.
+
+## BUG-163 — Receiver a11y service label mismatch in permissions screen
+**Description**: The permissions screen told users to find "InputBridge Input Controller", but the on-device service label is "Receiver Input Controller" (manifest `@string/accessibility_service_label_receiver`), so users couldn't find it. `AccessibilitySetupScreen` already used the correct name.
+**Steps to reproduce**: Open receiver permissions; follow the a11y instruction; service name doesn't match settings.
+**Expected behavior**: Screen names the real service label.
+**Actual behavior**: Wrong label.
+**Suspected cause**: Stale string.
+**Files involved**: `app-receiver/.../receiver/ui/screens/ReceiverPermissionsScreen.kt`.
+**Priority**: Low
+**Status**: ✅ FIXED (Session 049)
+**Fix**: Changed the instruction text to "Receiver Input Controller".
+
+## BUG-164 — ConnectionScreen shows literal "None" for accessibility mode
+**Description**: `diagnostics.accessibilityMode.ifEmpty { "ACCESSIBILITY" }` rendered "None" when the service was disabled (the default value is "None", never blank).
+**Steps to reproduce**: Disable a11y service; status shows "None".
+**Expected behavior**: Show "ACCESSIBILITY" when no real mode.
+**Actual behavior**: Shows "None".
+**Suspected cause**: `ifEmpty` doesn't catch the default "None".
+**Files involved**: `app-receiver/.../receiver/ui/screens/ConnectionScreen.kt`.
+**Priority**: Low
+**Status**: ✅ FIXED (Session 049)
+**Fix**: Fallback triggers on `isBlank() || it == "None"`.
+
+## BUG-165 — Receiver Shizuku button silently no-ops when Shizuku not running
+**Description**: `ShizukuInputInjector.requestPermissionIfNeeded()` early-returns when the binder is dead, but the button stayed labeled "Grant Shizuku Permission" — a misleading no-op for users without Shizuku installed.
+**Steps to reproduce**: With Shizuku not installed, tap the Shizuku button; nothing happens.
+**Expected behavior**: Honest label and a path to install Shizuku.
+**Actual behavior**: Silent no-op.
+**Suspected cause**: No alive-state check before the call.
+**Files involved**: `app-receiver/.../receiver/ui/screens/ReceiverPermissionsScreen.kt`.
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 049)
+**Fix**: Label now reflects state (Get Shizuku / Grant / Re-check); when not alive, send the user to Shizuku (launch intent → Play Store) with FLAG_ACTIVITY_NEW_TASK.
+
+## BUG-166 — Shizuku fast-path drops KeyUp → keys stuck down on receiver
+**Description**: `injectShizukuFastPath` only fast-pathed `KeyDown`; `KeyUp` was dropped, so the Shizuku/InputManager path injected `ACTION_DOWN` with no matching `ACTION_UP` and every typed key stayed "pressed" on the receiver.
+**Steps to reproduce**: Type via Shizuku fast-path; observe stuck modifiers/keys.
+**Expected behavior**: Both down and up injected.
+**Actual behavior**: Only down injected.
+**Suspected cause**: KeyUp excluded from fast-path.
+**Files involved**: `accessibility-receiver/.../accessibility/AccessibilityCommandBus.kt`.
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 049)
+**Fix**: Fast-path `InputEvent.KeyUp` to a new `shizukuInjectKeyUp()` injecting `KeyEvent.ACTION_UP` with the same metaState (a11y path still ignores KeyUp correctly).
+
+## BUG-167 — Held keys/buttons not released on reader exit → stuck input after disconnect/stop
+**Description**: `UsbInputCapture` readKeyboard/readMouse tracked held keys/buttons but emitted nothing on loop exit, so a key or button held at `stop()`/disconnect left the receiver with that input stuck down (no KeyUp/MouseButtonUp ever sent).
+**Steps to reproduce**: Hold a key, then disconnect/stop the bridge; receiver keeps the key down.
+**Expected behavior**: Release held inputs on exit.
+**Actual behavior**: Stuck inputs.
+**Suspected cause**: No exit-time release emission.
+**Files involved**: `input-capture/.../input/UsbInputCapture.kt`.
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 049)
+**Fix**: On reader exit, emit `KeyUp` for each held key + `ModifierStateChanged(NONE)`, and `MouseButtonUp` for each held button, via non-suspending `tryEmit` so it survives coroutine cancellation during `stop()`.
+
+## BUG-168 — Invalid READ_CLIPBOARD permission declared in manifest
+**Description**: `<uses-permission android:name="android.permission.READ_CLIPBOARD" />` is not a valid Android permission; it is silently ignored by the OS and the code never reads the clipboard.
+**Steps to reproduce**: Inspect merged manifest; permission does not exist.
+**Expected behavior**: No invalid permissions.
+**Actual behavior**: Dead permission declaration.
+**Suspected cause**: Merge leftover / copy from template.
+**Files involved**: `app/src/main/AndroidManifest.xml`.
+**Priority**: Low
+**Status**: ✅ FIXED (Session 049)
+**Fix**: Removed the declaration.
+
+## BUG-169 — BridgeModeActivity exported=false blocks USB_DEVICE_ATTACHED auto-launch
+**Description**: `BridgeModeActivity` declared an intent-filter for `android.hardware.usb.action.USB_DEVICE_ATTACHED` but was `android:exported="false"`, so the system could never start it on dongle attach on any API level — a dead filter left over from the merge.
+**Steps to reproduce**: Plug the USB HID dongle into the bridge; bridge activity does not auto-launch.
+**Expected behavior**: System launches the bridge activity on USB attach.
+**Actual behavior**: No launch.
+**Suspected cause**: Explicit `exported="false"` override.
+**Files involved**: `app/src/main/AndroidManifest.xml`.
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 049)
+**Fix**: Set `android:exported="true"` and added an explanatory comment.

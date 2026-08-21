@@ -71,7 +71,8 @@ fun ConnectionScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
-                diagnostics.accessibilityMode.ifEmpty { "ACCESSIBILITY" },
+                            // BUG-164: render ACCESSIBILITY when mode is blank or the default "None"
+diagnostics.accessibilityMode.let { if (it.isBlank() || it == "None") "ACCESSIBILITY" else it },
                 color = ReceiverDim, fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace, letterSpacing = 2.sp,
             )

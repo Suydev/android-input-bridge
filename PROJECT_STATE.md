@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 048 — BUG-157: crash-hardening from UI-trace subagents + Android-10 USB_PERMISSION fix
+> **Last updated:** Session 049 — BUG-158→169: low-priority sweep (discovery guard, watchdog, input-pipeline stuck-key fixes, manifest hygiene)
 
 ---
 

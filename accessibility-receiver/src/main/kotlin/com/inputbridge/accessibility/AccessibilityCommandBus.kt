@@ -338,16 +338,19 @@ object AccessibilityCommandBus {
 
     /**
      * Inject keyboard via Shizuku inline on the calling (receive) thread when Shizuku is available.
-     * Returns true if the event was handled (caller skips commandFlow). Only [InputEvent.KeyDown] is
-     * fast-pathed: [ShizukuInputInjector.injectKeyEvent] is a plain binder call (non-suspend), so it
-     * runs with zero coroutine dispatch on the highest-priority thread. Scroll/right-click use Shizuku
-     * SUSPEND functions and MUST run inside a coroutine, so they stay on the commandFlow → Main → IO
-     * path in [handleEvent]; left-button drag/click, text and navigation are excluded entirely (a11y
-     * gesture strokes on Main). Written as explicit `is` checks (not a sealed `when`) so it does not
-     * need an exhaustive `else ->` (AGENTS.md §4.2).
+     * Returns true if the event was handled (caller skips commandFlow). [InputEvent.KeyDown] and
+     * [InputEvent.KeyUp] are fast-pathed: [ShizukuInputInjector.injectKeyEvent] is a plain binder call
+     * (non-suspend), so it runs with zero coroutine dispatch on the highest-priority thread. Both the
+     * ACTION_DOWN and the matching ACTION_UP must be injected or the receiver keeps the key stuck down.
+     * Scroll/right-click use Shizuku SUSPEND functions and MUST run inside a coroutine, so they stay on
+     * the commandFlow → Main → IO path in [handleEvent]; left-button drag/click, text and navigation are
+     * excluded entirely (a11y gesture strokes on Main). Written as explicit `is` checks (not a sealed
+     * `when`) so it does not need an exhaustive `else ->` (AGENTS.md §4.2).
      */
     private fun injectShizukuFastPath(event: InputEvent): Boolean {
         if (event is InputEvent.KeyDown) { shizukuInjectKeyDown(event); return true }
+                // BUG-166: also fast-path KeyUp or Shizuku leaves keys stuck down
+if (event is InputEvent.KeyUp) { shizukuInjectKeyUp(event); return true }
         return false
     }
 
@@ -356,6 +359,13 @@ object AccessibilityCommandBus {
         val now = SystemClock.uptimeMillis()
         val keyDown = KeyEvent(now, now, KeyEvent.ACTION_DOWN, event.keyCode, 0, metaState)
         ShizukuInputInjector.injectKeyEvent(keyDown)
+    }
+
+    private fun shizukuInjectKeyUp(event: InputEvent.KeyUp) {
+        val metaState = buildMetaState(event.modifiers)
+        val now = SystemClock.uptimeMillis()
+        val keyUp = KeyEvent(now, now, KeyEvent.ACTION_UP, event.keyCode, 0, metaState)
+        ShizukuInputInjector.injectKeyEvent(keyUp)
     }
 
     // BUG-140 FIX: Shizuku `swipe`/`longPress` are SUSPEND functions (they must run inside a

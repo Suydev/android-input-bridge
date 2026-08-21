@@ -134,7 +134,8 @@ fun ReceiverPermissionsScreen(onBack: () -> Unit) {
                 description = "REQUIRED for mouse/trackpad gesture injection. For real keyboard " +
                         "key injection, also grant Shizuku (see below) — an accessibility service " +
                         "alone cannot inject system key events, only drive a focused text field.\n\n" +
-                        "Tap below → find 'InputBridge Input Controller' → enable it.",
+                        // BUG-163: match the on-device accessibility service label
+                        "Tap below → find 'Receiver Input Controller' → enable it.",
                 granted     = a11yEnabled,
                 alwaysShowAction = true,
                 action = {
@@ -210,14 +211,38 @@ fun ReceiverPermissionsScreen(onBack: () -> Unit) {
                 granted     = shizukuAlive && shizukuGranted,
                 alwaysShowAction = true,
                 action = {
-                    // BUG-157 FIX: the composable context is not always the Activity; an
-                    // unsafe cast crashed on Shizuku grant. Use a safe cast and only act
-                    // when we actually have an Activity.
-                    (context as? android.app.Activity)?.let { act ->
-                        ShizukuInputInjector.requestPermissionIfNeeded(act)
+                    // BUG-165: if Shizuku isn't running, send the user to install it instead of a no-op
+                    if (shizukuAlive) {
+                        // BUG-157 FIX: the composable context is not always the Activity; an
+                        // unsafe cast crashed on Shizuku grant. Use a safe cast and only act
+                        // when we actually have an Activity.
+                        (context as? android.app.Activity)?.let { act ->
+                            ShizukuInputInjector.requestPermissionIfNeeded(act)
+                        }
+                    } else {
+                        // Shizuku app not installed/running: requestPermissionIfNeeded no-ops
+                        // silently, so instead send the user to Shizuku rather than a dead button.
+                        runCatching {
+                            val launch = context.packageManager
+                                .getLaunchIntentForPackage("moe.shizuku.pure")
+                            if (launch != null) {
+                                context.startActivity(launch)
+                            } else {
+                                context.startActivity(
+                                    Intent(
+                                        Intent.ACTION_VIEW,
+                                        Uri.parse("market://details?id=moe.shizuku.pure"),
+                                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                )
+                            }
+                        }
                     }
                 },
-                actionLabel = if (shizukuGranted) "Re-check" else "Grant Shizuku Permission",
+                actionLabel = when {
+                    shizukuGranted -> "Re-check"
+                    shizukuAlive   -> "Grant Shizuku Permission"
+                    else           -> "Get Shizuku"
+                },
             )
 
             HorizontalDivider(color = ReceiverDim.copy(alpha = 0.3f))

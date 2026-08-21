@@ -1,3 +1,40 @@
+## Session 049 — Low-priority bug sweep (UI-trace subagents, BUG-158 → BUG-169)
+**Date:** 2026-08-21
+**Agent:** opencode
+**Status:** ✅ Complete
+
+### Goals
+- Continue the low→high bug sweep while the user field-tests build-179 on Redmi 9 + OnePlus Pad Go.
+- Launch 5 partitioned UI-trace subagents (discovery/connection, bridge UI, receiver UI, input pipeline, manifest/config) to find/fix functional, UX, and edge-case bugs.
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|----|----------|-------------|---------|
+| BUG-158 | Medium | Duplicate discovery connects / socket leak | FIXED |
+| BUG-159 | Medium | Watchdog never reconnects if no PONG arrived | FIXED |
+| BUG-160 | Low | Dead code in BridgeTrackpadScreen | FIXED |
+| BUG-161 | Low/Med | Trackpad status ignores active transport | FIXED |
+| BUG-162 | Medium | onDestroy cancels DISCONNECT before send | FIXED |
+| BUG-163 | Low | Receiver a11y label mismatch | FIXED |
+| BUG-164 | Low | ConnectionScreen shows "None" | FIXED |
+| BUG-165 | Medium | Shizuku button silent no-op | FIXED |
+| BUG-166 | Medium | Shizuku fast-path drops KeyUp → stuck keys | FIXED |
+| BUG-167 | Medium | Held keys/buttons not released on exit | FIXED |
+| BUG-168 | Low | Invalid READ_CLIPBOARD permission | FIXED |
+| BUG-169 | Medium | BridgeModeActivity exported=false blocks USB attach | FIXED |
+
+### What Was Changed
+- `BridgeService.kt`: discovery connect guard (AtomicBoolean) + watchdog neverPonged.
+- `BridgeTrackpadScreen.kt`: removed dead code; status reflects active transport.
+- `MouseTrackpadActivity.kt`: reliable DISCONNECT on destroy (runBlocking).
+- `ReceiverPermissionsScreen.kt`: correct a11y label; honest Shizuku button + install redirect.
+- `ConnectionScreen.kt`: ACCESSIBILITY fallback for blank/"None".
+- `AccessibilityCommandBus.kt`: Shizuku KeyUp fast-path.
+- `UsbInputCapture.kt`: release held keys/buttons on reader exit.
+- `AndroidManifest.xml`: removed invalid READ_CLIPBOARD; BridgeModeActivity exported=true.
+
+---
+
 ## Session 048 — Crash-hardening pass from UI-trace subagents + Android-10 USB fix (BUG-157)
 **Date:** 2026-08-20
 **Agent:** opencode

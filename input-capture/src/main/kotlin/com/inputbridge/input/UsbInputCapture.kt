@@ -254,6 +254,18 @@ class UsbInputCapture(
             // Pad prevKeys to 6 slots so the "not in" check works correctly next iteration
             prevKeys = IntArray(6).also { dst -> currentKeys.copyInto(dst) }
         }
+        // BUG-167: release held keys/buttons on reader exit so receiver doesn't keep them stuck
+        // Release any keys still held when the reader exits so the receiver does not
+        // keep them stuck down after a disconnect or stop() (connection-drop reset).
+        for (prev in prevKeys) {
+            if (prev != 0) {
+                val androidCode = KeyMap.hidToAndroid(prev)
+                _events.tryEmit(InputEvent.KeyUp(androidCode, prev, ModifierState.NONE))
+            }
+        }
+        if (prevModifiers != ModifierState.NONE) {
+            _events.tryEmit(InputEvent.ModifierStateChanged(ModifierState.NONE))
+        }
         BridgeLogger.i(TAG, "Keyboard reader stopped after $reportCount reports")
     }
 
@@ -326,6 +338,15 @@ class UsbInputCapture(
                 }
             }
             prevButtons = buttons
+        }
+        // BUG-167: release held buttons on reader exit (see keyboard release above)
+        // Release any mouse buttons still held when the reader exits so the receiver
+        // does not keep them stuck down after a disconnect or stop() (connection-drop reset).
+        for (bit in 0..2) {
+            val mask = 1 shl bit
+            if ((prevButtons and mask) != 0) {
+                _events.tryEmit(InputEvent.MouseButtonUp(MouseButton.fromId(bit.toByte())))
+            }
         }
         BridgeLogger.i(TAG, "Mouse reader stopped after $reportCount reports")
     }
