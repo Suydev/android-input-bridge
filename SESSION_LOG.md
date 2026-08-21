@@ -1,3 +1,23 @@
+## Session 052 — Framework input capture: no USB permission needed (BUG-187)
+**Date:** 2026-08-21
+**Agent:** opencode
+**Status:** ✅ Complete
+
+### Goals
+- User: dongle plugs into Redmi 9 charging port; USB permission flow is unreliable on MIUI;
+  'I want the big advantage: no USB permission'. Android 10+ handles HID natively via standard
+  view callbacks, so capture at the framework level instead of raw USB.
+
+### What Was Changed
+- NEW FrameworkInputBus (SharedFlow<InputEvent>) in input-capture.
+- BridgeModeActivity: dispatchKeyEvent/dispatchGenericMotionEvent/dispatchTouchEvent forward ALL
+  keys + mouse move/click/scroll to the bus; pointer capture for relative deltas; BACK stays local.
+- BridgeService.startFrameworkCapture(): same pairing/sensitivity/send path as USB events;
+  starts unconditionally in onCreate; cancelled in onDestroy.
+- Raw UsbInputCapture kept as fallback when USB permission is granted (both paths coexist).
+
+---
+
 ## Session 051 — Fix the three open design bugs (BUG-184 → BUG-186)
 **Date:** 2026-08-21
 **Agent:** opencode

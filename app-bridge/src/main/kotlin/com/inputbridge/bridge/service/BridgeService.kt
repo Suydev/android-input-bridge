@@ -13,6 +13,7 @@ import com.inputbridge.core.config.TransportMode
 import com.inputbridge.core.discovery.AutoDiscovery
 import com.inputbridge.core.logging.BridgeLogger
 import com.inputbridge.diagnostics.DiagnosticsManager
+import com.inputbridge.input.FrameworkInputBus
 import com.inputbridge.input.UsbInputCapture
 import com.inputbridge.protocol.EventPacketFactory
 import com.inputbridge.protocol.PacketSerializer
@@ -81,6 +82,7 @@ class BridgeService : Service() {
     // ── Jobs ──────────────────────────────────────────────────────────────────
     private var usbCapture: UsbInputCapture? = null
     private var captureJob: Job? = null
+    private var frameworkJob: Job? = null
     private var counterFlushJob: Job? = null
     private var pingJob: Job? = null
     private var pongResponseJob: Job? = null
@@ -200,6 +202,9 @@ class BridgeService : Service() {
         // the manifest filter matched. Running this early ensures USB detection
         // is independent of network pairing, IP config, and transport startup.
         checkPreAttachedUsb()
+        // BUG-187 FIX: framework-level capture runs unconditionally — it needs NO USB
+        // permission because Android's own input stack already owns the dongle.
+        startFrameworkCapture()
         DiagnosticsManager.update { copy(bridgeServiceRunning = true) }
         BridgeLogger.i(TAG, "BridgeService created")
     }
@@ -277,6 +282,7 @@ class BridgeService : Service() {
 
         // 1. Cancel tracked jobs
         counterFlushJob?.cancel()
+        frameworkJob?.cancel(); frameworkJob = null
         captureJob?.cancel()
         pingJob?.cancel()
         pongResponseJob?.cancel()
@@ -957,6 +963,51 @@ val neverPonged = lastPong == 0L && lastPing > 0L && (now - lastPing) > PONG_TIM
         val pi = PendingIntent.getBroadcast(this, 0, Intent(ACTION_USB_PERMISSION), flags)
         usbManager?.requestPermission(device, pi)
         BridgeLogger.i(TAG, "USB permission requested for ${device.deviceName}")
+    }
+
+    /**
+     * BUG-187: collect input events captured by the Android framework (hardware keyboard
+     * keys + mouse moves/clicks/scroll delivered to BridgeModeActivity) and feed them
+     * through the same pairing gate / sensitivity / BT-or-UDP send path as raw USB events.
+     * Runs even when no USB permission was granted — that is the whole point.
+     */
+    private fun startFrameworkCapture() {
+        if (frameworkJob != null) return
+        frameworkJob = serviceScope.launch {
+            BridgeLogger.i(TAG, "Framework input capture active (no USB permission needed)")
+            val sensitivity = prefs.bridgeSensitivity
+            var n = 0L
+            FrameworkInputBus.events.collect { raw ->
+                val t0 = System.nanoTime()
+                if (udpTransport?.isConnected != true && btTransport?.isConnected != true) return@collect
+                if (prefs.pairingPin.isNotEmpty() && !prefs.isPaired) {
+                    if (n <= 5L || n % 100L == 0L) BridgeLogger.d(TAG, "FW event #$n dropped — waiting for pairing")
+                    return@collect
+                }
+                n++
+                val event: com.inputbridge.core.model.InputEvent =
+                    if (sensitivity != 1.0f && raw is com.inputbridge.core.model.InputEvent.MouseMove)
+                        raw.copy(dx = raw.dx * sensitivity, dy = raw.dy * sensitivity)
+                    else raw
+                val bt = btTransport?.takeIf { it.isConnected }
+                val sent = if (bt != null) {
+                    bt.sendInputEvent(event)
+                } else {
+                    val packet = packetFactory.fromEvent(event) ?: return@collect
+                    try {
+                        if (event is com.inputbridge.core.model.InputEvent.MouseMove ||
+                            event is com.inputbridge.core.model.InputEvent.Scroll
+                        ) udpTransport?.sendDirect(packet) ?: false
+                        else udpTransport?.send(packet) ?: false
+                    } catch (e: Exception) {
+                        BridgeLogger.w(TAG, "FW UDP send failed", e)
+                        false
+                    }
+                }
+                if (sent) DiagnosticsManager.onPacketSent() else DiagnosticsManager.onSendFailed()
+                lastCaptureToSendUs.set((System.nanoTime() - t0) / 1_000L)
+            }
+        }
     }
 
     private suspend fun startCapture(device: UsbDevice) {

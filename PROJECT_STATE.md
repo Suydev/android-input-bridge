@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 051 — BUG-184→186 fixed: role-switch stop in onNewIntent, rotation-safe bridge activity, Shizuku-only scroll/right-click + NaN guards
+> **Last updated:** Session 052 — BUG-187: framework-level input capture (all keys/mouse, NO USB permission) + raw USB kept as fallback
 
 ---
 

@@ -12,7 +12,9 @@ import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
+import android.view.InputDevice
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -23,6 +25,10 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.inputbridge.bridge.prefs.BridgePreferences
+import com.inputbridge.core.model.InputEvent
+import com.inputbridge.core.model.ModifierState
+import com.inputbridge.core.model.MouseButton
+import com.inputbridge.input.FrameworkInputBus
 import com.inputbridge.bridge.service.BridgeService
 import com.inputbridge.bridge.ui.BridgeRoute
 import com.inputbridge.bridge.ui.screens.*
@@ -160,7 +166,101 @@ class BridgeModeActivity : ComponentActivity() {
         super.onResume()
         applyKeepScreenOn()
         scanUsbAndStartIfNeeded()
+        // BUG-187: pointer capture gives relative mouse deltas (no edge-clamping).
+        // Harmless when no mouse is attached; finger touch is unaffected.
+        runCatching { window.decorView.requestPointerCapture() }
     }
+
+    override fun onPause() {
+        runCatching { window.decorView.releasePointerCapture() }
+        lastHoverX = Float.NaN; lastHoverY = Float.NaN
+        super.onPause()
+    }
+
+    private var lastHoverX = Float.NaN
+    private var lastHoverY = Float.NaN
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // BACK must keep working on the phone; HOME is never delivered anyway.
+        if (event.keyCode == KeyEvent.KEYCODE_BACK) return super.dispatchKeyEvent(event)
+        val mods = metaToModifierState(event.metaState)
+        when (event.action) {
+            KeyEvent.ACTION_DOWN, KeyEvent.ACTION_MULTIPLE ->
+                FrameworkInputBus.emit(InputEvent.KeyDown(event.keyCode, event.scanCode, mods))
+            KeyEvent.ACTION_UP ->
+                FrameworkInputBus.emit(InputEvent.KeyUp(event.keyCode, event.scanCode, mods))
+        }
+        return true // consume so the phone UI does not also receive it
+    }
+
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        val isMouse = event.source and InputDevice.SOURCE_CLASS_POINTER != 0 &&
+            event.source and InputDevice.SOURCE_TOUCHSCREEN == 0
+        if (!isMouse) return super.dispatchGenericMotionEvent(event)
+        when (event.actionMasked) {
+            MotionEvent.ACTION_SCROLL -> {
+                // dy negated to match UsbInputCapture's wheel convention
+                val dx = event.getAxisValue(MotionEvent.AXIS_HSCROLL)
+                val dy = -event.getAxisValue(MotionEvent.AXIS_VSCROLL)
+                if (dx != 0f || dy != 0f) FrameworkInputBus.emit(InputEvent.Scroll(dx, dy))
+                return true
+            }
+            MotionEvent.ACTION_HOVER_MOVE -> {
+                val relX = event.getAxisValue(MotionEvent.AXIS_RELATIVE_X)
+                val relY = event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y)
+                val dx: Float
+                val dy: Float
+                if (relX != 0f || relY != 0f) {
+                    dx = relX; dy = relY
+                } else {
+                    if (lastHoverX.isNaN()) { lastHoverX = event.x; lastHoverY = event.y; return true }
+                    dx = event.x - lastHoverX; dy = event.y - lastHoverY
+                    lastHoverX = event.x; lastHoverY = event.y
+                }
+                if (dx != 0f || dy != 0f) FrameworkInputBus.emit(InputEvent.MouseMove(dx, dy))
+                return true
+            }
+            MotionEvent.ACTION_BUTTON_PRESS   -> { emitButtons(event, true);  return true }
+            MotionEvent.ACTION_BUTTON_RELEASE -> { emitButtons(event, false); return true }
+            else -> return super.dispatchGenericMotionEvent(event)
+        }
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        // Under pointer capture, mouse clicks arrive as touch events carrying a
+        // buttonState. Finger touches (trackpad screen) have buttonState == 0 and
+        // pass through untouched so Compose still receives them.
+        if (event.source and InputDevice.SOURCE_MOUSE != 0 && event.buttonState != 0) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> emitButtons(event, true)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP     -> emitButtons(event, false)
+            }
+            return true
+        }
+        return super.dispatchTouchEvent(event)
+    }
+
+    private fun emitButtons(event: MotionEvent, down: Boolean) {
+        var bits = if (event.actionButton != 0) event.actionButton else event.buttonState
+        var id = 0
+        while (bits != 0) {
+            if (bits and 1 != 0) {
+                val b = MouseButton.fromId(id.toByte())
+                if (down) FrameworkInputBus.emit(InputEvent.MouseButtonDown(b))
+                else FrameworkInputBus.emit(InputEvent.MouseButtonUp(b))
+            }
+            bits = bits shr 1; id++
+        }
+    }
+
+    private fun metaToModifierState(meta: Int): ModifierState = ModifierState(
+        shift = meta and KeyEvent.META_SHIFT_MASK != 0,
+        ctrl  = meta and KeyEvent.META_CTRL_MASK != 0,
+        alt   = meta and KeyEvent.META_ALT_MASK != 0,
+        meta  = meta and KeyEvent.META_META_MASK != 0,
+        capsLock = meta and KeyEvent.META_CAPS_LOCK_ON != 0,
+        numLock  = meta and KeyEvent.META_NUM_LOCK_ON != 0,
+    )
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)

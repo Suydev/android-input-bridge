@@ -3134,3 +3134,21 @@ throw an uncaught runtime exception that reaches the process default handler.
 **Description**: With Shizuku granted but a11y disabled, `handleEvent` early-returns so Scroll/right-click (which need no service) are dropped; `coerceIn` passes NaN through to Path/MotionEvent; inline fast-path injection can reorder against commandFlow-queued events.
 **Fix**: Shizuku-only path now handles Scroll + right-click via injectScroll/longPress; NaN/Infinity coords rejected at both cursor-update sites. Fast-path reordering left as accepted trade-off.
 **Priority**: Medium **Status**: ✅ FIXED (Session 051)
+
+## BUG-187 — USB permission dialog is the bridge's single point of failure on Android 10/MIUI
+**Description**: Raw USB Host capture requires the ACTION_USB_PERMISSION dialog, which MIUI/API 29
+silently drops when requested from a Service (§5.6/BUG-129), leaving the bridge stuck on
+"USB device not found". Meanwhile Android 10+ already processes HID dongles natively and delivers
+their events through the standard view pipeline — no app-level USB grant needed.
+**Fix**: Added a framework-level capture path that needs NO USB permission:
+- NEW `input-capture/.../FrameworkInputBus.kt`: SharedFlow bus between the activity and the service.
+- `BridgeModeActivity`: dispatchKeyEvent forwards all hardware keys (except BACK) as KeyDown/KeyUp;
+  dispatchGenericMotionEvent handles mouse hover-move (relative axes under pointer capture,
+  absolute-delta fallback otherwise), scroll wheel, and button press/release; dispatchTouchEvent maps
+  captured-mouse clicks (finger touches pass through untouched); requestPointerCapture in onResume.
+- `BridgeService.startFrameworkCapture()`: collects FrameworkInputBus events through the same
+  pairing gate / sensitivity / BT-or-UDP send path as raw USB events; runs unconditionally from onCreate.
+Raw UsbInputCapture remains as the fallback/complement when USB permission IS granted.
+**Files involved**: `input-capture/.../FrameworkInputBus.kt`, `app/.../ui/bridge/BridgeModeActivity.kt`,
+`app-bridge/.../service/BridgeService.kt`.
+**Priority**: Critical **Status**: ✅ FIXED (Session 052)
