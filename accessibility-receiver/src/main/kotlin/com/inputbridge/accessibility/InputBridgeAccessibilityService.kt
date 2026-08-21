@@ -183,7 +183,7 @@ class InputBridgeAccessibilityService : AccessibilityService() {
         if (strokeCount >= MAX_STROKES_PER_GESTURE) {
             // Dispatch final segment, then start fresh from current position
             val finalPath = currentStrokePath ?: return
-            val finalDuration = (now - currentStrokeStartTime).coerceAtMost(CONTINUOUS_STROKE_DURATION_MS)
+            val finalDuration = (now - currentStrokeStartTime).coerceIn(1L, CONTINUOUS_STROKE_DURATION_MS)
             val finalStroke = GestureDescription.StrokeDescription(finalPath, 0, finalDuration, false)
             val finalGesture = GestureDescription.Builder().addStroke(finalStroke).build()
             dispatchGesture(finalGesture, null, null)
@@ -195,7 +195,7 @@ class InputBridgeAccessibilityService : AccessibilityService() {
         }
 
         val path = currentStrokePath ?: return
-        val duration = (now - currentStrokeStartTime).coerceAtMost(CONTINUOUS_STROKE_DURATION_MS)
+        val duration = (now - currentStrokeStartTime).coerceIn(1L, CONTINUOUS_STROKE_DURATION_MS)
         val strokeDuration = if (willContinue) duration else TAP_DURATION_MS
 
         val stroke = GestureDescription.StrokeDescription(
@@ -221,7 +221,7 @@ class InputBridgeAccessibilityService : AccessibilityService() {
         val path = currentStrokePath
         if (path != null && strokeCount > 0) {
             val now = android.os.SystemClock.elapsedRealtime()
-            val duration = (now - currentStrokeStartTime).coerceAtMost(CONTINUOUS_STROKE_DURATION_MS)
+            val duration = (now - currentStrokeStartTime).coerceIn(1L, CONTINUOUS_STROKE_DURATION_MS)
             val stroke = GestureDescription.StrokeDescription(path, 0, duration, false)
             val gesture = GestureDescription.Builder().addStroke(stroke).build()
             dispatchGesture(gesture, null, null)
@@ -616,6 +616,7 @@ class InputBridgeAccessibilityService : AccessibilityService() {
                 // Some apps don't support ACTION_SET_TEXT — inject one char at a time
                 try {
                     for (ch in text) {
+                        focused.refresh()
                         val charCurrent = focused.text?.toString() ?: ""
                         val charSelStart = focused.textSelectionStart.coerceIn(0, charCurrent.length)
                         val charNewText = charCurrent.substring(0, charSelStart) + ch + charCurrent.substring(charSelStart)

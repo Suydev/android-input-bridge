@@ -1,3 +1,48 @@
+## Session 050 — Deep sweep: transports, a11y, cross-cutting (BUG-170 → BUG-186)
+**Date:** 2026-08-21
+**Agent:** opencode
+**Status:** ✅ Complete
+
+### Goals
+- User: 'there are tons more bugs' — launched 6 subagents (UDP/protocol, BT HID, a11y service,
+  ViewModels/DI, diagnostics/shared-core, cross-cutting concurrency). Two returned empty and were relaunched.
+
+### Bugs Found and Fixed
+| ID | Severity | Description | Verdict |
+|----|----------|-------------|---------|
+| BUG-170 | Medium | setTargetIp/setPairingPin left stale isPaired in diagnostics | FIXED |
+| BUG-171 | Medium | DiagnosticsManager singleton bleeds state across roles | OPEN |
+| BUG-172 | Low | BridgeViewModel 2s poll + init-order fragility | OPEN |
+| BUG-173 | High | Stale SharedFlow replay cache redelivers prior session packet | FIXED |
+| BUG-174 | Medium | UdpTransport.connect() partial failure leaks socket/channels | FIXED |
+| BUG-175 | Low | isCritical() else->false routes future control packets to droppable queue | FIXED |
+| BT-1 | High | CapsLock folded into Shift modifier bit (garbled keystrokes) | FIXED |
+| BT-2 | Medium | HidReportBuilder unsynchronized mutable state across threads | FIXED |
+| BT-3 | Medium | GET_REPORT replied with empty payload | FIXED |
+| BUG-176 | High | Zero-duration stroke crashes dispatchGesture | FIXED |
+| BUG-177 | High | Drag timeout leaves orphaned open gesture (stuck pointer) | FIXED |
+| BUG-178 | Medium | Char-by-char text fallback injects only last char | FIXED |
+| BUG-179 | Medium | Silent Shizuku key injection failures | FIXED |
+| BUG-180 | High | triggerReconnect vs discovery dual connect-loop race | FIXED |
+| BUG-181 | High | Trackpad teardown DISCONNECT kills main session on receiver | FIXED |
+| BUG-182 | Medium | Wall-clock watchdog math; NTP jumps cause false reconnects | FIXED |
+| BUG-183 | Medium | Orphaned ongoing notification after stopSelf | FIXED |
+| BUG-184/185/186 | Med | Role-switch onNewIntent gap; rotation kills trackpad; Shizuku-only gaps | OPEN |
+
+### What Was Changed
+- `UdpTransport.kt`: resetReplayCache on connect; connect() failure cleanup; explicit isCritical when.
+- `HidReportBuilder.kt`: CapsLock no longer forces Shift; @Synchronized on public methods.
+- `BluetoothHidTransport.kt`: GET_REPORT replies with correctly-sized zero reports.
+- `InputBridgeAccessibilityService.kt`: stroke duration coerceIn(1..60s); node refresh in char loop.
+- `AccessibilityCommandBus.kt`: dragSessionId bump on timeout; log+diagnostics on Shizuku inject failure.
+- `BridgeService.kt`/`ReceiverService.kt`: BUG-180 mutual connect guards; BUG-182 elapsedRealtime;
+  BUG-183 isDestroyed notification guard.
+- `MouseTrackpadActivity.kt`: no DISCONNECT from overlay teardown (BUG-181).
+- `BridgeViewModel.kt`: diagnostics sync on IP/PIN change (BUG-170).
+- `CrashLog.kt`/`AppRoleStore.kt`: apply()→commit() so crash records & role survive process death.
+
+---
+
 ## Session 049 — Low-priority bug sweep (UI-trace subagents, BUG-158 → BUG-169)
 **Date:** 2026-08-21
 **Agent:** opencode

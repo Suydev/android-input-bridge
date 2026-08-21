@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 049 — BUG-158→169: low-priority sweep (discovery guard, watchdog, input-pipeline stuck-key fixes, manifest hygiene)
+> **Last updated:** Session 050 — BUG-170→186: deep sweep (UDP replay cache, BT HID CapsLock, a11y strokes, dual-connect race, monotonic watchdogs)
 
 ---
 

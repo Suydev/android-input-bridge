@@ -767,9 +767,10 @@ class MouseTrackpadActivity : ComponentActivity() {
         super.onDestroy()
         handler.removeCallbacks(longPressRunnable)
         runCatching {
-                    // BUG-162: send DISCONNECT synchronously before scope.cancel() drops it
-runBlocking(NonCancellable + Dispatchers.IO) {
-                runCatching { udpTransport?.send(packetFactory.makeDisconnect()) }
+            // BUG-162/BUG-181: close this overlay's private transport synchronously, but do
+            // NOT send DISCONNECT — it would tear down the receiver's view of the main
+            // BridgeService session. The receiver's silence watchdog handles a real drop.
+            runBlocking(NonCancellable + Dispatchers.IO) {
                 delay(50L)
                 runCatching { udpTransport?.disconnect() }
             }

@@ -144,9 +144,16 @@ class BluetoothHidTransport(private val context: Context) : Transport {
             }
         }
 
-        /** Host requests a report — reply with an empty report (we are output-only). */
+        /** Host requests a report — reply with a correctly-sized all-zero report
+         *  (we are output-only). BUG-XXX FIX: an empty ByteArray was a protocol
+         *  violation for GET_REPORT and could make some hosts drop the device. */
         override fun onGetReport(device: BluetoothDevice, type: Byte, id: Byte, bufferSize: Int) {
-            hidDevice?.replyReport(device, type, id, ByteArray(0))
+            val data = when (id.toInt()) {
+                HidDescriptor.REPORT_ID_KEYBOARD -> ByteArray(8)
+                HidDescriptor.REPORT_ID_MOUSE    -> ByteArray(5)
+                else                             -> ByteArray(0)
+            }
+            hidDevice?.replyReport(device, type, id, data)
         }
 
         /** Host sends SET_REPORT (e.g. Caps-Lock LED state). Log and ignore for now. */

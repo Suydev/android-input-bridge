@@ -111,6 +111,9 @@ class UdpTransport(
      */
     fun getLastSenderIp(): String? = lastSenderAddress?.address?.hostAddress
 
+    // BUG-173 FIX: resetReplayCache() is experimental — opt in for the connect-time
+    // cache invalidation only.
+    @OptIn(ExperimentalCoroutinesApi::class)
     override suspend fun connect(): Boolean {
         if (isConnected) return true
         _connectionState.value = ConnectionState.Connecting
@@ -147,6 +150,13 @@ class UdpTransport(
             // BUG-092 FIX: the reply endpoint belongs to one receiver-mode session.
             // Never send a new session's control traffic to a previous bridge.
             lastSenderAddress = null
+            // BUG-173 FIX: drop any datagram retained by the replay=1 cache from a
+            // previous session on this instance. Without this, the first collector of a
+            // new session immediately receives the old session's last packet — e.g. a
+            // stale DISCONNECT (clears fresh pairing state) or a duplicate input event.
+            // BUG-097's within-session guarantee is preserved: the cache still retains
+            // the first datagram of THIS session until the first subscriber arrives.
+            _incomingPackets.resetReplayCache()
             // BUG-082 FIX: both loops use isConnected as their first condition.
             // Publish the live state before launching them so an immediately scheduled
             // coroutine cannot exit permanently before its first receive/send.
@@ -157,6 +167,15 @@ class UdpTransport(
             BridgeLogger.i(TAG, "UDP transport connected (sender=$isSender port=${config.port})")
             true
         } catch (e: Exception) {
+            // BUG-174 FIX: a failure after resource allocation must not leak the bound
+            // socket (port 54321 would stay occupied → every retry BindExceptions) nor
+            // strand isConnected=true with orphan send/receive loops if the exception
+            // landed after the flag was published. Tear everything down before reporting.
+            isConnected = false
+            runCatching { criticalChannel.close() }
+            runCatching { inputChannel.close() }
+            runCatching { socket?.close() }
+            socket = null
             BridgeLogger.e(TAG, "UDP connect failed", e)
             _connectionState.value = ConnectionState.Error(e.message ?: "Unknown error")
             false
@@ -248,10 +267,17 @@ class UdpTransport(
         PacketType.PING, PacketType.PONG,
         PacketType.PAIR_REQUEST, PacketType.PAIR_RESPONSE, PacketType.PAIR_CONFIRM,
         PacketType.DISCONNECT, PacketType.ERROR,
-        // BUG-XXX FIX: RECONNECT, ACK, MODE_SWITCH, and KEEP_ALIVE are control packets
+        // BUG-175 FIX: RECONNECT, ACK, MODE_SWITCH, and KEEP_ALIVE are control packets
         // that must not be dropped under mouse traffic. Route them through the unlimited queue.
         PacketType.RECONNECT, PacketType.ACK, PacketType.MODE_SWITCH, PacketType.KEEP_ALIVE -> true
-        else -> false
+        // BUG-175 FIX: enumerate input-event types explicitly instead of `else -> false`
+        // (§4.2 — no else in when over PacketType). The compiler now forces an explicit
+        // decision for every newly appended PacketType; a future control type can no
+        // longer silently fall into the droppable 64-slot input queue.
+        PacketType.KEY_DOWN, PacketType.KEY_UP,
+        PacketType.MOUSE_MOVE, PacketType.MOUSE_DOWN, PacketType.MOUSE_UP,
+        PacketType.SCROLL, PacketType.TEXT_INPUT, PacketType.MODIFIER_STATE,
+        PacketType.SPECIAL_ACTION, PacketType.CURSOR_GOTO -> false
     }
 
     private fun startSendLoop(

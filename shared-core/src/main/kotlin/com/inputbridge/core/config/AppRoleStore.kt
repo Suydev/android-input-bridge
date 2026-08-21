@@ -44,6 +44,9 @@ object AppRoleStore {
         context.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_ROLE, if (role == AppRole.NONE) null else role.name.lowercase())
-            .apply()
+            // commit(), not apply(): BootReceivers in a NEW process read this after a
+            // reboot/crash; an async apply() that hasn't flushed would revert the role
+            // to NONE and silently disable auto-start. File is tiny — blocking is negligible.
+            .commit()
     }
 }

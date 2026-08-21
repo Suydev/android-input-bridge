@@ -42,9 +42,15 @@ object CrashLog {
             .getString(KEY_LAST, null)
 
     private fun store(context: Context, value: String) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_LAST, value)
-            .apply()
+        // Must be synchronous (commit, not apply): callers include the global
+        // uncaught-exception handler, where the process can die before apply()'s
+        // async disk write flushes — losing the crash record. Best-effort: never
+        // throw out of a crash handler.
+        try {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_LAST, value)
+                .commit()
+        } catch (_: Exception) { }
     }
 }

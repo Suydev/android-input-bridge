@@ -87,11 +87,12 @@ class ReceiverService : Service() {
 
     /** IP of the bridge device that completed pairing. Empty = not paired. */
     @Volatile private var pairedBridgeIp: String = ""
+    @Volatile private var isDestroyed = false // BUG-183: suppress notify() after teardown
 
     // ── Packet loss detection ─────────────────────────────────────────────────
 
     /**
-     * Monotonic time of the last received PING from the bridge (System.currentTimeMillis()).
+     * Monotonic time of the last received PING from the bridge (SystemClock.elapsedRealtime(), BUG-182).
      * 0 = no PING received yet this session.
      * Used by the bridge-silence watchdog (BUG-041 fix).
      */
@@ -231,6 +232,7 @@ class ReceiverService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        isDestroyed = true
 
         // 1. Cancel tracked jobs
         receiveJob?.cancel()
@@ -343,7 +345,7 @@ class ReceiverService : Service() {
                 delay(BRIDGE_WATCHDOG_CHECK_MS)
                 val firstPing = lastPingReceivedMs
                 if (firstPing == 0L) continue  // haven't seen a PING yet — bridge may still be connecting
-                val silenceMs = System.currentTimeMillis() - firstPing
+                val silenceMs = android.os.SystemClock.elapsedRealtime() - firstPing
                 if (silenceMs >= BRIDGE_SILENCE_TIMEOUT_MS && !bridgeSilenceNotified) {
                     bridgeSilenceNotified = true
                     val silenceSec = silenceMs / 1000
@@ -408,7 +410,7 @@ class ReceiverService : Service() {
                         // BUG-041 fix: record the time of the last PING so the watchdog
                         // knows the bridge is alive. Also clear any previously-shown
                         // silence notification so it re-fires if the bridge goes silent again.
-                        lastPingReceivedMs = System.currentTimeMillis()
+                        lastPingReceivedMs = android.os.SystemClock.elapsedRealtime()
                         DiagnosticsManager.update { copy(transportConnected = true) }
                         if (bridgeSilenceNotified) {
                             bridgeSilenceNotified = false
@@ -532,6 +534,7 @@ class ReceiverService : Service() {
     }
 
     private fun updateNotification(status: String) {
+        if (isDestroyed) return // BUG-183
         val mgr = getSystemService(NOTIFICATION_SERVICE) as? NotificationManager ?: return
         mgr.notify(NOTIFICATION_ID, buildNotification(status))
     }

@@ -391,8 +391,10 @@ class BridgeService : Service() {
                 prefs.targetIp = ip
                 prefs.port = port
                 updateNotification("Found receiver at $ip:$port — connecting…")
-                                // BUG-158: guard so repeated receiver broadcasts don't spawn parallel connects/leak sockets
-if (!discoveryConnecting.compareAndSet(false, true)) return@listenForReceiver
+                // BUG-180: don't fight an in-progress reconnect loop
+                if (reconnectInProgress.get()) return@listenForReceiver
+                // BUG-158: guard so repeated receiver broadcasts don't spawn parallel connects/leak sockets
+                if (!discoveryConnecting.compareAndSet(false, true)) return@listenForReceiver
                 serviceScope.launch {
                     try {
                         pingJob?.cancel();         pingJob = null
@@ -554,9 +556,9 @@ if (!discoveryConnecting.compareAndSet(false, true)) return@listenForReceiver
                     PacketType.PONG -> {
                         val sentAt = lastPingSentAtMs
                         if (sentAt > 0L) {
-                            val latency = System.currentTimeMillis() - sentAt
+                            val latency = android.os.SystemClock.elapsedRealtime() - sentAt
                             if (latency in 0L..10_000L) {
-                                lastPongReceivedMs = System.currentTimeMillis()
+                                lastPongReceivedMs = android.os.SystemClock.elapsedRealtime()
                                 DiagnosticsManager.recordLatency(latency)
                                 // BUG-090 FIX: a PONG proves the configured receiver is
                                 // reachable, unlike merely creating a local UDP socket.
@@ -697,7 +699,7 @@ if (!discoveryConnecting.compareAndSet(false, true)) return@listenForReceiver
             while (isActive) {
                 delay(PING_INTERVAL_MS)
                 val ping = packetFactory.makePing()
-                lastPingSentAtMs = System.currentTimeMillis()
+                lastPingSentAtMs = android.os.SystemClock.elapsedRealtime()
                 DiagnosticsManager.update { copy(lastPingSentMs = lastPingSentAtMs) }
                 transport.send(ping)
                 BridgeLogger.d(TAG, "PING sent (seq=${ping.sequenceNo})")
@@ -716,7 +718,7 @@ if (!discoveryConnecting.compareAndSet(false, true)) return@listenForReceiver
             delay(WATCHDOG_GRACE_MS)  // wait for initial connection to settle
             while (isActive) {
                 delay(WATCHDOG_CHECK_MS)
-                val now = System.currentTimeMillis()
+                val now = android.os.SystemClock.elapsedRealtime()
                 val lastPong = lastPongReceivedMs
                 val lastPing = lastPingSentAtMs
                 val pongStale = lastPong > 0L && (now - lastPong) > PONG_TIMEOUT_MS
@@ -738,6 +740,11 @@ val neverPonged = lastPong == 0L && lastPing > 0L && (now - lastPing) > PONG_TIM
      */
     private suspend fun triggerReconnect() {
         if (!reconnectInProgress.compareAndSet(false, true)) return
+        // BUG-180: a discovery-driven connect owns the link right now — don't race it
+        if (discoveryConnecting.get()) {
+            reconnectInProgress.set(false)
+            return
+        }
 
         // Cancel currently running I/O jobs (but keep serviceScope alive)
         pingJob?.cancel();         pingJob = null
@@ -762,6 +769,12 @@ val neverPonged = lastPong == 0L && lastPing > 0L && (now - lastPing) > PONG_TIM
             BridgeLogger.i(TAG, "Reconnect: waiting ${backoffMs}ms before next attempt")
             delay(backoffMs)
             if (!serviceScope.isActive) break
+            // BUG-180: abort the backoff loop if discovery took over the connection
+            if (discoveryConnecting.get()) {
+                DiagnosticsManager.update { copy(isReconnecting = false) }
+                reconnectInProgress.set(false)
+                return
+            }
 
             val config = TransportConfig(targetIp = targetIp, port = port)
             val transport = UdpTransport(config, isSender = true)

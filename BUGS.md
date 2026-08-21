@@ -3004,3 +3004,131 @@ throw an uncaught runtime exception that reaches the process default handler.
 **Priority**: Medium
 **Status**: ✅ FIXED (Session 049)
 **Fix**: Set `android:exported="true"` and added an explanatory comment.
+
+## BUG-170 — setTargetIp/setPairingPin clear pairing in prefs but not in DiagnosticsManager
+**Description**: `BridgeViewModel.setTargetIp()` set `prefs.isPaired = false` and `setPairingPin()` called `prefs.setPinAndClearPairing()`, but neither updated `DiagnosticsManager`. The `isPaired` StateFlow derives exclusively from `DiagnosticsManager.state`, so the UI kept showing "paired" against a changed target IP / new PIN until a service restart re-synced it.
+**Steps to reproduce**: Pair with a receiver, then change the target IP on the Settings screen — bridge screen still reports paired state for the old peer.
+**Expected behavior**: Pairing state clears immediately when IP or PIN changes.
+**Actual behavior**: Stale `isPaired = true` in diagnostics until BridgeService restarts.
+**Suspected cause**: `clearPairing()` was updated to write diagnostics but the two sibling call sites were missed.
+**Files involved**: `app-bridge/src/main/kotlin/com/inputbridge/bridge/viewmodel/BridgeViewModel.kt` (setTargetIp, setPairingPin).
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 050)
+**Fix**: Both methods now also call `DiagnosticsManager.update { copy(isPaired = false) }`.
+
+## BUG-171 — Single DiagnosticsManager singleton is shared by both roles in the merged APK
+**Description**: `DiagnosticsManager` is a process-wide object with role-agnostic fields (`isPaired`, `lastError`, `transportConnected`, latency/packet counters). Both roles' services and ViewModels write/read it, and both services run in the same process (no `android:process` split). After a role switch (ModeSelection → other mode), stale bridge values (`lastError`, `transportConnected`, counters) leak into the receiver UI and vice versa; only `sessionPin`/`isPaired`/`pairedPeerIp` are re-seeded by `ReceiverViewModel.init`.
+**Steps to reproduce**: Run bridge mode, trigger an error or connect, back out to mode selection, choose Receiver — receiver diagnostics show leftover bridge fields.
+**Expected behavior**: Role switch resets diagnostics relevant to the previous role.
+**Actual behavior**: Cross-role state bleed in shared singleton.
+**Suspected cause**: Merged single-APK design kept one diagnostics object without per-role namespacing or reset-on-role-switch.
+**Files involved**: `diagnostics/src/main/kotlin/com/inputbridge/diagnostics/DiagnosticsManager.kt`, `app/src/main/kotlin/com/inputbridge/InputBridgeApplication.kt`, both ViewModels.
+**Priority**: Medium
+**Status**: 🔴 OPEN
+**Fix**: (proposed) Reset role-specific fields on role switch in ModeSelectionActivity/BridgeModeActivity/ReceiverModeActivity, or namespace DiagnosticsData per role.
+
+## BUG-172 — BridgeViewModel polls prefs every 2 s from init; fragile ordering vs _config declaration
+**Description**: `BridgeViewModel.init` launches a `while(true) { delay(2000) }` loop that copies prefs into `_config` for the whole ViewModel lifetime. It is safe today only because `delay(2000)` suspends before the first `_config` access — `_config` is declared at line ~118 AFTER the init block, so any refactor that touches `_config` before the first suspension crashes with an uninitialized-field NPE. The loop also burns cycles and cannot detect prefs writes that happen between ticks except on the next tick.
+**Steps to reproduce**: Code inspection; rotate/refactor risk.
+**Expected behavior**: Prefs→config sync driven by events (or a flow), with `_config` declared before init.
+**Actual behavior**: Unconditional 2 s polling coroutine; initialization-order landmine.
+**Suspected cause**: Placeholder "BUG-XXX" fix added sync without moving `_config` above init.
+**Files involved**: `app-bridge/src/main/kotlin/com/inputbridge/bridge/viewmodel/BridgeViewModel.kt:73-93`.
+**Priority**: Low
+**Status**: 🔴 OPEN
+**Fix**: (proposed) Move `_config` declaration above init and replace polling with explicit sync points or a SharedPreferences listener.
+
+## BUG-173 — Stale SharedFlow replay cache redelivers previous session's last packet after reconnect
+**Description**: `_incomingPackets` uses `replay = 1` (BUG-097) but the replay cache is never cleared in `connect()`. If the same `UdpTransport` instance is reconnected (or a collector re-subscribes after a session change), the new collector immediately receives the *previous* session's last datagram — e.g. a stale DISCONNECT (instantly clears fresh pairing state on both apps) or a duplicate input event (double click/key injection).
+**Steps to reproduce**: Receive any packet, disconnect, call `connect()` again on the same instance, subscribe to `incomingPackets` → stale packet delivered before any new traffic.
+**Expected behavior**: A new connection session starts with an empty replay cache; only packets received in the current session are replayed to late subscribers.
+**Actual behavior**: The last datagram of the prior session is redelivered to every new collector.
+**Suspected cause**: BUG-097 added `replay = 1` for the startup-collector race but no cache invalidation was tied to the connection lifecycle.
+**Files involved**: `transport-wifi/src/main/kotlin/com/inputbridge/transport/wifi/UdpTransport.kt` (connect).
+**Priority**: High
+**Status**: ✅ FIXED (Session 050)
+**Fix**: Call `_incomingPackets.resetReplayCache()` during `connect()` before the send/receive loops start, preserving BUG-097's within-session guarantee while clearing cross-session staleness.
+
+## BUG-174 — connect() partial failure leaks socket/channels and can strand isConnected=true with orphan loops
+**Description**: In `connect()`, if any exception is thrown after the socket is created (socket tuning, channel swap, loop startup), the catch block only logs and sets an Error state: the bound `DatagramSocket` is never closed (port 54321 stays occupied on the receiver → every subsequent connect fails with BindException), the swapped-in channels are never closed, and if the exception lands in the window after `isConnected = true` is published but before `return true`, the flag stays true with both loops running forever while the caller believes connect failed.
+**Steps to reproduce**: Simulate a throw between `isConnected = true` and loop launch (e.g. OOM/state-write failure); observe orphaned send/receive coroutines and a permanently bound port.
+**Expected behavior**: Any failed `connect()` leaves no open socket, no live channels, and `isConnected = false`.
+**Actual behavior**: Partial-failure state leaks kernel resources and can leave ghost loops.
+**Suspected cause**: Catch block predates the multi-resource setup added by BUG-069/087/092 refactors and was never extended.
+**Files involved**: `transport-wifi/src/main/kotlin/com/inputbridge/transport/wifi/UdpTransport.kt` (connect catch block).
+**Priority**: Medium
+**Status**: ✅ FIXED (Session 050)
+**Fix**: The catch block now sets `isConnected = false`, closes both channels, closes and nulls the socket before reporting the error.
+
+## BUG-175 — isCritical() routes future PacketTypes through the droppable queue via else->false (§4.2 violation)
+**Description**: `UdpTransport.isCritical()` discriminates control vs input packets with `else -> false` over `PacketType`. Per §4.2, `when` over `PacketType` must be exhaustive without `else`: any packet type appended later (e.g. a new control type) silently falls into the bounded 64-slot input queue and gets dropped under mouse traffic — exactly the failure mode BUG-069 fixed. The branch also carries an unfilled `// BUG-XXX FIX` placeholder comment from a prior session.
+**Steps to reproduce**: Append a new PacketType control constant; observe it is queued as droppable input traffic with no compile-time signal.
+**Expected behavior**: Enumerating the input-event types explicitly makes the compiler force a decision for every new PacketType.
+**Actual behavior**: Silent default hides misrouting.
+**Suspected cause**: Written before the §4.2 exhaustiveness rule was applied to enum whens.
+**Files involved**: `transport-wifi/src/main/kotlin/com/inputbridge/transport/wifi/UdpTransport.kt` (isCritical).
+**Priority**: Low
+**Status**: ✅ FIXED (Session 050)
+**Fix**: Replaced `else -> false` with an explicit enumeration of all ten input-event packet types returning false; when-expression is now compiler-exhaustive.
+
+## BUG-176 — Zero-duration gesture stroke crashes dispatchGesture
+**Description**: `continueStroke`/`endStroke` computed duration via `.coerceAtMost(60_000)`; on first continuation elapsed is often 0 ms and `StrokeDescription` throws `IllegalArgumentException` for duration < 1 ms.
+**Files involved**: `accessibility-receiver/.../InputBridgeAccessibilityService.kt:186,198,224`.
+**Priority**: High **Status**: ✅ FIXED (Session 050)
+**Fix**: `.coerceIn(1L, CONTINUOUS_STROKE_DURATION_MS)` at all three sites.
+
+## BUG-177 — Drag safety-timeout leaves an orphaned open gesture (pointer stuck down)
+**Description**: The MAX_DRAG_DURATION_MS timeout reset `isDragging` + `endStroke()` without bumping `dragSessionId`; in-flight `continueStroke` coroutines with the still-matching session id started a fresh never-ended stroke.
+**Files involved**: `accessibility-receiver/.../AccessibilityCommandBus.kt:258`.
+**Priority**: High **Status**: ✅ FIXED (Session 050)
+**Fix**: `dragSessionId++` after `isDragging = false` (mirrors MouseButtonUp path).
+
+## BUG-178 — Char-by-char text fallback injects only the last character
+**Description**: The SET_TEXT fallback loop read `focused.text` each iteration from a stale `AccessibilityNodeInfo` snapshot (no `refresh()`), so every iteration computed the same "original + ch" string; only the final char survived.
+**Files involved**: `accessibility-receiver/.../InputBridgeAccessibilityService.kt:619`.
+**Priority**: Medium **Status**: ✅ FIXED (Session 050)
+**Fix**: `focused.refresh()` at the top of each loop iteration.
+
+## BUG-179 — Shizuku key injection failures were silent (stuck keys, no diagnostics)
+**Description**: `shizukuInjectKeyDown/Up` ignored `injectKeyEvent`'s Boolean result; a revoked permission or dead binder dropped both DOWN and UP with no log.
+**Files involved**: `accessibility-receiver/.../AccessibilityCommandBus.kt:357–376`.
+**Priority**: Medium **Status**: ✅ FIXED (Session 050)
+**Fix**: Log via BridgeLogger.w + write `lastInjectionError` to DiagnosticsManager on failure.
+
+## BUG-180 — triggerReconnect() and discovery-driven connect can run two concurrent connect loops
+**Description**: The two paths use disjoint guards (`reconnectInProgress` vs `discoveryConnecting`). Watchdog backoff sleeping through a receiver broadcast → two UdpTransports, duplicate PING/watchdog loops, last-writer-wins on `udpTransport` while the loser keeps sending.
+**Steps to reproduce**: Receiver drops; during reconnect backoff a broadcast arrives (or vice versa).
+**Files involved**: `app-bridge/.../BridgeService.kt` (startAutoDiscovery onFound + triggerReconnect).
+**Priority**: High **Status**: ✅ FIXED (Session 050)
+**Fix**: Discovery callback skips when `reconnectInProgress.get()`; `triggerReconnect` early-returns when `discoveryConnecting.get()` and aborts its backoff loop (resetting diagnostics) if discovery takes over.
+
+## BUG-181 — Trackpad overlay teardown sends DISCONNECT, tearing down the main bridge session
+**Description**: `MouseTrackpadActivity.onDestroy` sent `makeDisconnect()` from its own private transport; the receiver cleared `pairedBridgeIp`/`isPaired` and flipped UI to "disconnected" while BridgeService was still alive.
+**Files involved**: `app-bridge/.../MouseTrackpadActivity.kt:onDestroy`.
+**Priority**: High **Status**: ✅ FIXED (Session 050)
+**Fix**: Close the private transport without sending DISCONNECT; the receiver's silence watchdog handles genuine drops.
+
+## BUG-182 — Keep-alive watchdogs use wall-clock time; NTP jumps cause false reconnects / stalled detection
+**Description**: PING/PONG and bridge-silence math used `System.currentTimeMillis()`. A forward NTP jump instantly satisfies the timeout → spurious reconnect storms; backward jump delays detection.
+**Files involved**: `app-bridge/.../BridgeService.kt` (ping/pong/watchdog), `app-receiver/.../ReceiverService.kt` (silence watchdog).
+**Priority**: Medium **Status**: ✅ FIXED (Session 050)
+**Fix**: All keep-alive timestamps switched to monotonic `SystemClock.elapsedRealtime()`.
+
+## BUG-183 — updateNotification() after stopSelf() leaves an orphaned ongoing notification
+**Description**: Watchdog/ping coroutines can call `notify()` between `stopSelf()` and `serviceScope.cancel()`; the ongoing notification outlives the service and isn't dismissable.
+**Files involved**: both services' `updateNotification`/`onDestroy`.
+**Priority**: Medium **Status**: ✅ FIXED (Session 050)
+**Fix**: `@Volatile isDestroyed` set first in `onDestroy`, checked before `notify()`.
+
+## BUG-184 — Role switch skips opposite-service stop when mode activity is reused (onNewIntent)
+**Description**: Opposite-role stop lives only in each mode activity's `onCreate`; with `singleTask` re-delivery (`onNewIntent`) both services run racing for UDP 54322, and the bridge can latch onto its in-process receiver's announcement (loopback pairing). 🔴 OPEN
+**Proposed fix**: Move the stop into ModeSelectionActivity click handlers + both activities' `onNewIntent`.
+**Priority**: Medium **Status**: 🔴 OPEN
+
+## BUG-185 — Rotation kills Compose trackpad session; MouseTrackpadActivity is unreachable dead entry
+**Description**: `BridgeModeActivity` has no `configChanges` → rotation resets nav to WELCOME and `BridgeTrackpadScreen`'s DisposableEffect disconnects its transport mid-gesture. `MouseTrackpadActivity` is rotation-proof but nothing launches it.
+**Priority**: Medium **Status**: 🔴 OPEN
+
+## BUG-186 — Shizuku-only mode silently drops scroll/right-click; NaN coords unguarded; fast-path reorders vs queued events
+**Description**: With Shizuku granted but a11y disabled, `handleEvent` early-returns so Scroll/right-click (which need no service) are dropped; `coerceIn` passes NaN through to Path/MotionEvent; inline fast-path injection can reorder against commandFlow-queued events.
+**Priority**: Medium **Status**: 🔴 OPEN (needs design decision)

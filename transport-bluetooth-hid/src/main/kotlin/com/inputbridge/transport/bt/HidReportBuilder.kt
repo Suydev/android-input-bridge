@@ -27,7 +27,9 @@ import com.inputbridge.core.model.MouseButton
  *     [3] wheel  — signed, -127..127 (scroll down = positive per HID convention)
  *     [4] AC Pan — signed, -127..127 (horizontal scroll, right = positive)
  *
- * Thread safety: single-threaded (called from the USB capture coroutine only).
+ * Thread safety: methods are @Synchronized — sendInputEvent() runs on the USB
+ * capture coroutine while disconnect() (any dispatcher) calls buildAllRelease();
+ * without the lock, pressedKeys/mouseButtonMask could be corrupted mid-report.
  */
 class HidReportBuilder {
 
@@ -42,6 +44,7 @@ class HidReportBuilder {
     // ── Keyboard reports ───────────────────────────────────────────────────────
 
     /** Key pressed. Returns a full 8-byte keyboard report. */
+    @Synchronized
     fun onKeyDown(event: InputEvent.KeyDown): ByteArray {
         ANDROID_TO_HID[event.keyCode]?.let { hid ->
             if (!pressedKeys.contains(hid) && pressedKeys.size < 6) {
@@ -52,6 +55,7 @@ class HidReportBuilder {
     }
 
     /** Key released. Returns a full 8-byte keyboard report. */
+    @Synchronized
     fun onKeyUp(event: InputEvent.KeyUp): ByteArray {
         ANDROID_TO_HID[event.keyCode]?.let { pressedKeys.remove(it) }
         return buildKeyboardReport(event.modifiers)
@@ -61,6 +65,7 @@ class HidReportBuilder {
      * Returns an all-keys-released keyboard report and resets all state.
      * Send this before disconnecting to avoid stuck keys on the host.
      */
+    @Synchronized
     fun buildAllRelease(): ByteArray {
         pressedKeys.clear()
         mouseButtonMask = 0
@@ -70,16 +75,19 @@ class HidReportBuilder {
     // ── Mouse reports ──────────────────────────────────────────────────────────
 
     /** Relative pointer movement. Returns a 5-byte mouse report. */
+    @Synchronized
     fun onMouseMove(dx: Float, dy: Float): ByteArray =
         buildMouseReport(dx = dx.clampToByte(), dy = dy.clampToByte(), wheel = 0, pan = 0)
 
     /** Mouse button pressed. Returns a 5-byte mouse report. */
+    @Synchronized
     fun onMouseButtonDown(button: MouseButton): ByteArray {
         mouseButtonMask = mouseButtonMask or buttonBit(button)
         return buildMouseReport(dx = 0, dy = 0, wheel = 0, pan = 0)
     }
 
     /** Mouse button released. Returns a 5-byte mouse report. */
+    @Synchronized
     fun onMouseButtonUp(button: MouseButton): ByteArray {
         mouseButtonMask = mouseButtonMask and buttonBit(button).inv()
         return buildMouseReport(dx = 0, dy = 0, wheel = 0, pan = 0)
@@ -91,6 +99,7 @@ class HidReportBuilder {
      * positive = scroll right. BUG-138: dx is forwarded as AC Pan so horizontal
      * scroll/trackpad tilt works on hosts (matches the reference's mouse descriptor).
      */
+    @Synchronized
     fun onScroll(dx: Float, dy: Float): ByteArray =
         buildMouseReport(dx = 0, dy = 0, wheel = dy.clampToByte(), pan = dx.clampToByte())
 
@@ -126,7 +135,11 @@ class HidReportBuilder {
     private fun hidModifierByte(mods: ModifierState): Byte {
         var b = 0
         if (mods.ctrl)               b = b or 0x01  // Left Ctrl
-        if (mods.shift || mods.capsLock) b = b or 0x02  // Left Shift
+        // BUG-XXX FIX: CapsLock must NOT be folded into the Shift modifier bit.
+        // The host toggles CapsLock itself from the 0x39 keypress in the key array
+        // (and its own LED output report); asserting Shift here shifted every
+        // keystroke while CapsLock was active.
+        if (mods.shift)              b = b or 0x02  // Left Shift
         if (mods.alt)                b = b or 0x04  // Left Alt
         if (mods.meta)               b = b or 0x08  // Left GUI / Super
         return b.toByte()

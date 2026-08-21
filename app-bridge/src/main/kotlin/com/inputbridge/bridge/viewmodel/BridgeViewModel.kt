@@ -160,7 +160,12 @@ class BridgeViewModel(
         val trimmed = ip.trim()
         _config.update { it.copy(transport = it.transport.copy(targetIp = trimmed)) }
         prefs.targetIp = trimmed
-        if (prefs.isPaired) prefs.isPaired = false
+        // BUG-170 FIX: isPaired StateFlow derives from DiagnosticsManager, so clearing
+        // only prefs left the UI showing "paired" against the new target until restart.
+        if (prefs.isPaired) {
+            prefs.isPaired = false
+            DiagnosticsManager.update { copy(isPaired = false) }
+        }
         // BUG-128 FIX: a new target IP must re-pair if the service is running.
         // BUG-147 FIX: the Settings field calls this on every keystroke. Only trigger a
         // re-pair once the value looks like a complete IPv4 address (or was just cleared),
@@ -186,6 +191,9 @@ class BridgeViewModel(
         val trimmed = pin.trim()
         _config.update { it.copy(security = it.security.copy(pairingToken = trimmed)) }
         prefs.setPinAndClearPairing(trimmed)
+        // BUG-170 FIX: keep diagnostics in sync with the prefs-side pairing clear
+        // (see setTargetIp) so the UI doesn't show a stale "paired" state.
+        DiagnosticsManager.update { copy(isPaired = false) }
         // BUG-128 FIX: once the user has entered a full 6-digit PIN, re-run pairing so
         // the freshly-saved PIN is actually sent (the pipeline only paired once at start).
         if (trimmed.length == 6) triggerRepair()

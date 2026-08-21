@@ -255,6 +255,7 @@ object AccessibilityCommandBus {
                 // BUG-XXX: safety timeout — if isDragging is stuck, force-reset
                 if (isDragging && System.currentTimeMillis() - dragStartTime > MAX_DRAG_DURATION_MS) {
                     isDragging = false
+                    dragSessionId++
                     scope.launch(Dispatchers.Main) { service?.endStroke() }
                 }
 
@@ -358,14 +359,24 @@ if (event is InputEvent.KeyUp) { shizukuInjectKeyUp(event); return true }
         val metaState = buildMetaState(event.modifiers)
         val now = SystemClock.uptimeMillis()
         val keyDown = KeyEvent(now, now, KeyEvent.ACTION_DOWN, event.keyCode, 0, metaState)
-        ShizukuInputInjector.injectKeyEvent(keyDown)
+        if (!ShizukuInputInjector.injectKeyEvent(keyDown)) {
+            BridgeLogger.w(TAG, "Shizuku key DOWN not injected (keyCode=${event.keyCode})")
+            DiagnosticsManager.update {
+                copy(lastInjectionError = "Shizuku key down failed (keyCode=${event.keyCode})")
+            }
+        }
     }
 
     private fun shizukuInjectKeyUp(event: InputEvent.KeyUp) {
         val metaState = buildMetaState(event.modifiers)
         val now = SystemClock.uptimeMillis()
         val keyUp = KeyEvent(now, now, KeyEvent.ACTION_UP, event.keyCode, 0, metaState)
-        ShizukuInputInjector.injectKeyEvent(keyUp)
+        if (!ShizukuInputInjector.injectKeyEvent(keyUp)) {
+            BridgeLogger.w(TAG, "Shizuku key UP not injected (keyCode=${event.keyCode})")
+            DiagnosticsManager.update {
+                copy(lastInjectionError = "Shizuku key up failed (keyCode=${event.keyCode})")
+            }
+        }
     }
 
     // BUG-140 FIX: Shizuku `swipe`/`longPress` are SUSPEND functions (they must run inside a
