@@ -975,8 +975,7 @@ val neverPonged = lastPong == 0L && lastPing > 0L && (now - lastPing) > PONG_TIM
     // WiFi power-save is the single biggest latency source on a hotspot link
     // (30–100 ms bursts); WIFI_MODE_FULL_HIGH_PERF disables it. A partial wake
     // lock stops CPU suspend between packets (idle→first-input spike).
-    private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
-    private var wakeLock: android.os.PowerManager.WakeLock? = null
+    // (Fields reuse the pre-existing wakeLock/wifiLock declarations above.)
 
     private fun acquireLatencyLocks() {
         runCatching {
