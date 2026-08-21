@@ -3199,3 +3199,16 @@ whole lifetime (acquired in onCreate, released in onDestroy); UdpTransport also 
 BridgeService (only ReceiverService got it), leaving a possible orphaned bridge notification.
 **Fix**: Applied the missed field/onDestroy/updateNotification guard.
 **Priority**: Medium **Status**: ✅ FIXED (Session 056)
+
+## BUG-192 — Trackpad screen ignored finger touches; external-mouse math wrong
+**Description**: PointerCaptureTrackpadView only listened to CAPTURED POINTER events, so the
+on-screen trackpad did nothing when touched with fingers — despite hint text promising
+move/tap/scroll gestures. Additionally the captured-pointer MOVE path multiplied an ABSOLUTE
+position by sensitivity (wrong math) and clamped at screen edges instead of using relative axes.
+**Fix**: Implemented full finger-trackpad gesture set (1-finger drag = relative move, 1-finger tap =
+left click, 2-finger drag = scroll, 2-finger tap = right click, 3-finger tap = middle click);
+added `TrackpadTransport.onMouseMoveRelative` (UnifiedTrackpadTransport sends MouseMove via
+sendDirect/HID); captured-pointer path now prefers AXIS_RELATIVE_X/Y.
+**Files involved**: `app-bridge/.../PointerCaptureTrackpadView.kt`, `.../TrackpadTransportAdapters.kt`,
+`.../screens/BridgeTrackpadScreen.kt`.
+**Priority**: High **Status**: ✅ FIXED (Session 057)

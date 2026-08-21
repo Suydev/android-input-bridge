@@ -144,6 +144,20 @@ class UnifiedTrackpadTransport(
         }
     }
 
+    override fun onMouseMoveRelative(dx: Float, dy: Float) {
+        val event = InputEvent.MouseMove(dx, dy)
+        if (useHid) {
+            hidTransport?.let { hid ->
+                try { hid.sendInputEvent(event) } catch (e: Exception) { Log.e("TrackpadTransport", "HID move failed", e) }
+            }
+        } else {
+            packetFactory?.let { factory ->
+                val packet = factory.fromEvent(event) ?: return
+                try { udpTransport?.sendDirect(packet) } catch (e: Exception) { Log.e("TrackpadTransport", "WiFi move failed", e) }
+            }
+        }
+    }
+
     override fun onButtonDown(button: Int) {
         val mouseButton = when (button) {
             0 -> MouseButton.LEFT

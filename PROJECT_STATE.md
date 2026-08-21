@@ -1,6 +1,6 @@
 # InputBridge — Project State
 
-> **Last updated:** Session 056 — BUG-191: WiFi high-perf + wake locks for low latency; missed BUG-183 bridge guard applied
+> **Last updated:** Session 057 — BUG-192: real trackpad gestures (tap-to-click, 2-finger scroll/right-click) + relative mouse axes
 
 ---
 

@@ -1,3 +1,19 @@
+## Session 057 — Real trackpad gestures + UI fixes (BUG-192)
+**Date:** 2026-08-21
+**Agent:** opencode
+**Status:** ✅ Complete
+
+### Goals
+- User: 'fix ui and improve trackpad'.
+
+### What Was Changed
+- PointerCaptureTrackpadView: full onTouchEvent gesture set (drag/tap/2-finger scroll/
+  2-finger right-click/3-finger middle); captured-pointer MOVE prefers relative axes.
+- TrackpadTransport + UnifiedTrackpadTransport: new onMouseMoveRelative (sendDirect fast path).
+- BridgeTrackpadScreen: status-line indentation cleanup; hint text now accurate.
+
+---
+
 ## Session 056 — Latency: WiFi high-perf lock, wake lock, send buffer (BUG-191)
 **Date:** 2026-08-21
 **Agent:** opencode

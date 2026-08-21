@@ -112,6 +112,85 @@ class PointerCaptureTrackpadView @JvmOverloads constructor(
         setLayerType(LAYER_TYPE_HARDWARE, null)
     }
 
+    // ── Finger trackpad state (BUG-192) ──────────────────────────────────────
+    private var touchStartTime = 0L
+    private var touchStartX = 0f
+    private var touchStartY = 0f
+    private var lastTouchX = 0f
+    private var lastTouchY = 0f
+    private var maxPointers = 0
+    private var movedBeyondTap = false
+    private var twoFingerLastY = 0f
+    private var twoFingerMoved = false
+    private val tapSlopPx by lazy { android.view.ViewConfiguration.get(context).scaledTouchSlop * 2f }
+    private val TAP_MAX_MS = 250L
+
+    /**
+     * BUG-192 FIX: the view only listened to CAPTURED POINTER events (external mouse),
+     * so finger touches on the phone screen did nothing even though the hint text
+     * promised a full trackpad. Implements standard notebook-trackpad gestures:
+     *   1 finger drag  -> relative cursor move
+     *   1 finger tap   -> left click
+     *   2 finger drag  -> scroll
+     *   2 finger tap   -> right click
+     *   3 finger tap   -> middle click
+     */
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        val t = transport ?: return super.onTouchEvent(event)
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                touchStartTime = System.currentTimeMillis()
+                touchStartX = event.x; touchStartY = event.y
+                lastTouchX = event.x; lastTouchY = event.y
+                maxPointers = 1
+                movedBeyondTap = false
+                parent?.requestDisallowInterceptTouchEvent(true)
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                maxPointers = maxOf(maxPointers, event.pointerCount)
+                if (event.pointerCount == 2) {
+                    twoFingerLastY = (event.getY(0) + event.getY(1)) / 2f
+                    twoFingerMoved = false
+                }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (event.pointerCount == 1 && maxPointers == 1) {
+                    val dx = event.x - lastTouchX
+                    val dy = event.y - lastTouchY
+                    lastTouchX = event.x; lastTouchY = event.y
+                    if (kotlin.math.hypot(event.x - touchStartX, event.y - touchStartY) > tapSlopPx) {
+                        movedBeyondTap = true
+                    }
+                    if (dx != 0f || dy != 0f) {
+                        safeCall { t.onMouseMoveRelative(dx * sensitivity, dy * sensitivity) }
+                    }
+                } else if (event.pointerCount >= 2) {
+                    val midY = (event.getY(0) + event.getY(1)) / 2f
+                    val dy = midY - twoFingerLastY
+                    twoFingerLastY = midY
+                    if (kotlin.math.abs(dy) > 0.5f) {
+                        twoFingerMoved = true
+                        safeCall { t.onScroll(0f, dy / 40f) }
+                    }
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                val elapsed = System.currentTimeMillis() - touchStartTime
+                if (!movedBeyondTap && elapsed < TAP_MAX_MS) {
+                    when (maxPointers) {
+                        1 -> { safeCall { t.onButtonDown(0) }; safeCall { t.onButtonUp(0) }
+                               triggerClickRipple(event.x, event.y) }
+                        2 -> if (!twoFingerMoved) { safeCall { t.onButtonDown(1) }; safeCall { t.onButtonUp(1) } }
+                        else -> { safeCall { t.onButtonDown(2) }; safeCall { t.onButtonUp(2) } }
+                    }
+                }
+                maxPointers = 0
+            }
+            MotionEvent.ACTION_CANCEL -> maxPointers = 0
+        }
+        return true
+    }
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         // Request pointer capture when attached
@@ -162,13 +241,16 @@ class PointerCaptureTrackpadView @JvmOverloads constructor(
             MotionEvent.ACTION_MOVE -> {
                 val now = System.currentTimeMillis()
                 if (now - lastMoveTime >= 15) {
-                    cursorX = x
-                    cursorY = y
-                    hasValidPosition = true
-                    // Apply sensitivity
-                    val sx = (x / width) * sensitivity
-                    val sy = (y / height) * sensitivity
-                    safeCall { transport.onCursorMove(sx.coerceIn(0f, 1f), sy.coerceIn(0f, 1f)) }
+                    // BUG-192: prefer relative axes — absolute x/y clamp at screen edges
+                    // and the old code multiplied an ABSOLUTE position by sensitivity.
+                    val relX = motionEvent.getAxisValue(MotionEvent.AXIS_RELATIVE_X)
+                    val relY = motionEvent.getAxisValue(MotionEvent.AXIS_RELATIVE_Y)
+                    if (relX != 0f || relY != 0f) {
+                        safeCall { transport.onMouseMoveRelative(relX * sensitivity, relY * sensitivity) }
+                    } else {
+                        cursorX = x; cursorY = y; hasValidPosition = true
+                        safeCall { transport.onCursorMove((x / width).coerceIn(0f, 1f), (y / height).coerceIn(0f, 1f)) }
+                    }
                     lastMoveTime = now
                     invalidate()
                 }
@@ -262,6 +344,7 @@ class PointerCaptureTrackpadView @JvmOverloads constructor(
 
     interface TrackpadTransport {
         fun onCursorMove(x: Float, y: Float)
+        fun onMouseMoveRelative(dx: Float, dy: Float)
         fun onButtonDown(button: Int)
         fun onButtonUp(button: Int)
         fun onScroll(x: Float, y: Float)

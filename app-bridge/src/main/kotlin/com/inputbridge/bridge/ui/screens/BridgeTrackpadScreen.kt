@@ -198,8 +198,8 @@ fun BridgeTrackpadScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     val btConnected = hidTransportState.value?.isConnected == true
-                                        // BUG-161: status must reflect the active transport, not either-up
-val activeConnected = if (useHidMode) btConnected else isConnected
+                    // BUG-161: status must reflect the active transport, not either-up
+                    val activeConnected = if (useHidMode) btConnected else isConnected
                     Text(
                         if (activeConnected) "Connected" else "Connecting…",
                         color = if (activeConnected) BridgePrimary else BridgeDim,
