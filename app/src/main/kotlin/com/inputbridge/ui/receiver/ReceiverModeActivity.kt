@@ -52,7 +52,7 @@ class ReceiverModeActivity : ComponentActivity() {
         // BUG-188: OEM battery managers kill the foreground service on swipe-away;
         // request the exemption so the receiver survives exiting the app.
         runCatching {
-            val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            val pm = getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
             if (!pm.isIgnoringBatteryOptimizations(packageName)) {
                 startActivity(
                     android.content.Intent(
